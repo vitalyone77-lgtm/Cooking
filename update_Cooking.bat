@@ -1,48 +1,72 @@
 @echo off
-setlocal enabledelayedexpansion
-chcp 65001 >nul
+setlocal
 
-REM ==== Настройки — поправь, если у тебя другие значения ====
+rem === Обновление Cooking: компьютер -> GitHub -> сервер (1 клик) ===
+
 set PROJECT_DIR=C:\Users\user\Desktop\ai_learning\Cooking
-set SSH_HOST=root@201.50.117.2
+set SERVER=root@201.50.117.2
 set REMOTE_DIR=~/Cooking
-set SERVICE=cooking
+set SERVICE=Cooking
 
-echo ============================================
-echo   Обновление бота "Cooking"
-echo ============================================
+echo ===============================================
+echo   Обновление: %SERVICE%
+echo ===============================================
 echo.
 
-cd /d "%PROJECT_DIR%" || (echo Не найдена папка проекта: %PROJECT_DIR% & pause & exit /b 1)
-
-echo --- Что изменилось ---
-git status --short
-echo.
-
-set /p COMMIT_MSG="Комментарий к изменениям (Enter = 'update'): "
-if "%COMMIT_MSG%"=="" set COMMIT_MSG=update
-
-echo.
-echo --- Коммитим и отправляем на GitHub ---
-git add .
-git commit -m "%COMMIT_MSG%"
+cd /d "%PROJECT_DIR%"
 if errorlevel 1 (
-    echo (нечего коммитить, либо ошибка коммита — продолжаю пуш на всякий случай)
-)
-git push origin main
-if errorlevel 1 (
-    echo ОШИБКА при push на GitHub. Останавливаюсь.
+    echo [ОШИБКА] Не нашёл папку проекта: %PROJECT_DIR%
     pause
     exit /b 1
 )
 
+git rev-parse --is-inside-work-tree >nul 2>&1
+if errorlevel 1 (
+    echo [ОШИБКА] Это не git-репозиторий: %PROJECT_DIR%
+    pause
+    exit /b 1
+)
+
+echo --- Что изменилось ---
+git status
 echo.
-echo --- Обновляем и перезапускаем на сервере ---
-ssh %SSH_HOST% "cd %REMOTE_DIR% && git pull && ( git diff --name-only HEAD@{1} HEAD | grep -q requirements.txt && source venv/bin/activate && pip install -r requirements.txt && deactivate || true ) && systemctl restart %SERVICE% && sleep 2 && systemctl status %SERVICE% --no-pager -l"
+
+set /p CHANGES=Есть изменения для отправки? (Enter = да, n = отменить):
+if /i "%CHANGES%"=="n" (
+    echo Отменено.
+    pause
+    exit /b 0
+)
+
+set /p MSG=Комментарий к изменениям (commit message):
+if "%MSG%"=="" set MSG=обновление
 
 echo.
-echo ============================================
-echo   Готово. Смотри статус выше: должно быть
-echo   "active (running)".
-echo ============================================
+echo --- Добавляю и коммичу ---
+git add .
+git commit -m "%MSG%"
+
+echo.
+echo --- Отправляю на GitHub ---
+git push
+if errorlevel 1 (
+    echo Обычный push не сработал, пробую "git push origin HEAD:main"...
+    git push origin HEAD:main
+    if errorlevel 1 (
+        echo [ОШИБКА] Не удалось отправить на GitHub. Останавливаюсь, на сервер не пойду.
+        pause
+        exit /b 1
+    )
+)
+
+echo.
+echo --- Подключаюсь к серверу и обновляю бота ---
+ssh %SERVER% "cd %REMOTE_DIR% && git pull && source venv/bin/activate && pip install -q -r requirements.txt && deactivate && systemctl restart %SERVICE% && echo --STATUS-- && systemctl status %SERVICE% --no-pager"
+
+echo.
+echo ===============================================
+echo   Готово. Проверь в выводе выше "active (running)".
+echo   Потом открой бота в Telegram и проверь.
+echo ===============================================
+echo.
 pause
