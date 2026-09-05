@@ -4,11 +4,21 @@
 """
 import asyncio
 import logging
+import re
 from duckduckgo_search import DDGS
 
 from config import SEARCH_RESULTS_COUNT
 
 logger = logging.getLogger(__name__)
+
+# Убираем вводные слова вроде "хочу", "хочу приготовить" перед построением поискового запроса
+_LEAD_IN_RE = re.compile(
+    r"^\s*(хочу приготовить|хочу сделать|хочу|сделать|приготовить)\s+", re.IGNORECASE
+)
+
+
+def _clean_preferred(text: str) -> str:
+    return _LEAD_IN_RE.sub("", text).strip()
 
 
 def _build_query(data: dict) -> str:
@@ -20,7 +30,7 @@ def _build_query(data: dict) -> str:
 
     parts = [cuisine]
     if data.get("preferred"):
-        parts.append(f"из {data['preferred']}")
+        parts.append(_clean_preferred(data["preferred"]))
     if data.get("appliance_labels"):
         parts.append(f"в {', '.join(data['appliance_labels'])}")
     if data.get("time") and data["time"] != "Не важно":

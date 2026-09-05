@@ -20,3 +20,9 @@ OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 
 # Сколько результатов веб-поиска брать для анализа
 SEARCH_RESULTS_COUNT = 5
+
+# Напоминание "что приготовить завтра"
+REMINDER_ENABLED = os.getenv("REMINDER_ENABLED", "true").lower() == "true"
+REMINDER_HOUR = int(os.getenv("REMINDER_HOUR", "14"))
+REMINDER_MINUTE = int(os.getenv("REMINDER_MINUTE", "0"))
+REMINDER_TIMEZONE = os.getenv("REMINDER_TIMEZONE", "Europe/Moscow")

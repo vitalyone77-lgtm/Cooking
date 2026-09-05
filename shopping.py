@@ -11,6 +11,13 @@ import re
 from urllib.parse import quote
 
 SEARCH_TERMS_RE = re.compile(r"ПРОДУКТЫ_СПИСОК:\s*(.+)", re.IGNORECASE)
+DISH_TITLE_RE = re.compile(r"^\s*🍽\s*(.+)$", re.MULTILINE)
+
+
+def extract_dish_title(recipe_text: str) -> str:
+    """Достаёт название блюда из первой строки рецепта (после эмодзи 🍽)."""
+    match = DISH_TITLE_RE.search(recipe_text)
+    return match.group(1).strip() if match else ""
 
 
 def extract_shopping_terms(recipe_text: str) -> tuple[str, list[str]]:
@@ -30,8 +37,8 @@ def extract_shopping_terms(recipe_text: str) -> tuple[str, list[str]]:
 
 
 def build_five_ka_link(term: str) -> str:
-    query = quote(f"site:5ka.ru {term}")
-    return f"https://ya.ru/search/?text={query}"
+    # Прямой поиск по каталогу 5ka.ru (без внешнего поисковика).
+    return f"https://5ka.ru/search/?text={quote(term)}"
 
 
 def format_shopping_message(terms: list[str]) -> str:

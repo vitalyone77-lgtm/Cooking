@@ -21,7 +21,9 @@ import keyboards as kb
 from states import RecipeForm
 from search import search_recipes, format_results_for_prompt
 from ai import generate_recipe
-from shopping import extract_shopping_terms, format_shopping_message
+from shopping import extract_shopping_terms, format_shopping_message, extract_dish_title
+from storage import save_last_request
+from reminders import setup_scheduler
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -70,7 +72,8 @@ async def step_cuisine(callback: CallbackQuery, state: FSMContext):
     await callback.message.edit_reply_markup()
     await callback.message.answer(
         "Отлично! Теперь напиши, какие продукты ты хочешь использовать "
-        "(например: курица, рис, брокколи).\n"
+        "(например: курица, рис, брокколи) — или сразу название блюда, "
+        "которое хочешь приготовить (например: «хочу плов» или «хочу борщ»).\n"
         "Если без разницы — нажми «Пропустить».",
         reply_markup=kb.skip_kb("preferred"),
     )
@@ -211,6 +214,9 @@ async def step_confirm_go(callback: CallbackQuery, state: FSMContext):
     results_text = format_results_for_prompt(results)
     recipe_text = await generate_recipe(data, search_query, results_text)
     recipe_text, shopping_terms = extract_shopping_terms(recipe_text)
+    dish_title = extract_dish_title(recipe_text)
+
+    save_last_request(callback.message.chat.id, data, dish_title)
 
     await status_msg.delete()
     await callback.message.answer(recipe_text)
@@ -231,6 +237,10 @@ async def step_confirm_go(callback: CallbackQuery, state: FSMContext):
 async def main():
     if not config.BOT_TOKEN:
         raise RuntimeError("Не задан BOT_TOKEN в .env")
+
+    if config.REMINDER_ENABLED:
+        setup_scheduler(bot, dp)
+
     logger.info("Бот запущен")
     await dp.start_polling(bot)
 
