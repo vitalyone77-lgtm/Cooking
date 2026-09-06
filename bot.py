@@ -18,12 +18,13 @@ from aiogram.types import Message, CallbackQuery
 
 import config
 import keyboards as kb
-from states import RecipeForm
+from states import RecipeForm, FavoritesForm
 from search import search_recipes, format_results_for_prompt
 from ai import generate_recipe
 from shopping import extract_shopping_terms, format_shopping_message, extract_dish_title
 from storage import save_last_request
 from reminders import setup_scheduler
+from favorites import add_favorite, get_favorites, get_favorite, remove_favorite, search_favorites
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -218,18 +219,109 @@ async def step_confirm_go(callback: CallbackQuery, state: FSMContext):
 
     save_last_request(callback.message.chat.id, data, dish_title)
 
+    shopping_message = format_shopping_message(shopping_terms)
+    full_display_text = recipe_text + ("\n\n" + shopping_message if shopping_message else "")
+    await state.update_data(
+        last_recipe_title=dish_title,
+        last_recipe_display=full_display_text,
+        cuisine=data.get("cuisine"),
+    )
+
     await status_msg.delete()
     await callback.message.answer(recipe_text)
 
-    shopping_message = format_shopping_message(shopping_terms)
     if shopping_message:
         await callback.message.answer(
             shopping_message,
-            reply_markup=kb.restart_kb(),
+            reply_markup=kb.recipe_result_kb(),
             disable_web_page_preview=True,
         )
     else:
-        await callback.message.answer("Готово! 🍽", reply_markup=kb.restart_kb())
+        await callback.message.answer("Готово! 🍽", reply_markup=kb.recipe_result_kb())
+
+
+# ---------- Избранное ----------
+
+@dp.callback_query(F.data == "favorites:open")
+async def favorites_open(callback: CallbackQuery, state: FSMContext):
+    chat_id = callback.message.chat.id
+    favs = get_favorites(chat_id)
+    if favs:
+        await callback.message.answer(
+            f"⭐ Твоё избранное ({len(favs)}):", reply_markup=kb.favorites_list_kb(favs)
+        )
+    else:
+        await callback.message.answer(
+            "Пока в избранном пусто. Понравившийся рецепт можно сохранить кнопкой "
+            "«⭐ В избранное» после его получения.",
+            reply_markup=kb.cuisine_kb(),
+        )
+        await state.set_state(RecipeForm.cuisine)
+    await callback.answer()
+
+
+@dp.callback_query(F.data == "favorites:back")
+async def favorites_back(callback: CallbackQuery, state: FSMContext):
+    await callback.message.answer("Выбери тип кухни:", reply_markup=kb.cuisine_kb())
+    await state.set_state(RecipeForm.cuisine)
+    await callback.answer()
+
+
+@dp.callback_query(F.data == "favorites:search")
+async def favorites_search_start(callback: CallbackQuery, state: FSMContext):
+    await callback.message.answer("Напиши слово из названия или продукта рецепта для поиска:")
+    await state.set_state(FavoritesForm.search)
+    await callback.answer()
+
+
+@dp.message(FavoritesForm.search)
+async def favorites_search_run(message: Message, state: FSMContext):
+    results = search_favorites(message.chat.id, message.text.strip())
+    if results:
+        await message.answer(
+            f"🔎 Найдено рецептов: {len(results)}", reply_markup=kb.favorites_list_kb(results)
+        )
+    else:
+        await message.answer(
+            "Ничего не нашлось. Попробуй другое слово.",
+            reply_markup=kb.favorites_list_kb(get_favorites(message.chat.id)),
+        )
+
+
+@dp.callback_query(F.data.startswith("fav:view:"))
+async def favorite_view(callback: CallbackQuery):
+    fav_id = callback.data.split(":", 2)[2]
+    fav = get_favorite(callback.message.chat.id, fav_id)
+    if not fav:
+        await callback.answer("Рецепт не найден (возможно, уже удалён).", show_alert=True)
+        return
+    await callback.message.answer(fav["text"], reply_markup=kb.favorite_view_kb(fav_id))
+    await callback.answer()
+
+
+@dp.callback_query(F.data.startswith("fav:delete:"))
+async def favorite_delete(callback: CallbackQuery):
+    fav_id = callback.data.split(":", 2)[2]
+    remove_favorite(callback.message.chat.id, fav_id)
+    await callback.answer("Удалено из избранного")
+    favs = get_favorites(callback.message.chat.id)
+    if favs:
+        await callback.message.answer("⭐ Твоё избранное:", reply_markup=kb.favorites_list_kb(favs))
+    else:
+        await callback.message.answer("Избранное теперь пусто.", reply_markup=kb.cuisine_kb())
+
+
+@dp.callback_query(F.data == "fav:save")
+async def favorite_save(callback: CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    title = data.get("last_recipe_title", "")
+    text = data.get("last_recipe_display", "")
+    cuisine = data.get("cuisine", "")
+    if not text:
+        await callback.answer("Не нашёл рецепт для сохранения, попробуй ещё раз получить его.", show_alert=True)
+        return
+    add_favorite(callback.message.chat.id, title, text, cuisine)
+    await callback.answer("Добавлено в избранное ⭐")
 
 
 # ---------- Запуск ----------

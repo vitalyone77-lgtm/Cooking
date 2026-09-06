@@ -13,3 +13,7 @@ class RecipeForm(StatesGroup):
     servings = State()         # количество порций
     appliance = State()        # режим приготовления
     confirm = State()          # подтверждение перед поиском
+
+
+class FavoritesForm(StatesGroup):
+    search = State()           # ожидание текста поискового запроса по избранному

@@ -9,6 +9,7 @@ def cuisine_kb() -> InlineKeyboardMarkup:
     b = InlineKeyboardBuilder()
     b.button(text="🍛 Аюрведическая", callback_data="cuisine:ayurveda")
     b.button(text="🍲 Классическая", callback_data="cuisine:classic")
+    b.button(text="⭐ Избранное", callback_data="favorites:open")
     b.adjust(1)
     return b.as_markup()
 
@@ -69,4 +70,33 @@ def confirm_kb() -> InlineKeyboardMarkup:
 def restart_kb() -> InlineKeyboardMarkup:
     b = InlineKeyboardBuilder()
     b.button(text="🍳 Подобрать ещё рецепт", callback_data="confirm:restart")
+    return b.as_markup()
+
+
+def recipe_result_kb() -> InlineKeyboardMarkup:
+    """Кнопки под готовым рецептом: добавить в избранное / новый рецепт."""
+    b = InlineKeyboardBuilder()
+    b.button(text="⭐ В избранное", callback_data="fav:save")
+    b.button(text="🍳 Подобрать ещё рецепт", callback_data="confirm:restart")
+    b.adjust(1)
+    return b.as_markup()
+
+
+def favorites_list_kb(favorites: list[dict]) -> InlineKeyboardMarkup:
+    b = InlineKeyboardBuilder()
+    for fav in favorites:
+        title = fav["title"]
+        short = title if len(title) <= 40 else title[:37] + "..."
+        b.button(text=f"🍽 {short}", callback_data=f"fav:view:{fav['id']}")
+    b.button(text="🔎 Поиск по избранному", callback_data="favorites:search")
+    b.button(text="⬅️ Назад", callback_data="favorites:back")
+    b.adjust(1)
+    return b.as_markup()
+
+
+def favorite_view_kb(fav_id: str) -> InlineKeyboardMarkup:
+    b = InlineKeyboardBuilder()
+    b.button(text="🗑 Удалить из избранного", callback_data=f"fav:delete:{fav_id}")
+    b.button(text="⬅️ К списку избранного", callback_data="favorites:open")
+    b.adjust(1)
     return b.as_markup()
