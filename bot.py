@@ -25,6 +25,7 @@ from shopping import extract_shopping_terms, format_shopping_message, extract_di
 from storage import save_last_request
 from reminders import setup_scheduler
 from favorites import add_favorite, get_favorites, get_favorite, remove_favorite, search_favorites
+from last_recipe import set_last_recipe, get_last_recipe
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -221,11 +222,7 @@ async def step_confirm_go(callback: CallbackQuery, state: FSMContext):
 
     shopping_message = format_shopping_message(shopping_terms)
     full_display_text = recipe_text + ("\n\n" + shopping_message if shopping_message else "")
-    await state.update_data(
-        last_recipe_title=dish_title,
-        last_recipe_display=full_display_text,
-        cuisine=data.get("cuisine"),
-    )
+    set_last_recipe(callback.message.chat.id, dish_title, full_display_text, data.get("cuisine"))
 
     await status_msg.delete()
     await callback.message.answer(recipe_text)
@@ -312,15 +309,12 @@ async def favorite_delete(callback: CallbackQuery):
 
 
 @dp.callback_query(F.data == "fav:save")
-async def favorite_save(callback: CallbackQuery, state: FSMContext):
-    data = await state.get_data()
-    title = data.get("last_recipe_title", "")
-    text = data.get("last_recipe_display", "")
-    cuisine = data.get("cuisine", "")
-    if not text:
+async def favorite_save(callback: CallbackQuery):
+    last = get_last_recipe(callback.message.chat.id)
+    if not last:
         await callback.answer("Не нашёл рецепт для сохранения, попробуй ещё раз получить его.", show_alert=True)
         return
-    add_favorite(callback.message.chat.id, title, text, cuisine)
+    add_favorite(callback.message.chat.id, last["title"], last["text"], last["cuisine"])
     await callback.answer("Добавлено в избранное ⭐")
 
 
