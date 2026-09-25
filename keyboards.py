@@ -4,11 +4,22 @@ Inline-клавиатуры для анкеты бота.
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
+from cuisines import CUISINE_LABELS
+
+CUISINE_EMOJI = {
+    "ayurveda": "🍛",
+    "classic": "🍲",
+    "balanced": "⚖️",
+    "athlete_endurance": "🏃",
+    "mass_gain": "💪",
+}
+
 
 def cuisine_kb() -> InlineKeyboardMarkup:
     b = InlineKeyboardBuilder()
-    b.button(text="🍛 Аюрведическая", callback_data="cuisine:ayurveda")
-    b.button(text="🍲 Классическая", callback_data="cuisine:classic")
+    for key, label in CUISINE_LABELS.items():
+        emoji = CUISINE_EMOJI.get(key, "🍽")
+        b.button(text=f"{emoji} {label}", callback_data=f"cuisine:{key}")
     b.button(text="⭐ Избранное", callback_data="favorites:open")
     b.adjust(1)
     return b.as_markup()

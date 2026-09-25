@@ -8,6 +8,7 @@ import re
 from duckduckgo_search import DDGS
 
 from config import SEARCH_RESULTS_COUNT
+from cuisines import cuisine_search_hint
 
 logger = logging.getLogger(__name__)
 
@@ -22,13 +23,7 @@ def _clean_preferred(text: str) -> str:
 
 
 def _build_query(data: dict) -> str:
-    cuisine_map = {
-        "ayurveda": "аюрведический рецепт",
-        "classic": "классический рецепт",
-    }
-    cuisine = cuisine_map.get(data.get("cuisine"), "рецепт")
-
-    parts = [cuisine]
+    parts = [cuisine_search_hint(data.get("cuisine"))]
     if data.get("preferred"):
         parts.append(_clean_preferred(data["preferred"]))
     if data.get("appliance_labels"):

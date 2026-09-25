@@ -13,6 +13,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 import config
+from cuisines import CUISINE_LABELS
 from states import RecipeForm
 from storage import get_all_users
 
@@ -33,20 +34,18 @@ async def send_daily_reminders(bot: Bot, dp: Dispatcher):
         logger.info("Напоминания: нет ни одного сохранённого пользователя")
         return
 
-    cuisine_labels = {"ayurveda": "аюрведическую", "classic": "классическую"}
-
     for chat_id_str, data in users.items():
         chat_id = int(chat_id_str)
         dish = data.get("dish_title") or ""
-        cuisine_label = cuisine_labels.get(data.get("cuisine"), "")
+        cuisine_label = CUISINE_LABELS.get(data.get("cuisine"), "")
 
         if dish:
             text = (
                 f"👋 Как насчёт приготовить завтра «{dish}» — как в прошлый раз?\n"
-                f"Или подберём что-то новое на {cuisine_label} кухню?"
+                f"Или подберём что-то новое ({cuisine_label})?"
             )
         else:
-            text = f"👋 Как насчёт завтра приготовить что-нибудь на {cuisine_label} кухню?"
+            text = f"👋 Как насчёт завтра приготовить что-нибудь? Тип питания: {cuisine_label}"
 
         try:
             # Загружаем сохранённые параметры прямо в FSM, чтобы кнопка "Найти рецепт"

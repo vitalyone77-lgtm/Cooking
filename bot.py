@@ -18,6 +18,7 @@ from aiogram.types import Message, CallbackQuery
 
 import config
 import keyboards as kb
+from cuisines import cuisine_label
 from states import RecipeForm, FavoritesForm
 from search import search_recipes, format_results_for_prompt
 from ai import generate_recipe
@@ -48,7 +49,7 @@ async def cmd_start(message: Message, state: FSMContext):
     await state.clear()
     await message.answer(
         "Привет! 👋 Я помогу подобрать рецепт под твои предпочтения.\n\n"
-        "Для начала выбери тип кухни:",
+        "Для начала выбери тип питания/кухни:",
         reply_markup=kb.cuisine_kb(),
     )
     await state.set_state(RecipeForm.cuisine)
@@ -58,7 +59,7 @@ async def cmd_start(message: Message, state: FSMContext):
 async def restart(callback: CallbackQuery, state: FSMContext):
     await state.clear()
     await callback.message.answer(
-        "Хорошо, начнём заново! Выбери тип кухни:",
+        "Хорошо, начнём заново! Выбери тип питания/кухни:",
         reply_markup=kb.cuisine_kb(),
     )
     await state.set_state(RecipeForm.cuisine)
@@ -189,10 +190,9 @@ async def step_appliance(callback: CallbackQuery, state: FSMContext):
 
 async def show_summary(message: Message, state: FSMContext):
     data = await state.get_data()
-    cuisine_label = "Аюрведическая" if data.get("cuisine") == "ayurveda" else "Классическая"
     text = (
         "📋 Проверим запрос:\n\n"
-        f"Кухня: {cuisine_label}\n"
+        f"Тип питания: {cuisine_label(data.get('cuisine'))}\n"
         f"Предпочитаемые продукты: {data.get('preferred') or '—'}\n"
         f"Исключить: {data.get('excluded') or '—'}\n"
         f"Время: {data.get('time')}\n"
@@ -259,7 +259,7 @@ async def favorites_open(callback: CallbackQuery, state: FSMContext):
 
 @dp.callback_query(F.data == "favorites:back")
 async def favorites_back(callback: CallbackQuery, state: FSMContext):
-    await callback.message.answer("Выбери тип кухни:", reply_markup=kb.cuisine_kb())
+    await callback.message.answer("Выбери тип питания/кухни:", reply_markup=kb.cuisine_kb())
     await state.set_state(RecipeForm.cuisine)
     await callback.answer()
 
