@@ -33,6 +33,10 @@ def extract_shopping_terms(recipe_text: str) -> tuple[str, list[str]]:
     terms = [t.strip(" .") for t in terms_raw.split(",") if t.strip(" .")]
 
     clean_text = recipe_text[:match.start()].rstrip()
+    if not clean_text:
+        # ИИ вывел техническую строку без самого рецепта (редкий сбой формата) —
+        # лучше показать пользователю хоть что-то, чем пустое сообщение.
+        clean_text = recipe_text.strip()
     return clean_text, terms
 
 

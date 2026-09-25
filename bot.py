@@ -242,19 +242,39 @@ async def step_confirm_go(callback: CallbackQuery, state: FSMContext):
     status_msg = await callback.message.answer("🔎 Ищу рецепты в интернете...")
     data = await state.get_data()
 
-    search_query, results = await search_recipes(data)
-    await status_msg.edit_text(f"🔎 Искал по запросу: «{search_query}»\n🤖 Анализирую и подбираю рецепт...")
+    try:
+        search_query, results = await search_recipes(data)
+        await status_msg.edit_text(
+            f"🔎 Искал по запросу: «{search_query}»\n🤖 Анализирую и подбираю рецепт..."
+        )
 
-    results_text = format_results_for_prompt(results)
-    recipe_text = await generate_recipe(data, search_query, results_text)
-    recipe_text, shopping_terms = extract_shopping_terms(recipe_text)
-    dish_title = extract_dish_title(recipe_text)
+        results_text = format_results_for_prompt(results)
+        recipe_text = await generate_recipe(data, search_query, results_text)
+        recipe_text, shopping_terms = extract_shopping_terms(recipe_text)
 
-    save_last_request(callback.message.chat.id, data, dish_title)
+        if not recipe_text.strip():
+            await status_msg.edit_text(
+                "😔 Не получилось составить рецепт под эти параметры (возможно, слишком "
+                "противоречивые условия, например цель по КБЖУ). Попробуй изменить запрос "
+                "и повторить.",
+                reply_markup=kb.restart_kb(),
+            )
+            return
 
-    shopping_message = format_shopping_message(shopping_terms)
-    full_display_text = recipe_text + ("\n\n" + shopping_message if shopping_message else "")
-    set_last_recipe(callback.message.chat.id, dish_title, full_display_text, data.get("cuisine"))
+        dish_title = extract_dish_title(recipe_text)
+        save_last_request(callback.message.chat.id, data, dish_title)
+
+        shopping_message = format_shopping_message(shopping_terms)
+        full_display_text = recipe_text + ("\n\n" + shopping_message if shopping_message else "")
+        set_last_recipe(callback.message.chat.id, dish_title, full_display_text, data.get("cuisine"))
+    except Exception as e:
+        logger.exception("Ошибка при подборе рецепта")
+        await status_msg.edit_text(
+            f"😔 Что-то пошло не так при подборе рецепта.\nТехническая причина: {e}\n\n"
+            "Попробуй ещё раз.",
+            reply_markup=kb.restart_kb(),
+        )
+        return
 
     await status_msg.delete()
     await callback.message.answer(recipe_text)
