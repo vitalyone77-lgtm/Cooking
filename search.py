@@ -24,6 +24,8 @@ def _clean_preferred(text: str) -> str:
 
 def _build_query(data: dict) -> str:
     parts = [cuisine_search_hint(data.get("cuisine"))]
+    if data.get("macro_goal"):
+        parts.append(data["macro_goal"])
     if data.get("preferred"):
         parts.append(_clean_preferred(data["preferred"]))
     if data.get("appliance_labels"):

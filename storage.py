@@ -36,6 +36,7 @@ def save_last_request(chat_id: int, form_data: dict, dish_title: str = "") -> No
         all_data = _read_all()
         all_data[str(chat_id)] = {
             "cuisine": form_data.get("cuisine"),
+            "macro_goal": form_data.get("macro_goal", ""),
             "preferred": form_data.get("preferred", ""),
             "excluded": form_data.get("excluded", ""),
             "time": form_data.get("time"),

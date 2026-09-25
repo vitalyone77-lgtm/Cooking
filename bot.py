@@ -18,7 +18,7 @@ from aiogram.types import Message, CallbackQuery
 
 import config
 import keyboards as kb
-from cuisines import cuisine_label
+from cuisines import cuisine_label, MACRO_GOAL_KEY
 from states import RecipeForm, FavoritesForm
 from search import search_recipes, format_results_for_prompt
 from ai import generate_recipe
@@ -73,7 +73,38 @@ async def step_cuisine(callback: CallbackQuery, state: FSMContext):
     cuisine = callback.data.split(":", 1)[1]
     await state.update_data(cuisine=cuisine)
     await callback.message.edit_reply_markup()
-    await callback.message.answer(
+
+    if cuisine == MACRO_GOAL_KEY:
+        await callback.message.answer(
+            "Укажи цель по КБЖУ на этот приём пищи, например:\n"
+            "«500 ккал, белки 40 г» или «около 600 ккал, много белка, поменьше углеводов».\n"
+            "Если без разницы — нажми «Пропустить», подберу сбалансированный вариант.",
+            reply_markup=kb.skip_kb("macro_goal"),
+        )
+        await state.set_state(RecipeForm.macro_goal)
+    else:
+        await ask_preferred(callback.message, state)
+    await callback.answer()
+
+
+# ---------- Шаг 1.5 (только ветка «Подобрать по КБЖУ»): цель по КБЖУ ----------
+
+@dp.message(RecipeForm.macro_goal)
+async def step_macro_goal_text(message: Message, state: FSMContext):
+    await state.update_data(macro_goal=message.text.strip())
+    await ask_preferred(message, state)
+
+
+@dp.callback_query(RecipeForm.macro_goal, F.data == "skip:macro_goal")
+async def step_macro_goal_skip(callback: CallbackQuery, state: FSMContext):
+    await state.update_data(macro_goal="")
+    await callback.message.edit_reply_markup()
+    await ask_preferred(callback.message, state)
+    await callback.answer()
+
+
+async def ask_preferred(message: Message, state: FSMContext):
+    await message.answer(
         "Отлично! Теперь напиши, какие продукты ты хочешь использовать "
         "(например: курица, рис, брокколи) — или сразу название блюда, "
         "которое хочешь приготовить (например: «хочу плов» или «хочу борщ»).\n"
@@ -81,7 +112,6 @@ async def step_cuisine(callback: CallbackQuery, state: FSMContext):
         reply_markup=kb.skip_kb("preferred"),
     )
     await state.set_state(RecipeForm.preferred)
-    await callback.answer()
 
 
 # ---------- Шаг 2: предпочитаемые продукты ----------
@@ -190,10 +220,12 @@ async def step_appliance(callback: CallbackQuery, state: FSMContext):
 
 async def show_summary(message: Message, state: FSMContext):
     data = await state.get_data()
+    macro_goal = data.get("macro_goal")
     text = (
         "📋 Проверим запрос:\n\n"
         f"Тип питания: {cuisine_label(data.get('cuisine'))}\n"
-        f"Предпочитаемые продукты: {data.get('preferred') or '—'}\n"
+        + (f"Цель по КБЖУ: {macro_goal}\n" if macro_goal else "")
+        + f"Предпочитаемые продукты: {data.get('preferred') or '—'}\n"
         f"Исключить: {data.get('excluded') or '—'}\n"
         f"Время: {data.get('time')}\n"
         f"Порций: {data.get('servings')}\n"

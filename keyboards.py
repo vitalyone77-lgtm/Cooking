@@ -4,7 +4,7 @@ Inline-клавиатуры для анкеты бота.
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-from cuisines import CUISINE_LABELS
+from cuisines import CUISINE_LABELS, MACRO_GOAL_KEY
 
 CUISINE_EMOJI = {
     "ayurveda": "🍛",
@@ -18,8 +18,11 @@ CUISINE_EMOJI = {
 def cuisine_kb() -> InlineKeyboardMarkup:
     b = InlineKeyboardBuilder()
     for key, label in CUISINE_LABELS.items():
+        if key == MACRO_GOAL_KEY:
+            continue
         emoji = CUISINE_EMOJI.get(key, "🍽")
         b.button(text=f"{emoji} {label}", callback_data=f"cuisine:{key}")
+    b.button(text="🎯 Подобрать по КБЖУ", callback_data=f"cuisine:{MACRO_GOAL_KEY}")
     b.button(text="⭐ Избранное", callback_data="favorites:open")
     b.adjust(1)
     return b.as_markup()
