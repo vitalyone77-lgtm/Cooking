@@ -1,7 +1,8 @@
 """
 Ежедневное напоминание "как насчёт приготовить завтра?" в заданное время (по умолчанию 14:00).
-Предлагает ту же кухню/блюдо, что было в прошлый раз, с кнопкой "Найти рецепт",
-которая запускает обычный поиск+ИИ с сохранёнными параметрами.
+Использует сохранённые параметры прошлого запроса (тип питания, исключения, время, порции,
+техника), но не название конкретного блюда — так каждый раз предлагается новый вариант,
+а не одно и то же блюдо.
 """
 import logging
 
@@ -22,8 +23,8 @@ logger = logging.getLogger(__name__)
 
 def reminder_kb():
     b = InlineKeyboardBuilder()
-    b.button(text="🔍 Найти рецепт", callback_data="confirm:go")
-    b.button(text="🍳 Хочу что-то другое", callback_data="confirm:restart")
+    b.button(text="🍳 Приготовить", callback_data="confirm:go")
+    b.button(text="🔍 Найти другой рецепт", callback_data="confirm:go")
     b.adjust(1)
     return b.as_markup()
 
@@ -36,23 +37,26 @@ async def send_daily_reminders(bot: Bot, dp: Dispatcher):
 
     for chat_id_str, data in users.items():
         chat_id = int(chat_id_str)
-        dish = data.get("dish_title") or ""
         cuisine_label = CUISINE_LABELS.get(data.get("cuisine"), "")
 
-        if dish:
-            text = (
-                f"👋 Как насчёт приготовить завтра «{dish}» — как в прошлый раз?\n"
-                f"Или подберём что-то новое ({cuisine_label})?"
-            )
-        else:
-            text = f"👋 Как насчёт завтра приготовить что-нибудь? Тип питания: {cuisine_label}"
+        text = (
+            f"👋 Как насчёт завтра приготовить что-нибудь новое?\n"
+            f"Подберу вариант по твоим обычным параметрам (тип питания: {cuisine_label}) — "
+            f"но не то же самое, что в прошлый раз."
+        )
 
         try:
-            # Загружаем сохранённые параметры прямо в FSM, чтобы кнопка "Найти рецепт"
-            # сразу могла запустить поиск+ИИ без повторного прохождения анкеты.
+            # Загружаем сохранённые параметры поиска (кухня/исключения/время/порции/техника)
+            # прямо в FSM, чтобы кнопки сразу запускали поиск+ИИ без анкеты. Конкретное
+            # название прошлого блюда сознательно не передаём — иначе ИИ снова предложит
+            # то же самое (например, каждый день "спагетти").
+            search_data = dict(data)
+            search_data["preferred"] = ""
+            search_data.pop("dish_title", None)
+
             key = StorageKey(bot_id=bot.id, chat_id=chat_id, user_id=chat_id)
             fsm = FSMContext(storage=dp.storage, key=key)
-            await fsm.set_data(data)
+            await fsm.set_data(search_data)
             await fsm.set_state(RecipeForm.confirm)
 
             await bot.send_message(chat_id, text, reply_markup=reminder_kb())
