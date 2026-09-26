@@ -20,8 +20,7 @@ def main_reply_kb() -> ReplyKeyboardMarkup:
     """
     return ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text=BTN_COOK), KeyboardButton(text=BTN_DAY_MENU)],
-            [KeyboardButton(text=BTN_FAVORITES)],
+            [KeyboardButton(text=BTN_COOK), KeyboardButton(text=BTN_DAY_MENU), KeyboardButton(text=BTN_FAVORITES)],
         ],
         resize_keyboard=True,
     )
