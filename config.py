@@ -14,9 +14,11 @@ BOT_TOKEN = os.getenv("BOT_TOKEN", "")
 LLM_PROVIDER = os.getenv("LLM_PROVIDER", "deepseek").lower()  # deepseek | groq | openrouter
 
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
-# "deepseek-chat" — режим БЕЗ размышлений (быстрее и не тратит токены на скрытые "мысли").
-# "deepseek-reasoner" — режим с цепочкой рассуждений, но он медленнее и дороже по токенам.
-DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
+# "deepseek-chat"/"deepseek-reasoner" — старые имена, отключаются 24.07.2026, не используем.
+# Текущее поколение (V4.1) — модель "deepseek-flash" с параметром thinking (enabled/disabled)
+# в теле запроса; thinking по умолчанию ВКЛЮЧЁН, поэтому ai.py явно шлёт thinking:disabled,
+# чтобы не тратить токены и время на скрытые рассуждения там, где они не нужны.
+DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-flash")
 DEEPSEEK_URL = "https://api.deepseek.com/chat/completions"
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")

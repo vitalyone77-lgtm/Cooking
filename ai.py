@@ -71,6 +71,11 @@ async def _call_provider(provider: str, messages: list[dict]) -> str:
         "temperature": 0.6,
         "max_tokens": 3000,
     }
+    if provider == "deepseek":
+        # У текущего поколения DeepSeek (V4.x) thinking по умолчанию ВКЛЮЧЁН — без этого
+        # флага модель тратит время/токены на скрытые рассуждения, которые нам не нужны
+        # для генерации рецепта.
+        payload["thinking"] = {"type": "disabled"}
 
     async with httpx.AsyncClient(timeout=60) as client:
         resp = await client.post(cfg["url"], headers=cfg["headers"], json=payload)
