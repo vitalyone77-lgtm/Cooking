@@ -18,3 +18,16 @@ class RecipeForm(StatesGroup):
 
 class FavoritesForm(StatesGroup):
     search = State()           # ожидание текста поискового запроса по избранному
+
+
+class DayMenuForm(StatesGroup):
+    """Меню на день: несколько приёмов пищи одним запросом с общим списком покупок."""
+    meals = State()             # выбор приёмов пищи (завтрак/обед/ужин/перекус/бранч)
+    cuisine = State()
+    macro_goal = State()        # цель по КБЖУ на ВЕСЬ день (только ветка "Подобрать по КБЖУ")
+    preferred = State()
+    excluded = State()
+    time = State()
+    servings = State()
+    appliance = State()
+    confirm = State()

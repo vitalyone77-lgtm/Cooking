@@ -16,6 +16,11 @@ CUISINE_EMOJI = {
 
 
 def cuisine_kb() -> InlineKeyboardMarkup:
+    """
+    Стартовое меню сгруппировано по смыслу и разложено по 2 кнопки в ряд, чтобы не
+    растягиваться в длинный список: сначала типы питания/кухни, потом альтернативные
+    режимы подбора (по КБЖУ / меню на день), потом избранное отдельной строкой.
+    """
     b = InlineKeyboardBuilder()
     for key, label in CUISINE_LABELS.items():
         if key == MACRO_GOAL_KEY:
@@ -23,8 +28,9 @@ def cuisine_kb() -> InlineKeyboardMarkup:
         emoji = CUISINE_EMOJI.get(key, "🍽")
         b.button(text=f"{emoji} {label}", callback_data=f"cuisine:{key}")
     b.button(text="🎯 Подобрать по КБЖУ", callback_data=f"cuisine:{MACRO_GOAL_KEY}")
+    b.button(text="📅 Меню на день", callback_data="daymenu:start")
     b.button(text="⭐ Избранное", callback_data="favorites:open")
-    b.adjust(1)
+    b.adjust(2, 2, 1, 2, 1)
     return b.as_markup()
 
 
@@ -70,6 +76,37 @@ def appliance_kb(selected: set[str] | None = None) -> InlineKeyboardMarkup:
         b.button(text=f"{mark}{label}", callback_data=f"appliance:{key}")
     b.button(text="Готово ➡️", callback_data="appliance:done")
     b.adjust(2, 2, 1)
+    return b.as_markup()
+
+
+MEAL_LABELS = {
+    "breakfast": "🍳 Завтрак",
+    "brunch": "🥐 Бранч",
+    "lunch": "🍲 Обед",
+    "snack": "🍎 Перекус",
+    "dinner": "🍽 Ужин",
+}
+
+# Ориентировочная доля от общей дневной цели по КБЖУ (нормализуется под фактически
+# выбранный набор приёмов пищи в day_menu.py).
+MEAL_KCAL_SHARE = {
+    "breakfast": 0.25,
+    "brunch": 0.30,
+    "lunch": 0.35,
+    "snack": 0.10,
+    "dinner": 0.30,
+}
+
+
+def meals_kb(selected: set[str] | None = None) -> InlineKeyboardMarkup:
+    """Мультивыбор приёмов пищи для меню на день."""
+    selected = selected or set()
+    b = InlineKeyboardBuilder()
+    for key, label in MEAL_LABELS.items():
+        mark = "✅ " if key in selected else ""
+        b.button(text=f"{mark}{label}", callback_data=f"daymeal:{key}")
+    b.button(text="Готово ➡️", callback_data="daymeal:done")
+    b.adjust(2, 2, 1, 1)
     return b.as_markup()
 
 
