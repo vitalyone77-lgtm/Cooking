@@ -1,16 +1,22 @@
 """
-Веб-поиск рецептов через DuckDuckGo (бесплатно, без API-ключа).
+Веб-поиск рецептов. Основной источник — Tavily (платный API, без скрейпинга и без
+рейтлимитов). Если ключ Tavily не задан или запрос не удался — резервный вариант:
+DuckDuckGo (бесплатно, но на некоторых серверах упирается в рейтлимит "202 Ratelimit").
 Собираем сниппеты нескольких результатов — их потом анализирует LLM.
 """
 import asyncio
 import logging
 import re
+
+import httpx
 from duckduckgo_search import DDGS
 
-from config import SEARCH_RESULTS_COUNT
+from config import SEARCH_RESULTS_COUNT, TAVILY_API_KEY
 from cuisines import cuisine_search_hint
 
 logger = logging.getLogger(__name__)
+
+TAVILY_URL = "https://api.tavily.com/search"
 
 # Убираем вводные слова вроде "хочу", "хочу приготовить" перед построением поискового запроса
 _LEAD_IN_RE = re.compile(
@@ -36,7 +42,37 @@ def _build_query(data: dict) -> str:
     return " ".join(parts)
 
 
-def _search_sync(query: str, count: int) -> list[dict]:
+async def _search_tavily(query: str, count: int) -> list[dict]:
+    if not TAVILY_API_KEY:
+        return []
+    try:
+        async with httpx.AsyncClient(timeout=20) as client:
+            resp = await client.post(
+                TAVILY_URL,
+                json={
+                    "api_key": TAVILY_API_KEY,
+                    "query": query,
+                    "search_depth": "basic",
+                    "max_results": count,
+                },
+            )
+            resp.raise_for_status()
+            data = resp.json()
+    except Exception as e:
+        logger.warning(f"Ошибка поиска Tavily: {e}")
+        return []
+
+    return [
+        {
+            "title": r.get("title", ""),
+            "body": r.get("content", ""),
+            "href": r.get("url", ""),
+        }
+        for r in data.get("results", [])
+    ]
+
+
+def _search_ddg_sync(query: str, count: int) -> list[dict]:
     results = []
     try:
         with DDGS() as ddgs:
@@ -54,10 +90,14 @@ def _search_sync(query: str, count: int) -> list[dict]:
 async def search_recipes(data: dict) -> tuple[str, list[dict]]:
     """
     Возвращает (поисковый запрос, список найденных сниппетов).
-    Выполняется в отдельном потоке, т.к. duckduckgo_search — синхронная библиотека.
+    Сначала пробует Tavily, при пустом результате — DuckDuckGo как резерв.
     """
     query = _build_query(data)
-    results = await asyncio.to_thread(_search_sync, query, SEARCH_RESULTS_COUNT)
+
+    results = await _search_tavily(query, SEARCH_RESULTS_COUNT)
+    if not results:
+        results = await asyncio.to_thread(_search_ddg_sync, query, SEARCH_RESULTS_COUNT)
+
     return query, results
 
 

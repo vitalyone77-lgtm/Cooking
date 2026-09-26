@@ -30,6 +30,11 @@ OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 # Сколько результатов веб-поиска брать для анализа
 SEARCH_RESULTS_COUNT = 5
 
+# Tavily (tavily.com) — основной поиск в интернете, платный API без скрейпинга и без
+# рейтлимитов, в отличие от DuckDuckGo (который используется как резерв, если ключ
+# не задан или Tavily недоступен).
+TAVILY_API_KEY = os.getenv("TAVILY_API_KEY", "")
+
 # Напоминание "что приготовить завтра"
 REMINDER_ENABLED = os.getenv("REMINDER_ENABLED", "true").lower() == "true"
 REMINDER_HOUR = int(os.getenv("REMINDER_HOUR", "14"))
