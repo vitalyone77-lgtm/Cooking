@@ -4,8 +4,10 @@
 обычный конвейер search_recipes -> generate_recipe -> extract_shopping_terms) и
 собираем ОДИН общий список покупок на все блюда сразу (без дублей).
 
-Полные тексты рецептов держим в памяти процесса (по аналогии с last_recipe.py) —
-этого достаточно, чтобы кнопки "Показать рецепт" под сводкой открывали нужный текст.
+Полные тексты рецептов держим в памяти процесса (по аналогии с last_recipe.py). Сводка и
+открытый рецепт — это ОДНО и то же сообщение: кнопка "Показать рецепт" редактирует его в
+разворнутый вид, а "⬅️ Свернуть" возвращает обратно к списку — чат не разрастается новыми
+сообщениями на каждое открытие/закрытие блюда.
 """
 import asyncio
 import logging
@@ -20,8 +22,8 @@ from shopping import extract_shopping_terms, extract_dish_title, format_shopping
 
 logger = logging.getLogger(__name__)
 
-# {chat_id: {meal_key: {"title": str, "text": str}}}
-_store: dict[int, dict[str, dict]] = {}
+# {chat_id: {"order": [meal_key, ...], "meals": {meal_key: {"title", "text", "ok"}}}}
+_store: dict[int, dict] = {}
 
 
 def _meal_label_text(meal_key: str) -> str:
@@ -97,14 +99,17 @@ def _merge_shopping_terms(per_meal_terms: list[list[str]]) -> list[str]:
 async def generate_day_menu(chat_id: int, selected_meals: list[str], base_data: dict) -> dict:
     """
     Запускает генерацию всех выбранных приёмов пищи параллельно, сохраняет полные
-    тексты для последующего показа по кнопке и возвращает сводку для итогового
-    сообщения: список (meal_key, title, ok) и общий текст списка покупок.
+    тексты для последующего разворачивания/сворачивания и возвращает сводку: список
+    (meal_key, title, ok) и общий текст списка покупок.
     """
     results = await asyncio.gather(
         *[_generate_one_meal(meal_key, base_data, selected_meals) for meal_key in selected_meals]
     )
 
-    _store[chat_id] = {r["meal_key"]: {"title": r["title"], "text": r["text"]} for r in results}
+    _store[chat_id] = {
+        "order": selected_meals,
+        "meals": {r["meal_key"]: {"title": r["title"], "text": r["text"], "ok": r["ok"]} for r in results},
+    }
 
     shopping_message = format_shopping_message(
         _merge_shopping_terms([r["shopping_terms"] for r in results if r["ok"]])
@@ -113,16 +118,38 @@ async def generate_day_menu(chat_id: int, selected_meals: list[str], base_data: 
     return {"meals": results, "shopping_message": shopping_message}
 
 
-def get_meal_text(chat_id: int, meal_key: str) -> dict | None:
-    return _store.get(chat_id, {}).get(meal_key)
+def build_summary_view(chat_id: int) -> tuple[str, InlineKeyboardMarkup] | None:
+    """Свёрнутый вид: список приёмов пищи кнопками. None, если меню не найдено (истекло/не собрано)."""
+    entry = _store.get(chat_id)
+    if not entry:
+        return None
 
+    order = entry["order"]
+    meals = entry["meals"]
+    ok_count = sum(1 for k in order if meals[k]["ok"])
+    text = (
+        f"📅 Меню на день готово ({ok_count}/{len(order)})! "
+        "Выбери блюдо, чтобы увидеть полный рецепт:"
+    )
 
-def day_menu_summary_kb(results: list[dict]) -> InlineKeyboardMarkup:
     b = InlineKeyboardBuilder()
-    for r in results:
-        emoji_label = MEAL_LABELS[r["meal_key"]]
-        short_title = r["title"] if len(r["title"]) <= 30 else r["title"][:27] + "..."
-        b.button(text=f"{emoji_label}: {short_title}", callback_data=f"daymenu:show:{r['meal_key']}")
+    for meal_key in order:
+        m = meals[meal_key]
+        emoji_label = MEAL_LABELS[meal_key]
+        short_title = m["title"] if len(m["title"]) <= 30 else m["title"][:27] + "..."
+        b.button(text=f"{emoji_label}: {short_title}", callback_data=f"daymenu:show:{meal_key}")
     b.button(text="🔄 Собрать меню заново", callback_data="daymenu:start")
     b.adjust(1)
-    return b.as_markup()
+    return text, b.as_markup()
+
+
+def build_meal_view(chat_id: int, meal_key: str) -> tuple[str, InlineKeyboardMarkup] | None:
+    """Развёрнутый вид: полный текст рецепта одного блюда + кнопка свернуть обратно."""
+    entry = _store.get(chat_id)
+    if not entry or meal_key not in entry["meals"]:
+        return None
+
+    text = entry["meals"][meal_key]["text"]
+    b = InlineKeyboardBuilder()
+    b.button(text="⬅️ Свернуть", callback_data="daymenu:collapse")
+    return text, b.as_markup()

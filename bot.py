@@ -48,6 +48,9 @@ dp = Dispatcher(storage=MemoryStorage())
 @dp.message(CommandStart())
 async def cmd_start(message: Message, state: FSMContext):
     await state.clear()
+    # Reply-клавиатура и инлайн-клавиатура — разные типы reply_markup, за один вызов
+    # можно прикрепить только один, поэтому нижнее меню отправляем отдельным сообщением.
+    await message.answer("Меню открыто внизу ⌨️ — доступно в любой момент.", reply_markup=kb.main_reply_kb())
     await message.answer(
         "Привет! 👋 Я помогу подобрать рецепт под твои предпочтения.\n\n"
         "Для начала выбери тип питания/кухни:",
@@ -65,6 +68,44 @@ async def restart(callback: CallbackQuery, state: FSMContext):
     )
     await state.set_state(RecipeForm.cuisine)
     await callback.answer()
+
+
+# ---------- Постоянное нижнее меню (reply-keyboard) ----------
+# Зарегистрированы раньше остальных message-хэндлеров, чтобы иметь приоритет: даже если
+# пользователь сейчас в середине анкеты (ждём текст для preferred/excluded/...), нажатие
+# кнопки нижнего меню должно перехватывать управление, а не восприниматься как ответ на
+# текущий шаг анкеты.
+
+@dp.message(F.text == kb.BTN_COOK)
+async def menu_btn_cook(message: Message, state: FSMContext):
+    await state.clear()
+    await message.answer("Выбери тип питания/кухни:", reply_markup=kb.cuisine_kb())
+    await state.set_state(RecipeForm.cuisine)
+
+
+@dp.message(F.text == kb.BTN_DAY_MENU)
+async def menu_btn_day_menu(message: Message, state: FSMContext):
+    await state.clear()
+    await message.answer(
+        "📅 Соберём меню на день! Выбери приёмы пищи (можно несколько), потом «Готово»:",
+        reply_markup=kb.meals_kb(set()),
+    )
+    await state.set_state(DayMenuForm.meals)
+
+
+@dp.message(F.text == kb.BTN_FAVORITES)
+async def menu_btn_favorites(message: Message, state: FSMContext):
+    await state.clear()
+    favs = get_favorites(message.chat.id)
+    if favs:
+        await message.answer(f"⭐ Твоё избранное ({len(favs)}):", reply_markup=kb.favorites_list_kb(favs))
+    else:
+        await message.answer(
+            "Пока в избранном пусто. Понравившийся рецепт можно сохранить кнопкой "
+            "«⭐ В избранное» после его получения.",
+            reply_markup=kb.cuisine_kb(),
+        )
+        await state.set_state(RecipeForm.cuisine)
 
 
 # ---------- Шаг 1: кухня ----------
@@ -506,12 +547,8 @@ async def dm_step_confirm_go(callback: CallbackQuery, state: FSMContext):
 
     await status_msg.delete()
 
-    ok_count = sum(1 for r in summary["meals"] if r["ok"])
-    await callback.message.answer(
-        f"📅 Меню на день готово ({ok_count}/{len(summary['meals'])})! "
-        "Выбери блюдо, чтобы увидеть полный рецепт:",
-        reply_markup=day_menu.day_menu_summary_kb(summary["meals"]),
-    )
+    text, markup = day_menu.build_summary_view(callback.message.chat.id)
+    await callback.message.answer(text, reply_markup=markup)
 
     if summary["shopping_message"]:
         await callback.message.answer(summary["shopping_message"], disable_web_page_preview=True)
@@ -519,12 +556,26 @@ async def dm_step_confirm_go(callback: CallbackQuery, state: FSMContext):
 
 @dp.callback_query(F.data.startswith("daymenu:show:"))
 async def daymenu_show(callback: CallbackQuery):
+    """Разворачивает рецепт блюда ПРЯМО В ЭТОМ ЖЕ сообщении (без нового сообщения в чат)."""
     meal_key = callback.data.split(":", 2)[2]
-    meal = day_menu.get_meal_text(callback.message.chat.id, meal_key)
-    if not meal:
+    view = day_menu.build_meal_view(callback.message.chat.id, meal_key)
+    if not view:
         await callback.answer("Рецепт не найден, собери меню заново.", show_alert=True)
         return
-    await callback.message.answer(meal["text"])
+    text, markup = view
+    await callback.message.edit_text(text, reply_markup=markup)
+    await callback.answer()
+
+
+@dp.callback_query(F.data == "daymenu:collapse")
+async def daymenu_collapse(callback: CallbackQuery):
+    """Сворачивает рецепт обратно в список блюд — тоже редактированием того же сообщения."""
+    view = day_menu.build_summary_view(callback.message.chat.id)
+    if not view:
+        await callback.answer("Меню не найдено, собери заново.", show_alert=True)
+        return
+    text, markup = view
+    await callback.message.edit_text(text, reply_markup=markup)
     await callback.answer()
 
 

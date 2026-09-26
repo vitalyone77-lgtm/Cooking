@@ -1,10 +1,31 @@
 """
 Inline-клавиатуры для анкеты бота.
 """
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from cuisines import CUISINE_LABELS, MACRO_GOAL_KEY
+
+# Текст кнопок постоянного нижнего меню (reply-keyboard) — вынесен в константы, чтобы
+# сверяться с ним в обработчиках bot.py без риска опечатки.
+BTN_COOK = "🍳 Готовить"
+BTN_FAVORITES = "⭐ Избранное"
+BTN_DAY_MENU = "📅 Меню дня"
+
+
+def main_reply_kb() -> ReplyKeyboardMarkup:
+    """
+    Постоянное меню внизу экрана (не сообщение в чате!) — открывается/прячется одной
+    кнопкой-иконкой клавиатуры у поля ввода в Telegram, не засоряя историю чата.
+    """
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text=BTN_COOK), KeyboardButton(text=BTN_DAY_MENU)],
+            [KeyboardButton(text=BTN_FAVORITES)],
+        ],
+        resize_keyboard=True,
+    )
+
 
 CUISINE_EMOJI = {
     "ayurveda": "🍛",
