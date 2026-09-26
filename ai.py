@@ -60,7 +60,7 @@ def _provider_config(provider: str) -> dict | None:
     return None
 
 
-async def _call_provider(provider: str, messages: list[dict]) -> str:
+async def _call_provider(provider: str, messages: list[dict], max_tokens: int) -> str:
     cfg = _provider_config(provider)
     if not cfg:
         raise RuntimeError(f"Провайдер {provider} не настроен (нет API-ключа)")
@@ -69,7 +69,7 @@ async def _call_provider(provider: str, messages: list[dict]) -> str:
         "model": cfg["model"],
         "messages": messages,
         "temperature": 0.6,
-        "max_tokens": 3000,
+        "max_tokens": max_tokens,
     }
     if provider == "deepseek":
         # У текущего поколения DeepSeek (V4.x) thinking по умолчанию ВКЛЮЧЁН — без этого
@@ -96,26 +96,38 @@ async def _call_provider(provider: str, messages: list[dict]) -> str:
         return content
 
 
-async def generate_recipe(data: dict, search_query: str, search_results_text: str) -> str:
-    messages = [
-        {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "user", "content": build_user_prompt(data, search_query, search_results_text)},
-    ]
-
+async def call_llm_with_fallback(messages: list[dict], max_tokens: int = 3000) -> str:
+    """
+    Общая точка входа для любого запроса к LLM (одиночный рецепт, меню на день и т.п.).
+    Пробует провайдеров по очереди (LLM_PROVIDER первым, дальше LLM_FALLBACK_ORDER) и
+    поднимает RuntimeError, только если ВСЕ провалились — вызывающий код сам решает,
+    что показать пользователю или на какой альтернативный путь переключиться.
+    """
     providers = [config.LLM_PROVIDER] + [p for p in LLM_FALLBACK_ORDER if p != config.LLM_PROVIDER]
     errors = []
 
     for provider in providers:
         try:
-            return await _call_provider(provider, messages)
+            return await _call_provider(provider, messages, max_tokens)
         except Exception as e:
             logger.warning(f"Провайдер {provider} не сработал: {e}")
             errors.append(f"{provider}: {e}")
             continue
 
-    logger.error(f"Все LLM-провайдеры не сработали: {errors}")
-    return (
-        "😔 Не получилось получить рецепт от ИИ (проблема с API-ключами или сервисами).\n"
-        f"Технические причины: {'; '.join(errors)}\n\n"
-        "Проверь ключи в файле .env и попробуй ещё раз."
-    )
+    raise RuntimeError("; ".join(errors))
+
+
+async def generate_recipe(data: dict, search_query: str, search_results_text: str) -> str:
+    messages = [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user", "content": build_user_prompt(data, search_query, search_results_text)},
+    ]
+    try:
+        return await call_llm_with_fallback(messages)
+    except RuntimeError as e:
+        logger.error(f"Все LLM-провайдеры не сработали: {e}")
+        return (
+            "😔 Не получилось получить рецепт от ИИ (проблема с API-ключами или сервисами).\n"
+            f"Технические причины: {e}\n\n"
+            "Проверь ключи в файле .env и попробуй ещё раз."
+        )

@@ -1,8 +1,12 @@
 """
 Меню на день: несколько приёмов пищи (завтрак/обед/ужин и опционально перекус/бранч)
-одним запросом — параллельно генерируем рецепт под каждый приём пищи (переиспользуя
-обычный конвейер search_recipes -> generate_recipe -> extract_shopping_terms) и
-собираем ОДИН общий список покупок на все блюда сразу (без дублей).
+одним запросом. Сначала пробуем СОВМЕСТНУЮ генерацию — один LLM-вызов на все блюда сразу,
+с явной инструкцией максимально переиспользовать продукты между блюдами (иначе на каждый
+приём пищи выходит полностью свой набор продуктов, и список покупок раздувается). Если
+совместный формат почему-то не распарсился (не тот формат/сбой LLM) — надёжности ради
+откатываемся на старый способ: независимая параллельная генерация каждого блюда своим
+вызовом (тогда продукты между блюдами уже не переиспользуются, зато результат гарантирован).
+Общий список покупок собирается один раз на все блюда сразу (без дублей).
 
 Последнее собранное меню на день хранится в JSON-файле (по аналогии с favorites.py) —
 переживает перезапуск бота, поэтому кнопка "📅 Меню дня" в постоянном нижнем меню открывает
@@ -22,7 +26,8 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from keyboards import MEAL_LABELS, MEAL_KCAL_SHARE
 from search import search_recipes, format_results_for_prompt
-from ai import generate_recipe
+from ai import generate_recipe, call_llm_with_fallback
+from prompts import DAY_MENU_SYSTEM_PROMPT, DAY_MENU_BLOCK_DELIMITER, build_day_menu_user_prompt
 from shopping import extract_shopping_terms, extract_dish_title, format_shopping_message
 
 logger = logging.getLogger(__name__)
@@ -120,6 +125,76 @@ async def _generate_one_meal(meal_key: str, base_data: dict, selected_meals: lis
         }
 
 
+def _meal_macro_goal_text(meal_key: str, base_data: dict, selected_meals: list[str]) -> str | None:
+    day_goal = (base_data.get("macro_goal") or "").strip()
+    if not day_goal:
+        return None
+    total_share = sum(MEAL_KCAL_SHARE.get(k, 0.2) for k in selected_meals) or 1
+    share_pct = round(MEAL_KCAL_SHARE.get(meal_key, 0.2) / total_share * 100)
+    label_text = _meal_label_text(meal_key)
+    return f"{day_goal} на весь день; этот приём пищи («{label_text}») — примерно {share_pct}% от неё"
+
+
+def _strip_meal_prefix(title: str, label_text: str) -> str:
+    """Убирает префикс вида 'Завтрак: ' из заголовка блюда, если модель его добавила."""
+    prefix = f"{label_text}:"
+    if title.lower().startswith(prefix.lower()):
+        return title[len(prefix):].strip()
+    return title
+
+
+async def _generate_combined(selected_meals: list[str], base_data: dict) -> list[dict]:
+    """
+    Один LLM-вызов на все блюда сразу — чтобы модель могла спланировать общий набор
+    продуктов на день. Поднимает исключение при любом сбое парсинга/генерации, чтобы
+    вызывающий код мог откатиться на независимую генерацию.
+    """
+    search_pairs = await asyncio.gather(
+        *[search_recipes(_build_meal_data(mk, base_data, selected_meals)) for mk in selected_meals]
+    )
+
+    meals_info = [
+        {
+            "label": _meal_label_text(meal_key),
+            "search_query": query,
+            "search_results_text": format_results_for_prompt(results),
+            "macro_goal": _meal_macro_goal_text(meal_key, base_data, selected_meals),
+        }
+        for meal_key, (query, results) in zip(selected_meals, search_pairs)
+    ]
+
+    messages = [
+        {"role": "system", "content": DAY_MENU_SYSTEM_PROMPT},
+        {"role": "user", "content": build_day_menu_user_prompt(meals_info, base_data)},
+    ]
+    max_tokens = min(8000, 1400 * len(selected_meals) + 600)
+
+    raw = await call_llm_with_fallback(messages, max_tokens=max_tokens)
+
+    blocks = [b.strip() for b in raw.split(DAY_MENU_BLOCK_DELIMITER)]
+    if len(blocks) != len(selected_meals):
+        raise ValueError(
+            f"ожидалось {len(selected_meals)} блоков, получено {len(blocks)} — "
+            "формат ответа LLM не совпал"
+        )
+
+    results = []
+    for meal_key, block in zip(selected_meals, blocks):
+        label_text = _meal_label_text(meal_key)
+        recipe_text, shopping_terms = extract_shopping_terms(block)
+        if not recipe_text.strip():
+            raise ValueError(f"пустой блок для приёма пищи {meal_key}")
+        dish_title = _strip_meal_prefix(extract_dish_title(recipe_text) or label_text, label_text)
+        results.append({
+            "meal_key": meal_key,
+            "ok": True,
+            "title": dish_title,
+            "text": recipe_text,
+            "shopping_terms": shopping_terms,
+        })
+    return results
+
+
 def _merge_shopping_terms(per_meal_terms: list[list[str]]) -> list[str]:
     """Объединяет продукты со всех блюд, убирая повторы (без учёта регистра)."""
     seen = set()
@@ -135,13 +210,19 @@ def _merge_shopping_terms(per_meal_terms: list[list[str]]) -> list[str]:
 
 async def generate_day_menu(chat_id: int, selected_meals: list[str], base_data: dict) -> dict:
     """
-    Запускает генерацию всех выбранных приёмов пищи параллельно, сохраняет полные
-    тексты для последующего разворачивания/сворачивания и возвращает сводку: список
-    (meal_key, title, ok) и общий текст списка покупок.
+    Собирает меню на день: сначала пробует совместную генерацию (один LLM-вызов, общий
+    набор продуктов на все блюда), при сбое — откатывается на независимую генерацию
+    каждого блюда отдельным вызовом. Сохраняет полные тексты для последующего
+    разворачивания/сворачивания и возвращает сводку: список (meal_key, title, ok) и
+    общий текст списка покупок.
     """
-    results = await asyncio.gather(
-        *[_generate_one_meal(meal_key, base_data, selected_meals) for meal_key in selected_meals]
-    )
+    try:
+        results = await _generate_combined(selected_meals, base_data)
+    except Exception as e:
+        logger.warning(f"Совместная генерация меню на день не удалась ({e}), откат на независимую")
+        results = await asyncio.gather(
+            *[_generate_one_meal(meal_key, base_data, selected_meals) for meal_key in selected_meals]
+        )
 
     _save_menu(chat_id, {
         "order": selected_meals,
