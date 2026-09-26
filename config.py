@@ -8,7 +8,16 @@ load_dotenv()
 
 BOT_TOKEN = os.getenv("BOT_TOKEN", "")
 
-LLM_PROVIDER = os.getenv("LLM_PROVIDER", "groq").lower()  # groq | openrouter
+# Основной провайдер LLM. Порядок автоматического фолбэка при ошибке/пустом ответе —
+# см. LLM_FALLBACK_ORDER в ai.py: deepseek -> groq -> openrouter (пропускаются те,
+# у кого не задан ключ).
+LLM_PROVIDER = os.getenv("LLM_PROVIDER", "deepseek").lower()  # deepseek | groq | openrouter
+
+DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
+# "deepseek-chat" — режим БЕЗ размышлений (быстрее и не тратит токены на скрытые "мысли").
+# "deepseek-reasoner" — режим с цепочкой рассуждений, но он медленнее и дороже по токенам.
+DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
+DEEPSEEK_URL = "https://api.deepseek.com/chat/completions"
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
 GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
