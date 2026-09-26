@@ -4,13 +4,18 @@
 обычный конвейер search_recipes -> generate_recipe -> extract_shopping_terms) и
 собираем ОДИН общий список покупок на все блюда сразу (без дублей).
 
-Полные тексты рецептов держим в памяти процесса (по аналогии с last_recipe.py). Сводка и
-открытый рецепт — это ОДНО и то же сообщение: кнопка "Показать рецепт" редактирует его в
-разворнутый вид, а "⬅️ Свернуть" возвращает обратно к списку — чат не разрастается новыми
-сообщениями на каждое открытие/закрытие блюда.
+Последнее собранное меню на день хранится в JSON-файле (по аналогии с favorites.py) —
+переживает перезапуск бота, поэтому кнопка "📅 Меню дня" в постоянном нижнем меню открывает
+последнее меню даже на следующий день, а не теряет его при деплое. Сводка и открытый
+рецепт — это ОДНО и то же сообщение: кнопка "Показать рецепт" редактирует его в развёрнутый
+вид, а "⬅️ Свернуть" возвращает обратно к списку — чат не разрастается новыми сообщениями
+на каждое открытие/закрытие блюда.
 """
 import asyncio
+import json
 import logging
+import threading
+from pathlib import Path
 
 from aiogram.types import InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
@@ -22,8 +27,40 @@ from shopping import extract_shopping_terms, extract_dish_title, format_shopping
 
 logger = logging.getLogger(__name__)
 
-# {chat_id: {"order": [meal_key, ...], "meals": {meal_key: {"title", "text", "ok"}}}}
-_store: dict[int, dict] = {}
+DAY_MENU_FILE = Path(__file__).parent / "day_menu.json"
+_lock = threading.Lock()
+
+
+def _read_all() -> dict:
+    if not DAY_MENU_FILE.exists():
+        return {}
+    try:
+        with open(DAY_MENU_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except (json.JSONDecodeError, OSError) as e:
+        logger.warning(f"Не удалось прочитать {DAY_MENU_FILE}: {e}")
+        return {}
+
+
+def _write_all(data: dict) -> None:
+    with open(DAY_MENU_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+
+def _save_menu(chat_id: int, entry: dict) -> None:
+    with _lock:
+        all_data = _read_all()
+        all_data[str(chat_id)] = entry
+        _write_all(all_data)
+
+
+def _load_menu(chat_id: int) -> dict | None:
+    with _lock:
+        return _read_all().get(str(chat_id))
+
+
+def has_menu(chat_id: int) -> bool:
+    return _load_menu(chat_id) is not None
 
 
 def _meal_label_text(meal_key: str) -> str:
@@ -106,10 +143,10 @@ async def generate_day_menu(chat_id: int, selected_meals: list[str], base_data: 
         *[_generate_one_meal(meal_key, base_data, selected_meals) for meal_key in selected_meals]
     )
 
-    _store[chat_id] = {
+    _save_menu(chat_id, {
         "order": selected_meals,
         "meals": {r["meal_key"]: {"title": r["title"], "text": r["text"], "ok": r["ok"]} for r in results},
-    }
+    })
 
     shopping_message = format_shopping_message(
         _merge_shopping_terms([r["shopping_terms"] for r in results if r["ok"]])
@@ -120,7 +157,7 @@ async def generate_day_menu(chat_id: int, selected_meals: list[str], base_data: 
 
 def build_summary_view(chat_id: int) -> tuple[str, InlineKeyboardMarkup] | None:
     """Свёрнутый вид: список приёмов пищи кнопками. None, если меню не найдено (истекло/не собрано)."""
-    entry = _store.get(chat_id)
+    entry = _load_menu(chat_id)
     if not entry:
         return None
 
@@ -145,7 +182,7 @@ def build_summary_view(chat_id: int) -> tuple[str, InlineKeyboardMarkup] | None:
 
 def build_meal_view(chat_id: int, meal_key: str) -> tuple[str, InlineKeyboardMarkup] | None:
     """Развёрнутый вид: полный текст рецепта одного блюда + кнопка свернуть обратно."""
-    entry = _store.get(chat_id)
+    entry = _load_menu(chat_id)
     if not entry or meal_key not in entry["meals"]:
         return None
 

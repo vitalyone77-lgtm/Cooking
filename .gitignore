@@ -4,3 +4,8 @@ __pycache__/
 *.pyc
 .env
 kitchen_bot.zip
+
+# Рантайм-данные бота (создаются на сервере, у каждого окружения свои)
+favorites.json
+user_data.json
+day_menu.json

@@ -118,6 +118,13 @@ MEAL_KCAL_SHARE = {
 }
 
 
+def day_menu_missing_kb() -> InlineKeyboardMarkup:
+    """Показывается, если у пользователя ещё нет собранного меню на день."""
+    b = InlineKeyboardBuilder()
+    b.button(text="📅 Собрать меню на день", callback_data="daymenu:start")
+    return b.as_markup()
+
+
 def meals_kb(selected: set[str] | None = None) -> InlineKeyboardMarkup:
     """Мультивыбор приёмов пищи для меню на день."""
     selected = selected or set()

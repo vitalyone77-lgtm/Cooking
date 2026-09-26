@@ -85,12 +85,21 @@ async def menu_btn_cook(message: Message, state: FSMContext):
 
 @dp.message(F.text == kb.BTN_DAY_MENU)
 async def menu_btn_day_menu(message: Message, state: FSMContext):
+    """
+    Кнопка в ПОСТОЯННОМ нижнем меню открывает ПОСЛЕДНЕЕ уже собранное меню на день
+    (оно хранится на диске, так что доступно даже на следующий день после сборки).
+    Собрать новое меню — через кнопку «📅 Меню на день» в обычном (всплывающем) меню.
+    """
     await state.clear()
-    await message.answer(
-        "📅 Соберём меню на день! Выбери приёмы пищи (можно несколько), потом «Готово»:",
-        reply_markup=kb.meals_kb(set()),
-    )
-    await state.set_state(DayMenuForm.meals)
+    view = day_menu.build_summary_view(message.chat.id)
+    if view:
+        text, markup = view
+        await message.answer(text, reply_markup=markup)
+    else:
+        await message.answer(
+            "У тебя пока нет собранного меню на день.",
+            reply_markup=kb.day_menu_missing_kb(),
+        )
 
 
 @dp.message(F.text == kb.BTN_FAVORITES)
