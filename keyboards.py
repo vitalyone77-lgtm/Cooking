@@ -4,6 +4,7 @@ Inline-клавиатуры для анкеты бота.
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
+import config
 from cuisines import CUISINE_LABELS, MACRO_GOAL_KEY
 
 # Текст кнопок постоянного нижнего меню (reply-keyboard) — вынесен в константы, чтобы
@@ -11,6 +12,7 @@ from cuisines import CUISINE_LABELS, MACRO_GOAL_KEY
 BTN_COOK = "🍳 Готовить"
 BTN_FAVORITES = "⭐ Избранное"
 BTN_DAY_MENU = "📅 Меню дня"
+BTN_WEEK_MENU = "📆 План питания"
 
 
 def main_reply_kb() -> ReplyKeyboardMarkup:
@@ -20,7 +22,8 @@ def main_reply_kb() -> ReplyKeyboardMarkup:
     """
     return ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text=BTN_COOK), KeyboardButton(text=BTN_DAY_MENU), KeyboardButton(text=BTN_FAVORITES)],
+            [KeyboardButton(text=BTN_COOK), KeyboardButton(text=BTN_DAY_MENU)],
+            [KeyboardButton(text=BTN_WEEK_MENU), KeyboardButton(text=BTN_FAVORITES)],
         ],
         resize_keyboard=True,
     )
@@ -49,8 +52,9 @@ def cuisine_kb() -> InlineKeyboardMarkup:
         b.button(text=f"{emoji} {label}", callback_data=f"cuisine:{key}")
     b.button(text="🎯 Подобрать по КБЖУ", callback_data=f"cuisine:{MACRO_GOAL_KEY}")
     b.button(text="📅 Меню на день", callback_data="daymenu:start")
+    b.button(text=f"📆 Меню на {config.WEEK_MENU_DAYS} дня", callback_data="weekmenu:start")
     b.button(text="⭐ Избранное", callback_data="favorites:open")
-    b.adjust(2, 2, 2, 1, 1)
+    b.adjust(2, 2, 2, 2, 1)
     return b.as_markup()
 
 
@@ -122,6 +126,13 @@ def day_menu_missing_kb() -> InlineKeyboardMarkup:
     """Показывается, если у пользователя ещё нет собранного меню на день."""
     b = InlineKeyboardBuilder()
     b.button(text="📅 Собрать меню на день", callback_data="daymenu:start")
+    return b.as_markup()
+
+
+def week_menu_missing_kb() -> InlineKeyboardMarkup:
+    """Показывается, если у пользователя ещё нет плана питания на несколько дней."""
+    b = InlineKeyboardBuilder()
+    b.button(text=f"📆 Собрать план на {config.WEEK_MENU_DAYS} дня", callback_data="weekmenu:start")
     return b.as_markup()
 
 

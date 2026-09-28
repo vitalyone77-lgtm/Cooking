@@ -68,9 +68,13 @@ def has_menu(chat_id: int) -> bool:
     return _load_menu(chat_id) is not None
 
 
-def _meal_label_text(meal_key: str) -> str:
+def meal_label(meal_key: str) -> str:
     # Без эмодзи, для подстановки в текстовые поля запроса ("Завтрак", "Обед", ...)
     return MEAL_LABELS[meal_key].split(" ", 1)[1]
+
+
+# Оставлено для внутренней обратной совместимости внутри модуля.
+_meal_label_text = meal_label
 
 
 def _build_meal_data(meal_key: str, base_data: dict, selected_meals: list[str]) -> dict:
@@ -135,12 +139,55 @@ def _meal_macro_goal_text(meal_key: str, base_data: dict, selected_meals: list[s
     return f"{day_goal} на весь день; этот приём пищи («{label_text}») — примерно {share_pct}% от неё"
 
 
-def _strip_meal_prefix(title: str, label_text: str) -> str:
+def strip_meal_prefix(title: str, label_text: str) -> str:
     """Убирает префикс вида 'Завтрак: ' из заголовка блюда, если модель его добавила."""
     prefix = f"{label_text}:"
     if title.lower().startswith(prefix.lower()):
         return title[len(prefix):].strip()
     return title
+
+
+async def prepare_meals_info(selected_meals: list[str], base_data: dict) -> list[dict]:
+    """
+    Параллельно ищет веб-контекст под каждый приём пищи и собирает meals_info для
+    build_day_menu_user_prompt() — используется и для обычного меню на день, и для
+    генерации одного дня в рамках week_menu.py.
+    """
+    search_pairs = await asyncio.gather(
+        *[search_recipes(_build_meal_data(mk, base_data, selected_meals)) for mk in selected_meals]
+    )
+    return [
+        {
+            "label": meal_label(meal_key),
+            "search_query": query,
+            "search_results_text": format_results_for_prompt(results),
+            "macro_goal": _meal_macro_goal_text(meal_key, base_data, selected_meals),
+        }
+        for meal_key, (query, results) in zip(selected_meals, search_pairs)
+    ]
+
+
+def parse_meal_blocks(blocks: list[str], selected_meals: list[str]) -> list[dict]:
+    """
+    Превращает N текстовых блоков (уже разбитых по DAY_MENU_BLOCK_DELIMITER) в список
+    результатов по каждому приёму пищи. Поднимает ValueError на пустой блок — вызывающий
+    код решает, что делать (откат/повтор).
+    """
+    results = []
+    for meal_key, block in zip(selected_meals, blocks):
+        label_text = meal_label(meal_key)
+        recipe_text, shopping_terms = extract_shopping_terms(block)
+        if not recipe_text.strip():
+            raise ValueError(f"пустой блок для приёма пищи {meal_key}")
+        dish_title = strip_meal_prefix(extract_dish_title(recipe_text) or label_text, label_text)
+        results.append({
+            "meal_key": meal_key,
+            "ok": True,
+            "title": dish_title,
+            "text": recipe_text,
+            "shopping_terms": shopping_terms,
+        })
+    return results
 
 
 async def _generate_combined(selected_meals: list[str], base_data: dict) -> list[dict]:
@@ -149,19 +196,7 @@ async def _generate_combined(selected_meals: list[str], base_data: dict) -> list
     продуктов на день. Поднимает исключение при любом сбое парсинга/генерации, чтобы
     вызывающий код мог откатиться на независимую генерацию.
     """
-    search_pairs = await asyncio.gather(
-        *[search_recipes(_build_meal_data(mk, base_data, selected_meals)) for mk in selected_meals]
-    )
-
-    meals_info = [
-        {
-            "label": _meal_label_text(meal_key),
-            "search_query": query,
-            "search_results_text": format_results_for_prompt(results),
-            "macro_goal": _meal_macro_goal_text(meal_key, base_data, selected_meals),
-        }
-        for meal_key, (query, results) in zip(selected_meals, search_pairs)
-    ]
+    meals_info = await prepare_meals_info(selected_meals, base_data)
 
     messages = [
         {"role": "system", "content": DAY_MENU_SYSTEM_PROMPT},
@@ -178,21 +213,7 @@ async def _generate_combined(selected_meals: list[str], base_data: dict) -> list
             "формат ответа LLM не совпал"
         )
 
-    results = []
-    for meal_key, block in zip(selected_meals, blocks):
-        label_text = _meal_label_text(meal_key)
-        recipe_text, shopping_terms = extract_shopping_terms(block)
-        if not recipe_text.strip():
-            raise ValueError(f"пустой блок для приёма пищи {meal_key}")
-        dish_title = _strip_meal_prefix(extract_dish_title(recipe_text) or label_text, label_text)
-        results.append({
-            "meal_key": meal_key,
-            "ok": True,
-            "title": dish_title,
-            "text": recipe_text,
-            "shopping_terms": shopping_terms,
-        })
-    return results
+    return parse_meal_blocks(blocks, selected_meals)
 
 
 def _merge_shopping_terms(per_meal_terms: list[list[str]]) -> list[str]:

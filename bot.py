@@ -19,8 +19,9 @@ from aiogram.types import Message, CallbackQuery
 import config
 import keyboards as kb
 import day_menu
+import week_menu
 from cuisines import cuisine_label, MACRO_GOAL_KEY
-from states import RecipeForm, FavoritesForm, DayMenuForm
+from states import RecipeForm, FavoritesForm, DayMenuForm, WeekMenuForm
 from search import search_recipes, format_results_for_prompt
 from ai import generate_recipe
 from shopping import extract_shopping_terms, format_shopping_message, extract_dish_title
@@ -100,6 +101,40 @@ async def menu_btn_day_menu(message: Message, state: FSMContext):
             "У тебя пока нет собранного меню на день.",
             reply_markup=kb.day_menu_missing_kb(),
         )
+
+
+@dp.message(F.text == kb.BTN_WEEK_MENU)
+async def menu_btn_week_menu(message: Message, state: FSMContext):
+    """
+    Открывает ПОСЛЕДНИЙ НЕ ПРИГОТОВЛЕННЫЙ рецепт плана питания (а не сводку) — так проще
+    продолжить готовить оттуда, где остановился. Собрать новый план — через кнопку
+    «📆 Меню на N дня» во всплывающем меню.
+    """
+    await state.clear()
+    chat_id = message.chat.id
+    if not week_menu.has_plan(chat_id):
+        await message.answer(
+            "У тебя пока нет плана питания на несколько дней.",
+            reply_markup=kb.week_menu_missing_kb(),
+        )
+        return
+
+    index = week_menu.next_uncooked_index(chat_id)
+    status_msg = await message.answer("⏳ Секунду...")
+    try:
+        slot = await week_menu.ensure_slot(chat_id, index)
+    except Exception as e:
+        logger.exception("Ошибка при открытии текущего дня плана питания")
+        view = week_menu.build_status_view(chat_id)
+        if view:
+            text, markup = view
+            await status_msg.edit_text(text, reply_markup=markup)
+        else:
+            await status_msg.edit_text(f"😔 Не получилось открыть план: {e}")
+        return
+
+    text, markup = week_menu.build_slot_view(chat_id, slot)
+    await status_msg.edit_text(text, reply_markup=markup)
 
 
 @dp.message(F.text == kb.BTN_FAVORITES)
@@ -582,6 +617,299 @@ async def daymenu_collapse(callback: CallbackQuery):
     view = day_menu.build_summary_view(callback.message.chat.id)
     if not view:
         await callback.answer("Меню не найдено, собери заново.", show_alert=True)
+        return
+    text, markup = view
+    await callback.message.edit_text(text, reply_markup=markup)
+    await callback.answer()
+
+
+# ---------- Меню на несколько дней (пилот на config.WEEK_MENU_DAYS дня) ----------
+
+@dp.callback_query(F.data == "weekmenu:start")
+async def weekmenu_start(callback: CallbackQuery, state: FSMContext):
+    await callback.message.edit_reply_markup()
+    await callback.message.answer(
+        f"📆 Соберём план питания на {config.WEEK_MENU_DAYS} дня! "
+        "Выбери приёмы пищи (можно несколько), потом «Готово»:",
+        reply_markup=kb.meals_kb(set()),
+    )
+    await state.set_state(WeekMenuForm.meals)
+    await callback.answer()
+
+
+@dp.callback_query(WeekMenuForm.meals, F.data.startswith("daymeal:"))
+async def wm_step_meals(callback: CallbackQuery, state: FSMContext):
+    value = callback.data.split(":", 1)[1]
+    data = await state.get_data()
+    selected = set(data.get("meals", []))
+
+    if value == "done":
+        if not selected:
+            await callback.answer("Выбери хотя бы один приём пищи!", show_alert=True)
+            return
+        await state.update_data(meals=list(selected))
+        await callback.message.edit_reply_markup()
+        await callback.message.answer("Теперь выбери тип питания/кухни:", reply_markup=kb.cuisine_kb())
+        await state.set_state(WeekMenuForm.cuisine)
+        await callback.answer()
+        return
+
+    if value in selected:
+        selected.remove(value)
+    else:
+        selected.add(value)
+    await state.update_data(meals=list(selected))
+    await callback.message.edit_reply_markup(reply_markup=kb.meals_kb(selected))
+    await callback.answer()
+
+
+@dp.callback_query(WeekMenuForm.cuisine, F.data.startswith("cuisine:"))
+async def wm_step_cuisine(callback: CallbackQuery, state: FSMContext):
+    cuisine = callback.data.split(":", 1)[1]
+    await state.update_data(cuisine=cuisine)
+    await callback.message.edit_reply_markup()
+
+    if cuisine == MACRO_GOAL_KEY:
+        await callback.message.answer(
+            "Укажи ОБЩУЮ цель по КБЖУ на КАЖДЫЙ день плана, например:\n"
+            "«1800 ккал» или «2000 ккал, белки 120 г».\n"
+            "Если без разницы — нажми «Пропустить».",
+            reply_markup=kb.skip_kb("wm_macro_goal"),
+        )
+        await state.set_state(WeekMenuForm.macro_goal)
+    else:
+        await wm_ask_preferred(callback.message, state)
+    await callback.answer()
+
+
+@dp.message(WeekMenuForm.macro_goal)
+async def wm_step_macro_goal_text(message: Message, state: FSMContext):
+    await state.update_data(macro_goal=message.text.strip())
+    await wm_ask_preferred(message, state)
+
+
+@dp.callback_query(WeekMenuForm.macro_goal, F.data == "skip:wm_macro_goal")
+async def wm_step_macro_goal_skip(callback: CallbackQuery, state: FSMContext):
+    await state.update_data(macro_goal="")
+    await callback.message.edit_reply_markup()
+    await wm_ask_preferred(callback.message, state)
+    await callback.answer()
+
+
+async def wm_ask_preferred(message: Message, state: FSMContext):
+    await message.answer(
+        "Какие продукты хочешь использовать на весь период, в общих чертах "
+        "(например: курица, рис, овощи)? Если без разницы — «Пропустить».",
+        reply_markup=kb.skip_kb("wm_preferred"),
+    )
+    await state.set_state(WeekMenuForm.preferred)
+
+
+@dp.message(WeekMenuForm.preferred)
+async def wm_step_preferred_text(message: Message, state: FSMContext):
+    await state.update_data(preferred=message.text.strip())
+    await wm_ask_excluded(message, state)
+
+
+@dp.callback_query(WeekMenuForm.preferred, F.data == "skip:wm_preferred")
+async def wm_step_preferred_skip(callback: CallbackQuery, state: FSMContext):
+    await state.update_data(preferred="")
+    await callback.message.edit_reply_markup()
+    await wm_ask_excluded(callback.message, state)
+    await callback.answer()
+
+
+async def wm_ask_excluded(message: Message, state: FSMContext):
+    await message.answer(
+        "Какие продукты исключить на весь период? (аллергии, нелюбимые продукты)\n"
+        "Если исключать нечего — нажми «Пропустить».",
+        reply_markup=kb.skip_kb("wm_excluded"),
+    )
+    await state.set_state(WeekMenuForm.excluded)
+
+
+@dp.message(WeekMenuForm.excluded)
+async def wm_step_excluded_text(message: Message, state: FSMContext):
+    await state.update_data(excluded=message.text.strip())
+    await wm_ask_time(message, state)
+
+
+@dp.callback_query(WeekMenuForm.excluded, F.data == "skip:wm_excluded")
+async def wm_step_excluded_skip(callback: CallbackQuery, state: FSMContext):
+    await state.update_data(excluded="")
+    await callback.message.edit_reply_markup()
+    await wm_ask_time(callback.message, state)
+    await callback.answer()
+
+
+async def wm_ask_time(message: Message, state: FSMContext):
+    await message.answer("Сколько времени готов тратить на КАЖДОЕ блюдо?", reply_markup=kb.time_kb())
+    await state.set_state(WeekMenuForm.time)
+
+
+@dp.callback_query(WeekMenuForm.time, F.data.startswith("time:"))
+async def wm_step_time(callback: CallbackQuery, state: FSMContext):
+    time_value = callback.data.split(":", 1)[1]
+    await state.update_data(time=time_value)
+    await callback.message.edit_reply_markup()
+    await callback.message.answer("На сколько человек готовим (порций на приём пищи)?", reply_markup=kb.servings_kb())
+    await state.set_state(WeekMenuForm.servings)
+    await callback.answer()
+
+
+@dp.callback_query(WeekMenuForm.servings, F.data.startswith("servings:"))
+async def wm_step_servings(callback: CallbackQuery, state: FSMContext):
+    servings = int(callback.data.split(":", 1)[1])
+    await state.update_data(servings=servings, appliance=[])
+    await callback.message.edit_reply_markup()
+    await callback.message.answer(
+        "В чём будем готовить? Можно выбрать несколько вариантов.",
+        reply_markup=kb.appliance_kb(set()),
+    )
+    await state.set_state(WeekMenuForm.appliance)
+    await callback.answer()
+
+
+@dp.callback_query(WeekMenuForm.appliance, F.data.startswith("appliance:"))
+async def wm_step_appliance(callback: CallbackQuery, state: FSMContext):
+    value = callback.data.split(":", 1)[1]
+    data = await state.get_data()
+    selected = set(data.get("appliance", []))
+
+    if value == "done":
+        if not selected:
+            await callback.answer("Выбери хотя бы один вариант!", show_alert=True)
+            return
+        labels = [APPLIANCE_LABELS[k] for k in selected]
+        await state.update_data(appliance_labels=labels)
+        await callback.message.edit_reply_markup()
+        await wm_show_summary(callback.message, state)
+        await callback.answer()
+        return
+
+    if value in selected:
+        selected.remove(value)
+    else:
+        selected.add(value)
+    await state.update_data(appliance=list(selected))
+    await callback.message.edit_reply_markup(reply_markup=kb.appliance_kb(selected))
+    await callback.answer()
+
+
+async def wm_show_summary(message: Message, state: FSMContext):
+    data = await state.get_data()
+    meals = data.get("meals", [])
+    meals_text = ", ".join(kb.MEAL_LABELS[m] for m in meals)
+    macro_goal = data.get("macro_goal")
+    text = (
+        f"📋 Проверим план на {config.WEEK_MENU_DAYS} дня:\n\n"
+        f"Приёмы пищи (каждый день): {meals_text}\n"
+        f"Тип питания: {cuisine_label(data.get('cuisine'))}\n"
+        + (f"Цель по КБЖУ (на каждый день): {macro_goal}\n" if macro_goal else "")
+        + f"Предпочитаемые продукты: {data.get('preferred') or '—'}\n"
+        f"Исключить: {data.get('excluded') or '—'}\n"
+        f"Время на каждое блюдо: {data.get('time')}\n"
+        f"Порций: {data.get('servings')}\n"
+        f"Техника: {', '.join(data.get('appliance_labels', []))}\n"
+    )
+    await message.answer(text, reply_markup=kb.confirm_kb())
+    await state.set_state(WeekMenuForm.confirm)
+
+
+@dp.callback_query(WeekMenuForm.confirm, F.data == "confirm:go")
+async def wm_step_confirm_go(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()
+    await callback.message.edit_reply_markup()
+    status_msg = await callback.message.answer(
+        "🔎 Считаю продуктовую корзину на весь период..."
+    )
+    data = await state.get_data()
+    meals = data.get("meals", [])
+    chat_id = callback.message.chat.id
+
+    try:
+        basket_text = await week_menu.start_week_plan(chat_id, meals, config.WEEK_MENU_DAYS, data)
+    except Exception as e:
+        logger.exception("Ошибка при сборке продуктовой корзины плана питания")
+        await status_msg.edit_text(
+            f"😔 Не получилось составить план питания.\nТехническая причина: {e}\n\n"
+            "Попробуй ещё раз.",
+            reply_markup=kb.restart_kb(),
+        )
+        return
+
+    await status_msg.delete()
+    await callback.message.answer(basket_text, disable_web_page_preview=True)
+
+    text, markup = week_menu.build_status_view(chat_id)
+    await callback.message.answer(text, reply_markup=markup)
+
+
+@dp.callback_query(F.data == "weekmenu:cook_next")
+async def weekmenu_cook_next(callback: CallbackQuery):
+    chat_id = callback.message.chat.id
+    index = week_menu.current_day_first_index(chat_id)
+    if index is None:
+        await callback.answer("План уже завершён или не найден.", show_alert=True)
+        return
+    await callback.answer()
+    await callback.message.edit_text("🔎 Готовлю блюда на сегодня — это займёт чуть больше времени...")
+
+    try:
+        slot = await week_menu.ensure_slot(chat_id, index)
+    except Exception as e:
+        logger.exception("Ошибка при генерации дня плана питания")
+        await callback.message.edit_text(
+            f"😔 Не получилось приготовить день.\nТехническая причина: {e}\n\nПопробуй ещё раз.",
+        )
+        return
+
+    text, markup = week_menu.build_slot_view(chat_id, slot)
+    await callback.message.edit_text(text, reply_markup=markup)
+
+
+@dp.callback_query(F.data.startswith("weekmenu:slot:"))
+async def weekmenu_slot(callback: CallbackQuery):
+    index = int(callback.data.split(":", 2)[2])
+    try:
+        slot = await week_menu.ensure_slot(callback.message.chat.id, index)
+    except Exception as e:
+        await callback.answer(f"Не получилось открыть: {e}", show_alert=True)
+        return
+    text, markup = week_menu.build_slot_view(callback.message.chat.id, slot)
+    await callback.message.edit_text(text, reply_markup=markup)
+    await callback.answer()
+
+
+@dp.callback_query(F.data.startswith("weekmenu:done:"))
+async def weekmenu_done(callback: CallbackQuery):
+    chat_id = callback.message.chat.id
+    index = int(callback.data.split(":", 2)[2])
+    week_menu.mark_done(chat_id, index)
+    await callback.answer()
+
+    try:
+        slot = await week_menu.ensure_slot(chat_id, index + 1)
+    except ValueError:
+        view = week_menu.build_status_view(chat_id)
+        if view:
+            text, markup = view
+            await callback.message.edit_text("🎉 Весь план питания приготовлен!\n\n" + text, reply_markup=markup)
+        return
+    except Exception as e:
+        logger.exception("Ошибка при генерации следующего дня плана питания")
+        await callback.message.edit_text(f"😔 Не получилось сгенерировать следующий день.\nПричина: {e}")
+        return
+
+    text, markup = week_menu.build_slot_view(chat_id, slot)
+    await callback.message.edit_text(text, reply_markup=markup)
+
+
+@dp.callback_query(F.data == "weekmenu:status")
+async def weekmenu_status(callback: CallbackQuery):
+    view = week_menu.build_status_view(callback.message.chat.id)
+    if not view:
+        await callback.answer("План не найден.", show_alert=True)
         return
     text, markup = view
     await callback.message.edit_text(text, reply_markup=markup)

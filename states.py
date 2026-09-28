@@ -31,3 +31,20 @@ class DayMenuForm(StatesGroup):
     servings = State()
     appliance = State()
     confirm = State()
+
+
+class WeekMenuForm(StatesGroup):
+    """
+    Меню на несколько дней (пилот на 3 дня): та же анкета, что у меню на день, но вместо
+    сразу готовых рецептов на все дни — сначала общая продуктовая корзина на весь период,
+    а рецепт на каждый день генерируется отдельно, по факту, из того, что реально осталось.
+    """
+    meals = State()
+    cuisine = State()
+    macro_goal = State()        # цель по КБЖУ на ВЕСЬ день (одна и та же на каждый день периода)
+    preferred = State()
+    excluded = State()
+    time = State()
+    servings = State()
+    appliance = State()
+    confirm = State()
