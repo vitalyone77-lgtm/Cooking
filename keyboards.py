@@ -50,7 +50,7 @@ def cuisine_kb() -> InlineKeyboardMarkup:
     b.button(text="🎯 Подобрать по КБЖУ", callback_data=f"cuisine:{MACRO_GOAL_KEY}")
     b.button(text="📅 Меню на день", callback_data="daymenu:start")
     b.button(text="⭐ Избранное", callback_data="favorites:open")
-    b.adjust(2, 2, 1, 2, 1)
+    b.adjust(2, 2, 2, 1, 1)
     return b.as_markup()
 
 
