@@ -35,6 +35,7 @@ from reminders import setup_scheduler
 from favorites import add_favorite, get_favorites, get_favorite, remove_favorite, search_favorites
 from last_recipe import set_last_recipe, get_last_recipe
 from stores import prefs as store_prefs
+from stores.links import DEFAULT_STORES
 from stores.basket import build_priced_basket
 
 logging.basicConfig(level=logging.INFO)
@@ -147,7 +148,7 @@ async def shop_open(callback: CallbackQuery):
     # Ответом на сообщение с рецептом: так по нему же восстановим продукты на следующем шаге
     await callback.message.reply(
         "🛒 В каком магазине искать продукты?",
-        reply_markup=kb.store_pick_kb(ctx, store_prefs.get_enabled(callback.message.chat.id)),
+        reply_markup=kb.store_pick_kb(ctx, DEFAULT_STORES),
     )
     await callback.answer()
 
@@ -160,13 +161,12 @@ async def shop_store(callback: CallbackQuery):
     if not terms:
         await callback.answer("Не нашёл список продуктов — открой рецепт заново.", show_alert=True)
         return
-    enabled = store_prefs.get_enabled(chat_id)
-    if store not in enabled:
-        await callback.answer("Этот магазин выключен в /stores", show_alert=True)
+    if store not in DEFAULT_STORES:
+        await callback.answer("Неизвестный магазин", show_alert=True)
         return
     text = format_store_links(terms, store)
     await edit_text_safe(
-        callback.message, text, reply_markup=kb.store_pick_kb(ctx, enabled, current=store),
+        callback.message, text, reply_markup=kb.store_pick_kb(ctx, DEFAULT_STORES, current=store),
         disable_web_page_preview=True,
     )
     await callback.answer()
