@@ -318,8 +318,8 @@ input[type=text]{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid
   // ---- вкладка «Избранное» ----
   function viewFavs(){
     return call("GET","/api/favorites").then(function(d){ls("favcache",JSON.stringify(d.items));return d.items;},function(){try{return JSON.parse(ls("favcache")||"[]");}catch(e){return [];}}).then(function(items){
-      if(!items.length) return '<h1>Избранное</h1><div class="card empty">Пока пусто. Нажми «⭐ Сохранить» под понравившимся рецептом — он останется на этом устройстве, регистрация не нужна.</div>';
-      var h='<h1>Избранное</h1><p class="sub">Хранится в этом браузере. Если очистить данные браузера, список пропадёт — чтобы не потерять, скачай PDF.</p>';
+      if(!items.length) return '<h1>Избранное</h1><div class="card" style="padding:12px 16px;margin:0 0 12px;border-left:4px solid var(--danger)"><strong>⚠ Избранное хранится только на этом устройстве.</strong><br>Оно пропадёт, если: очистить данные сайта или cookie в браузере; удалить ярлык/приложение с телефона; открыть сайт в другом браузере, на другом телефоне или в режиме инкогнито; сменить телефон. Чтобы не потерять — скачай всё одним PDF.</div><div class="card empty">Пока пусто. Нажми «⭐ Сохранить» под понравившимся рецептом — он останется на этом устройстве, регистрация не нужна.</div>';
+      var h='<h1>Избранное</h1><div class="card" style="padding:12px 16px;margin:0 0 12px;border-left:4px solid var(--danger)"><strong>⚠ Избранное хранится только на этом устройстве.</strong><br>Оно пропадёт, если: очистить данные сайта или cookie в браузере; удалить ярлык/приложение с телефона; открыть сайт в другом браузере, на другом телефоне или в режиме инкогнито; сменить телефон. Чтобы не потерять — скачай всё одним PDF.</div>';
       h+=bulkButton("📄 Всё избранное — одним PDF",items.map(function(f){return {title:f.title,text:f.text};}),"Избранные рецепты")+'<div style="height:12px"></div>';
       items.forEach(function(f){h+=accordion(esc(f.title),"","",recipeHTML(f.text)+actions(f.title,f.text,true)+'<button class="btn ghost" data-del="'+esc(f.id)+'">🗑 Удалить</button>',false);});
       return h;});
