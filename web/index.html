@@ -235,14 +235,14 @@ input[type=text]{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid
     if(el.getAttribute("data-loaded"))return;
     el.setAttribute("data-loaded","1");
     el.innerHTML='<div style="color:var(--muted)">Подбираю товары и цены во ВкусВилле… до 40 секунд</div>';
-    call("POST","/api/week/cart",{}).then(function(r){
+    call("POST","/api/cart",{items:JSON.parse(el.getAttribute("data-items")||"[]")}).then(function(r){
       if(!r.text){el.innerHTML='<div style="color:var(--muted)">ВкусВилл сейчас не отвечает — используй ссылки на поиск ниже.</div>';return;}
       el.innerHTML='<div class="recipe">'+esc(r.text)+'</div>'+(r.link?'<a class="btn" style="display:block;text-align:center;margin:8px 0" href="'+esc(r.link)+'" target="_blank" rel="noopener">🧺 Открыть корзину во ВкусВилле</a>':"");
     }).catch(function(){el.removeAttribute("data-loaded");el.innerHTML='<div style="color:var(--muted)">Не удалось получить цены. Выбери магазин ещё раз или открой ссылки на поиск.</div>';});
   }
   function shoppingHTML(items,title){
     if(!items||!items.length) return "";
-    var h='<div class="storebox">'+storeChips(items)+'<div class="storeitems" style="display:none">';items.forEach(function(it){h+='<div class="item"><strong>'+esc(it.name)+'</strong>'+(it.amount?' — '+esc(it.amount):'')+'<div class="links">'+it.links.map(storeLink).join("")+'</div></div>';});h+='</div></div>';
+    var h='<div class="storebox">'+storeChips(items)+'<div data-cart data-items="'+esc(JSON.stringify(items.map(function(i){return {name:i.name,amount:i.amount||""};})))+'" style="display:none"></div><div class="storeitems" style="display:none">';items.forEach(function(it){h+='<div class="item"><strong>'+esc(it.name)+'</strong>'+(it.amount?' — '+esc(it.amount):'')+'<div class="links">'+it.links.map(storeLink).join("")+'</div></div>';});h+='</div></div>';
     return accordion("🛒 "+(title||"Найти продукты в магазине"),"выбери магазин — ссылки на поиск","",h,false);
   }
   function fail(e,back){
@@ -322,7 +322,7 @@ input[type=text]{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid
       h+=accordion("День "+day.day,"",badge,body,day.is_next||(day.generated&&!all));
     });
     var b=w.basket,inner="";
-    if(b.items.length){inner='<div class="storebox">'+storeChips(b.items)+'<div data-cart style="display:none"></div><div class="storeitems" style="display:none">';
+    if(b.items.length){inner='<div class="storebox">'+storeChips(b.items)+'<div data-cart data-items="'+esc(JSON.stringify(b.items.map(function(i){return {name:i.name,amount:i.amount||""};})))+'" style="display:none"></div><div class="storeitems" style="display:none">';
       b.items.forEach(function(it){inner+='<div class="item"><strong>'+esc(it.name)+'</strong> — '+esc(it.amount)+'<div class="links">'+it.links.map(storeLink).join("")+'</div></div>';});
       inner+='</div></div>';}
     var ti=adv.indexOf("💡"),tips=ti>=0?adv.slice(ti).replace(/\*/g,""):"";

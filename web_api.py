@@ -41,7 +41,7 @@ from ai import generate_recipe
 from cuisines import CUISINE_LABELS
 from keyboards import MEAL_LABELS
 from search import search_recipes, format_results_for_prompt
-from shopping import extract_shopping_terms, extract_dish_title
+from shopping import extract_shopping_terms, extract_dish_title, amounts_from_recipe_text
 from storage import get_all_users
 from stores.links import STORES, DEFAULT_STORES, search_url, short_name
 from stores.basket import build_priced_basket
@@ -605,3 +605,41 @@ def llms():
         f"## Ссылки\n- [Приложение]({_site()}/)\n"
     )
     return Response(body, media_type="text/plain; charset=utf-8")
+
+
+class CartItem(BaseModel):
+    name: str = Field(max_length=120)
+    amount: str | int | float | None = ""
+
+
+class CartIn(BaseModel):
+    items: list[CartItem] = Field(max_length=60)
+
+
+@app.post("/api/cart")
+async def api_cart(body: CartIn, x_device: str | None = Header(default=None)):
+    """Корзина ВкусВилла с ценами для списка продуктов (рецепт, день или план) — после выбора магазина."""
+    dev_id = _dev(x_device)
+    if web_db.count_today(dev_id, "cart") >= 30:
+        raise HTTPException(429, "Слишком много запросов корзины — попробуй завтра.")
+    web_db.log_event(dev_id, "cart")
+    amounts: dict[str, int] = {}
+    for it in body.items:
+        if isinstance(it.amount, (int, float)):
+            grams = int(it.amount)
+        else:
+            parsed = amounts_from_recipe_text(f"Продукты:\n- {it.name} — {it.amount}")
+            grams = next(iter(parsed.values()), 0)
+        if grams > 0:
+            key = it.name.strip().lower()
+            amounts[key] = amounts.get(key, 0) + grams
+    if not amounts:
+        return {"text": "", "link": ""}
+    priced = await build_priced_basket(amounts, "выбранные продукты")
+    if not priced:
+        return {"text": "", "link": ""}
+    m = re.search(r"\]\((https?://[^)]+)\)", priced)
+    text = re.sub(r"\[([^\]]+)\]\([^)]+\)", "", priced)
+    text = re.sub(r"[*_`]", "", text)
+    text = "\n".join(ln for ln in text.splitlines() if "Открыть корзину" not in ln)
+    return {"text": text.strip(), "link": m.group(1) if m else ""}
