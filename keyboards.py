@@ -65,20 +65,8 @@ def cuisine_kb(with_extras: bool = True) -> InlineKeyboardMarkup:
     b.button(text="📅 Меню на день", callback_data="daymenu:start")
     b.button(text=f"📆 Меню на {config.WEEK_MENU_DAYS} дня", callback_data="weekmenu:start")
     b.button(text="⭐ Избранное", callback_data="favorites:open")
-    b.button(text="🏪 Магазины", callback_data="stores:open")
     b.button(text="❓ Справка", callback_data="help:open")
     b.adjust(2, 2, 2, 2, 1, 2)
-    return b.as_markup()
-
-
-def stores_kb(enabled: list[str]) -> InlineKeyboardMarkup:
-    from stores.links import STORES
-    b = InlineKeyboardBuilder()
-    for key, (_, full, _) in STORES.items():
-        mark = "✅" if key in enabled else "⬜"
-        b.button(text=f"{mark} {full}", callback_data=f"stores:toggle:{key}")
-    b.button(text="⬅️ В меню", callback_data="menu:open")
-    b.adjust(1)
     return b.as_markup()
 
 

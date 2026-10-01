@@ -195,13 +195,49 @@ def _link_label(term: str) -> str:
     return re.sub(r"[\[\]*_`]", "", term).strip() or term
 
 
-def format_store_links(terms: list[str], store: str) -> str:
-    """Список продуктов со ссылками на поиск ТОЛЬКО в одном магазине (коротко, по одной ссылке на строку)."""
+def _fmt_amount(name: str, value: int) -> str:
+    if "яйц" in name.lower() and value < 100:
+        return f"{value} шт"
+    if value >= 1000:
+        return f"{value / 1000:.1f}".rstrip("0").rstrip(".").replace(".", ",") + " кг"
+    return f"{value} г"
+
+
+def _find_amount(term: str, amounts: dict[str, int]) -> tuple[str, int] | None:
+    """Количество для продукта: точное совпадение названия, иначе по общей основе слова (первые 4 буквы)."""
+    t = term.lower().strip()
+    if t in amounts:
+        return t, amounts[t]
+    stems = [w[:4] for w in re.findall(r"[а-яёa-z]{4,}", t)]
+    for key, val in amounts.items():
+        k = key.lower()
+        if stems and all(st in k for st in stems):
+            return key, val
+    for key, val in amounts.items():
+        k_stems = [w[:4] for w in re.findall(r"[а-яёa-z]{4,}", key.lower())]
+        if k_stems and all(st in t for st in k_stems):
+            return key, val
+    return None
+
+
+def format_store_links(terms: list[str], store: str, amounts: dict[str, int] | None = None) -> str:
+    """Список продуктов со ссылками на поиск ТОЛЬКО в одном магазине; после ссылки — сколько нужно купить."""
     if not terms:
         return ""
     lines = [f"🛒 *Продукты — {full_name(store)}*", ""]
+    used: set[str] = set()
     for term in terms:
-        lines.append(f"• [{_link_label(term)}]({search_url(store, term)})")
+        line = f"• [{_link_label(term)}]({search_url(store, term)})"
+        found = _find_amount(term, amounts) if amounts else None
+        if found:
+            used.add(found[0])
+            line += f" — {_fmt_amount(term, found[1])}"
+        lines.append(line)
+    rest = [(k, v) for k, v in (amounts or {}).items() if k not in used and v]
+    if rest:
+        lines.append("")
+        lines.append("Ещё по рецептам понадобится: " + ", ".join(f"{k} — {_fmt_amount(k, v)}" for k, v in rest))
     lines.append("")
-    lines.append("_Нажми на продукт — откроется поиск в магазине. Другой магазин — кнопки ниже._")
+    lines.append("_Нажми на продукт — откроется поиск в магазине, там можно добавить его в корзину и оформить заказ. "
+                 "Справа от названия — сколько нужно купить. Другой магазин — кнопки ниже._")
     return "\n".join(lines)

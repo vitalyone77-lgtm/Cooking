@@ -65,7 +65,7 @@ HELP_TEXT = (
     "❓ *Справка* — этот текст.\n\n"
     "Под рецептом, меню и планом есть кнопка «🛒 Найти продукты в магазине»: выбираешь магазин "
     "(Пятёрочка, ВкусВилл, Перекрёсток, Лавка, Купер) — и получаешь короткий список со ссылками на поиск.\n\n"
-    "*Команды:* /menu — меню, /ready — готовые меню, /stores — выбор магазинов, "
+    "*Команды:* /menu — меню, /ready — готовые меню,"
     "/app — веб-версия для телефона, /help — справка.\n\n"
     "Каждый день в 14:00 я напоминаю о новом блюде. Если что-то зависло — /start."
 )
@@ -164,7 +164,7 @@ async def shop_store(callback: CallbackQuery):
     if store not in DEFAULT_STORES:
         await callback.answer("Неизвестный магазин", show_alert=True)
         return
-    text = format_store_links(terms, store)
+    text = format_store_links(terms, store, resolve_shopping_amounts(callback.message, ctx))
     await edit_text_safe(
         callback.message, text, reply_markup=kb.store_pick_kb(ctx, DEFAULT_STORES, current=store),
         disable_web_page_preview=True,
@@ -265,11 +265,6 @@ async def cmd_help(message: Message, state: FSMContext):
     await message.answer(HELP_TEXT, reply_markup=kb.main_reply_kb())
 
 
-@dp.message(Command("stores"))
-async def cmd_stores(message: Message):
-    await message.answer(STORES_TEXT, reply_markup=kb.stores_kb(store_prefs.get_enabled(message.chat.id)))
-
-
 @dp.message(Command("app"))
 async def cmd_app(message: Message):
     if not config.WEB_APP_URL:
@@ -296,27 +291,6 @@ async def menu_open(callback: CallbackQuery, state: FSMContext):
 @dp.callback_query(F.data == "help:open")
 async def help_open(callback: CallbackQuery):
     await callback.message.answer(HELP_TEXT)
-    await callback.answer()
-
-
-# ---------- Магазины ----------
-
-STORES_TEXT = (
-    "🏪 *Магазины*\nОтметь, в каких магазинах показывать ссылки на поиск продуктов. "
-    "Для ВкусВилла дополнительно считаю корзину с ценами (если сервис доступен)."
-)
-
-
-@dp.callback_query(F.data == "stores:open")
-async def stores_open(callback: CallbackQuery):
-    await callback.message.answer(STORES_TEXT, reply_markup=kb.stores_kb(store_prefs.get_enabled(callback.message.chat.id)))
-    await callback.answer()
-
-
-@dp.callback_query(F.data.startswith("stores:toggle:"))
-async def stores_toggle(callback: CallbackQuery):
-    enabled = store_prefs.toggle(callback.message.chat.id, callback.data.split(":", 2)[2])
-    await callback.message.edit_reply_markup(reply_markup=kb.stores_kb(enabled))
     await callback.answer()
 
 
@@ -1301,7 +1275,6 @@ async def main():
     await bot.set_my_commands([
         BotCommand(command="menu", description="Показать меню"),
         BotCommand(command="ready", description="Готовые меню"),
-        BotCommand(command="stores", description="Выбор магазинов"),
         BotCommand(command="app", description="Веб-версия для телефона"),
         BotCommand(command="help", description="Справка"),
     ])
