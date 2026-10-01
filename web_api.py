@@ -41,7 +41,7 @@ from ai import generate_recipe
 from cuisines import CUISINE_LABELS
 from keyboards import MEAL_LABELS
 from search import search_recipes, format_results_for_prompt
-from shopping import extract_shopping_terms, extract_dish_title, amounts_from_recipe_text, _fmt_amount
+from shopping import extract_shopping_terms, extract_dish_title, amounts_from_recipe_text, _fmt_amount, _find_amount
 from storage import get_all_users
 from stores.links import STORES, DEFAULT_STORES, search_url, short_name
 from stores.basket import build_priced_basket
@@ -74,6 +74,15 @@ def parse_shopping(md: str) -> list[dict]:
             name, _, rest = line[2:].partition(" — ")
             links = [{"store": s, "url": u} for s, u in re.findall(r"\[([^\]]+)\]\(([^)]+)\)", rest)]
             items.append({"name": name.strip(), "links": links})
+    return items
+
+
+def with_amounts(items: list[dict], amounts: dict[str, int]) -> list[dict]:
+    """Дописывает к продуктам, сколько их нужно купить (из рецепта/меню)."""
+    for it in items:
+        found = _find_amount(it["name"], amounts) if amounts else None
+        if found:
+            it["amount"] = _fmt_amount(it["name"], found[1])
     return items
 
 
@@ -228,7 +237,7 @@ async def api_recipe(p: Params, x_device: str | None = Header(default=None)):
         text, terms = extract_shopping_terms(text)
         if not text.strip():
             raise RuntimeError("Не получилось составить рецепт под эти параметры")
-        return {"title": extract_dish_title(text) or "Рецепт", "text": text, "shopping": links_for(terms)}
+        return {"title": extract_dish_title(text) or "Рецепт", "text": text, "shopping": with_amounts(links_for(terms), amounts_from_recipe_text(text))}
 
     return _start_job(dev_id, work, "recipe")
 
@@ -242,7 +251,7 @@ async def api_daymenu(p: Params, x_device: str | None = Header(default=None)):
 
     async def work():
         summary = await day_menu.generate_day_menu(cid, meals, data)
-        shopping = parse_shopping(summary.get("shopping_message", ""))
+        shopping = with_amounts(parse_shopping(summary.get("shopping_message", "")), day_menu.get_shopping_amounts(cid))
         web_db.kv_set(f"dayshop:{cid}", json.dumps(shopping, ensure_ascii=False))
         return {"ok": True}
 

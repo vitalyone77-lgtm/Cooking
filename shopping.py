@@ -8,6 +8,9 @@ from stores.links import search_url, short_name, full_name
 from stores.prefs import get_enabled
 from stores.units import is_pieces
 
+# запятая-разделитель, но не десятичная («молоко 1,5%»)
+_COMMA_RE = re.compile(r",(?![0-9])")
+
 SEARCH_TERMS_RE = re.compile(r"ПРОДУКТЫ_СПИСОК:\s*(.+)", re.IGNORECASE)
 DISH_TITLE_RE = re.compile(r"^\s*🍽\s*(.+)$", re.MULTILINE)
 BASE_PRODUCTS_RE = re.compile(r"БАЗОВЫЕ_ПРОДУКТЫ:\s*(.+)", re.IGNORECASE)
@@ -46,7 +49,7 @@ def _terms_from_products_section(text: str) -> list[str]:
         item = _BULLET_RE.sub("", s)
         item = re.sub(r"\([^)]*\)", "", item)
         item = re.split(r"\s[—–-]\s", item, maxsplit=1)[0]
-        for part in item.split(","):
+        for part in _COMMA_RE.split(item):
             name = part.strip(" .*_`")
             if name and name.lower() not in seen:
                 seen.add(name.lower())
@@ -65,7 +68,7 @@ def extract_shopping_terms(recipe_text: str) -> tuple[str, list[str]]:
         return recipe_text.strip(), _terms_from_products_section(recipe_text)
 
     terms_raw = match.group(1)
-    terms = [t.strip(" .") for t in terms_raw.split(",") if t.strip(" .")]
+    terms = [t.strip(" .") for t in _COMMA_RE.split(terms_raw) if t.strip(" .")]
 
     clean_text = recipe_text[:match.start()].rstrip()
     if not clean_text:
@@ -78,7 +81,7 @@ def extract_shopping_terms(recipe_text: str) -> tuple[str, list[str]]:
 def _parse_kv_amounts(raw: str) -> dict[str, int]:
     """Разбирает 'продукт1=число, продукт2=число, ...' в {продукт: целое_число}."""
     result: dict[str, int] = {}
-    for part in raw.split(","):
+    for part in _COMMA_RE.split(raw):
         part = part.strip()
         if not part or "=" not in part:
             continue
@@ -162,7 +165,7 @@ def amounts_from_recipe_text(text: str) -> dict[str, int]:
         if not sep:
             name_part, sep, rest = item.partition(" — ")
         name = name_part.strip(" .*_`").lower()
-        if not name or "," in name or name in ("вода", "кипяток", "лёд", "лед", "вода питьевая"):
+        if not name or _COMMA_RE.search(name) or name in ("вода", "кипяток", "лёд", "лед", "вода питьевая"):
             continue  # воду из крана не покупаем
         grams = pieces = 0.0
         for m in _AMOUNT_RE.finditer(item.partition(" — ")[2]):
