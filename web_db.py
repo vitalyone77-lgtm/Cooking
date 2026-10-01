@@ -80,6 +80,18 @@ def count_today(dev_id: int, kind: str) -> int:
                          (dev_id, kind, midnight)).fetchone()["n"]
 
 
+def count_since(dev_id: int, kind: str, since: float) -> int:
+    with db() as c:
+        return c.execute("SELECT COUNT(*) n FROM events WHERE device_id=? AND kind=? AND ts>=?",
+                         (dev_id, kind, since)).fetchone()["n"]
+
+
+def drop_last_event(dev_id: int, kind: str):
+    with db() as c:
+        c.execute("DELETE FROM events WHERE rowid=(SELECT MAX(rowid) FROM events WHERE device_id=? AND kind=?)",
+                  (dev_id, kind))
+
+
 def stats(tg_users: int) -> dict:
     now = time.time()
     day = 86400

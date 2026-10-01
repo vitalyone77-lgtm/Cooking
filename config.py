@@ -82,5 +82,8 @@ WEB_ALLOWED_ORIGINS = [
 
 # Автономная веб-версия (web_api.py отдаёт и страницу, и API)
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "")            # пароль входа в /admin
+WEB_LIMIT_RECIPE = int(os.getenv("WEB_LIMIT_RECIPE", "3"))     # блюд в сутки на устройство (веб)
+WEB_LIMIT_DAYMENU = int(os.getenv("WEB_LIMIT_DAYMENU", "1"))   # меню на день в сутки
+WEB_LIMIT_WEEK = int(os.getenv("WEB_LIMIT_WEEK", "1"))         # планов на 3 дня за 3 календарных дня
 WEB_DAILY_LIMIT = int(os.getenv("WEB_DAILY_LIMIT", "12"))   # генераций в сутки на одно устройство
 WEB_DATA_DIR = os.getenv("WEB_DATA_DIR", "web_data")        # база и данные веба (отдельно от бота)

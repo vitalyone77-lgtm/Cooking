@@ -114,14 +114,40 @@ class Params(BaseModel):
 JOBS: dict[str, dict] = {}
 
 
+MSK = 3 * 3600   # Москва = UTC+3 без перехода на летнее время
+
+
+def _msk_midnight(days_back: int = 0) -> float:
+    now = time.time() + MSK
+    return now - (now % 86400) - days_back * 86400 - MSK
+
+
+# вид подбора -> (сколько раз, за сколько календарных дней по Москве, как назвать)
+LIMITS = {
+    "recipe": (config.WEB_LIMIT_RECIPE, 1, "подбора блюда в сутки"),
+    "daymenu": (config.WEB_LIMIT_DAYMENU, 1, "меню на день в сутки"),
+    "week": (config.WEB_LIMIT_WEEK, 3, "план питания на 3 дня"),
+}
+
+
 def _spend(dev_id: int, kind: str):
-    if web_db.count_today(dev_id, "gen") >= config.WEB_DAILY_LIMIT:
-        raise HTTPException(429, f"Дневной лимит ({config.WEB_DAILY_LIMIT} генераций) исчерпан — приходи завтра 🙂")
+    """Лимиты: 3 блюда в сутки, 1 меню на день в сутки, 1 план на 3 дня за 3 календарных дня (МСК)."""
+    if kind in LIMITS:
+        n, days, label = LIMITS[kind]
+        if web_db.count_since(dev_id, kind, _msk_midnight(days - 1)) >= n:
+            when = "завтра" if days == 1 else "через пару дней"
+            raise HTTPException(429, f"Лимит исчерпан: {n} {label}. Приходи {when} 🙂")
     web_db.log_event(dev_id, "gen")
     web_db.log_event(dev_id, kind)
 
 
-def _start_job(dev_id: int, coro_fn) -> dict:
+def _refund(dev_id: int, kind: str):
+    """Подбор не получился (сбой ИИ) — возвращаем попытку."""
+    web_db.drop_last_event(dev_id, kind)
+    web_db.drop_last_event(dev_id, "gen")
+
+
+def _start_job(dev_id: int, coro_fn, kind: str | None = None) -> dict:
     # чистим старые задачи
     for k in [k for k, v in JOBS.items() if time.time() - v["ts"] > 3600]:
         JOBS.pop(k, None)
@@ -137,6 +163,8 @@ def _start_job(dev_id: int, coro_fn) -> dict:
         except Exception as e:  # noqa: BLE001
             JOBS[job_id]["status"] = "error"
             JOBS[job_id]["error"] = str(e)[:300]
+            if kind:
+                _refund(dev_id, kind)
 
     asyncio.create_task(runner())
     return {"job": job_id}
@@ -181,6 +209,7 @@ def meta():
         "meals": [{"key": k, "label": v} for k, v in MEAL_LABELS.items()],
         "week_days": config.WEEK_MENU_DAYS,
         "limit": config.WEB_DAILY_LIMIT,
+        "limits": {"recipe": config.WEB_LIMIT_RECIPE, "daymenu": config.WEB_LIMIT_DAYMENU, "week": config.WEB_LIMIT_WEEK},
     }
 
 
@@ -202,7 +231,7 @@ async def api_recipe(p: Params, x_device: str | None = Header(default=None)):
             raise RuntimeError("Не получилось составить рецепт под эти параметры")
         return {"title": extract_dish_title(text) or "Рецепт", "text": text, "shopping": links_for(terms)}
 
-    return _start_job(dev_id, work)
+    return _start_job(dev_id, work, "recipe")
 
 
 @app.post("/api/daymenu")
@@ -218,7 +247,7 @@ async def api_daymenu(p: Params, x_device: str | None = Header(default=None)):
         web_db.kv_set(f"dayshop:{cid}", json.dumps(shopping, ensure_ascii=False))
         return {"ok": True}
 
-    return _start_job(dev_id, work)
+    return _start_job(dev_id, work, "daymenu")
 
 
 @app.post("/api/week")
@@ -232,7 +261,7 @@ async def api_week(p: Params, x_device: str | None = Header(default=None)):
         _, shopping_md = await week_menu.start_week_plan(cid, meals, config.WEEK_MENU_DAYS, data)
         return {"ok": True}
 
-    return _start_job(dev_id, work)
+    return _start_job(dev_id, work, "week")
 
 
 @app.post("/api/week/cart")
@@ -270,7 +299,7 @@ async def api_week_cook(x_device: str | None = Header(default=None)):
                           json.dumps(parse_shopping(slot.get("shopping_message", "")), ensure_ascii=False))
         return {"ok": True}
 
-    return _start_job(dev_id, work)
+    return _start_job(dev_id, work, "weekday")
 
 
 # ---------------- чтение меню ----------------
