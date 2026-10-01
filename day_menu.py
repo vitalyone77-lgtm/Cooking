@@ -251,7 +251,7 @@ async def generate_day_menu(chat_id: int, selected_meals: list[str], base_data: 
     })
 
     shopping_message = format_shopping_message(
-        _merge_shopping_terms([r["shopping_terms"] for r in results if r["ok"]])
+        _merge_shopping_terms([r["shopping_terms"] for r in results if r["ok"]]), chat_id
     )
 
     return {"meals": results, "shopping_message": shopping_message}

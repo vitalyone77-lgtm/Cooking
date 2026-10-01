@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>Админка — Кухонный помощник</title>
+<style>
+:root{--bg:#F4F1EC;--s:#fff;--t:#2B2622;--m:#6B625A;--l:#E2DAD0;--p:#2F6B4F;--d:#A33A2B}
+@media (prefers-color-scheme:dark){:root{--bg:#171512;--s:#231F1B;--t:#F1EAE2;--m:#B5AA9E;--l:#39332D;--p:#7CC5A0;--d:#F0907F}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--t);font:16px/1.5 -apple-system,Segoe UI,Roboto,Arial,sans-serif}
+.w{max-width:900px;margin:0 auto;padding:16px}h1{font-size:22px}h2{font-size:18px;margin:24px 0 8px}
+.g{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
+.c{background:var(--s);border:1px solid var(--l);border-radius:14px;padding:14px}.n{font-size:28px;font-weight:700}.k{color:var(--m);font-size:13px}
+input,select,button{font:inherit;padding:10px 12px;border-radius:10px;border:1.5px solid var(--l);background:var(--s);color:var(--t)}
+button{cursor:pointer}.pri{background:var(--p);color:#fff;border-color:var(--p);font-weight:600}.dng{color:var(--d)}
+.bars{display:flex;align-items:flex-end;gap:4px;height:120px;background:var(--s);border:1px solid var(--l);border-radius:14px;padding:12px}
+.bar{flex:1;background:var(--p);border-radius:4px 4px 0 0;min-height:2px;position:relative}.bar span{position:absolute;top:-18px;left:0;right:0;text-align:center;font-size:11px;color:var(--m)}
+.lab{display:flex;gap:4px;padding:0 12px;font-size:10px;color:var(--m)}.lab div{flex:1;text-align:center}
+table{width:100%;border-collapse:collapse;background:var(--s);border:1px solid var(--l);border-radius:14px;overflow:hidden}td,th{padding:8px 10px;border-bottom:1px solid var(--l);text-align:left;font-size:14px}
+img.th{width:120px;max-height:60px;object-fit:cover;border-radius:6px}
+form.f{display:grid;gap:8px;background:var(--s);border:1px solid var(--l);border-radius:14px;padding:14px}
+.hide{display:none}.err{color:var(--d)}
+</style>
+</head>
+<body><div class="w">
+<div id="login" class="hide"><h1>Вход в админку</h1>
+  <form class="f" id="lf"><input type="password" id="pw" placeholder="Пароль" autocomplete="current-password" required><button class="pri">Войти</button><div class="err" id="le"></div></form></div>
+<div id="app" class="hide">
+  <h1>Кухонный помощник — админка</h1>
+  <div class="g" id="cards"></div>
+  <h2>Уникальные посетители по дням</h2><div class="bars" id="bars"></div><div class="lab" id="lab"></div>
+  <h2>Реклама</h2>
+  <table><thead><tr><th>Баннер</th><th>Место</th><th>Показы</th><th>Клики</th><th>CTR</th><th></th></tr></thead><tbody id="ads"></tbody></table>
+  <h2>Добавить баннер</h2>
+  <form class="f" id="af">
+    <select name="slot"><option value="top">Сверху на странице «Создать» (рекомендуемо 640×120)</option><option value="inline">После рецепта и меню (640×200)</option></select>
+    <input name="title" placeholder="Подпись (для скринридеров), необязательно">
+    <input name="url" type="url" placeholder="Куда ведёт (https://…)" required>
+    <input name="image" type="file" accept="image/png,image/jpeg,image/webp,image/gif" required>
+    <button class="pri">Загрузить</button><div class="err" id="ae"></div>
+  </form>
+  <p class="k">Если в месте несколько активных баннеров — показываются случайно. Пусто — место не занимает экран.</p>
+</div></div>
+<script>
+function $(i){return document.getElementById(i);}
+function esc(s){return String(s).replace(/[&<>"]/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"}[c];});}
+function load(){
+  fetch("/admin/api/stats").then(function(r){
+    if(r.status===401){$("login").className="";$("app").className="hide";return null;}
+    return r.json();
+  }).then(function(s){
+    if(!s) return; $("login").className="hide";$("app").className="";
+    var g=s.generations,cards=[["Устройств всего",s.devices_total],["Новых за 24 ч",s.new_24h],["Новых за 7 дней",s.new_7d],["Активных за 24 ч",s.active_24h],["Активных за 7 дней",s.active_7d],["Активных за 30 дней",s.active_30d],["Пользователей Telegram-бота",s.tg_users],["Подборов за 24 ч",s.generations_24h],["Рецептов всего",g.recipe],["Меню на день",g.daymenu],["Планов",g.week]];
+    $("cards").innerHTML=cards.map(function(c){return '<div class="c"><div class="n">'+c[1]+'</div><div class="k">'+c[0]+'</div></div>';}).join("");
+    var max=Math.max.apply(null,s.daily.map(function(d){return d.n;}).concat([1]));
+    $("bars").innerHTML=s.daily.map(function(d){return '<div class="bar" style="height:'+Math.round(d.n/max*100)+'%"><span>'+d.n+'</span></div>';}).join("");
+    $("lab").innerHTML=s.daily.map(function(d){return '<div>'+d.date+'</div>';}).join("");
+    $("ads").innerHTML=s.ads.length?s.ads.map(function(a){var ctr=a.views?(a.clicks/a.views*100).toFixed(1)+"%":"—";
+      return '<tr><td><img class="th" src="/uploads/'+esc(a.image)+'" alt=""><br><small>'+esc(a.title||"")+'</small></td><td>'+esc(a.slot)+'</td><td>'+a.views+'</td><td>'+a.clicks+'</td><td>'+ctr+'</td><td><button data-t="'+a.id+'">'+(a.active?"Выключить":"Включить")+'</button> <button class="dng" data-d="'+a.id+'">Удалить</button></td></tr>';}).join(""):'<tr><td colspan="6">Баннеров пока нет</td></tr>';
+  });
+}
+$("lf").onsubmit=function(e){e.preventDefault();fetch("/admin/login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({password:$("pw").value})}).then(function(r){if(!r.ok)return r.json().then(function(j){$("le").textContent=j.detail||"Ошибка";});$("pw").value="";load();});};
+$("af").onsubmit=function(e){e.preventDefault();$("ae").textContent="";fetch("/admin/api/ads",{method:"POST",body:new FormData($("af"))}).then(function(r){if(!r.ok)return r.json().then(function(j){$("ae").textContent=j.detail||"Ошибка";});$("af").reset();load();});};
+document.addEventListener("click",function(e){var b=e.target.closest("button");if(!b)return;
+  if(b.dataset.t)fetch("/admin/api/ads/"+b.dataset.t+"/toggle",{method:"POST"}).then(load);
+  if(b.dataset.d&&confirm("Удалить баннер?"))fetch("/admin/api/ads/"+b.dataset.d,{method:"DELETE"}).then(load);});
+load();
+</script></body></html>

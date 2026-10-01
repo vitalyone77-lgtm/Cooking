@@ -7,25 +7,33 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 import config
 from cuisines import CUISINE_LABELS, MACRO_GOAL_KEY
 
-# Текст кнопок постоянного нижнего меню (reply-keyboard) — вынесен в константы, чтобы
-# сверяться с ним в обработчиках bot.py без риска опечатки.
-BTN_COOK = "🍳 Готовить"
-BTN_FAVORITES = "⭐ Избранное"
-BTN_DAY_MENU = "📅 Меню дня"
-BTN_WEEK_MENU = "📆 План питания"
+# Текст кнопок постоянного нижнего меню (reply-keyboard).
+BTN_MENU = "📋 Показать меню"
+BTN_READY = "🗂 Готовые меню"
+BTN_HELP = "❓ Справка"
+
+# Тексты кнопок ПРОШЛЫХ версий: у людей, у которых старая клавиатура ещё висит в чате,
+# нажатие должно работать, а клавиатура — обновиться на новую.
+LEGACY_BTN_COOK = "🍳 Готовить"
+LEGACY_BTN_FAVORITES = "⭐ Избранное"
+LEGACY_BTN_DAY_MENU = "📅 Меню дня"
+LEGACY_BTN_WEEK_MENU = "📆 План питания"
 
 
 def main_reply_kb() -> ReplyKeyboardMarkup:
     """
-    Постоянное меню внизу экрана (не сообщение в чате!) — открывается/прячется одной
-    кнопкой-иконкой клавиатуры у поля ввода в Telegram, не засоряя историю чата.
+    Постоянное меню внизу экрана: одна строка из трёх кнопок. is_persistent=True — Telegram
+    не прячет её после нажатия и показывает вместо иконки-клавиатуры.
     """
     return ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text=BTN_COOK), KeyboardButton(text=BTN_DAY_MENU)],
-            [KeyboardButton(text=BTN_WEEK_MENU), KeyboardButton(text=BTN_FAVORITES)],
-        ],
+        keyboard=[[
+            KeyboardButton(text=BTN_MENU),
+            KeyboardButton(text=BTN_READY),
+            KeyboardButton(text=BTN_HELP),
+        ]],
         resize_keyboard=True,
+        is_persistent=True,
+        input_field_placeholder="Нажми «Показать меню» или напиши, что хочешь приготовить",
     )
 
 
@@ -38,11 +46,11 @@ CUISINE_EMOJI = {
 }
 
 
-def cuisine_kb() -> InlineKeyboardMarkup:
+def cuisine_kb(with_extras: bool = True) -> InlineKeyboardMarkup:
     """
-    Стартовое меню сгруппировано по смыслу и разложено по 2 кнопки в ряд, чтобы не
-    растягиваться в длинный список: сначала типы питания/кухни, потом альтернативные
-    режимы подбора (по КБЖУ / меню на день), потом избранное отдельной строкой.
+    Главное меню: типы питания (по 2 в ряд), подбор по КБЖУ; при with_extras — ещё меню на
+    день/несколько дней, избранное, магазины, справка. Внутри анкет «на день»/«на N дней»
+    extras не нужны (with_extras=False), иначе можно случайно прервать анкету.
     """
     b = InlineKeyboardBuilder()
     for key, label in CUISINE_LABELS.items():
@@ -51,10 +59,40 @@ def cuisine_kb() -> InlineKeyboardMarkup:
         emoji = CUISINE_EMOJI.get(key, "🍽")
         b.button(text=f"{emoji} {label}", callback_data=f"cuisine:{key}")
     b.button(text="🎯 Подобрать по КБЖУ", callback_data=f"cuisine:{MACRO_GOAL_KEY}")
+    if not with_extras:
+        b.adjust(2)
+        return b.as_markup()
     b.button(text="📅 Меню на день", callback_data="daymenu:start")
     b.button(text=f"📆 Меню на {config.WEEK_MENU_DAYS} дня", callback_data="weekmenu:start")
     b.button(text="⭐ Избранное", callback_data="favorites:open")
-    b.adjust(2, 2, 2, 2, 1)
+    b.button(text="🏪 Магазины", callback_data="stores:open")
+    b.button(text="❓ Справка", callback_data="help:open")
+    b.adjust(2, 2, 2, 2, 1, 2)
+    return b.as_markup()
+
+
+def stores_kb(enabled: list[str]) -> InlineKeyboardMarkup:
+    from stores.links import STORES
+    b = InlineKeyboardBuilder()
+    for key, (_, full, _) in STORES.items():
+        mark = "✅" if key in enabled else "⬜"
+        b.button(text=f"{mark} {full}", callback_data=f"stores:toggle:{key}")
+    b.button(text="⬅️ В меню", callback_data="menu:open")
+    b.adjust(1)
+    return b.as_markup()
+
+
+def ready_hub_kb(has_day: bool, has_week: bool, week_days: int) -> InlineKeyboardMarkup:
+    b = InlineKeyboardBuilder()
+    if has_day:
+        b.button(text="📅 Меню на день", callback_data="ready:day")
+    if has_week:
+        b.button(text=f"📆 План на {week_days} дня", callback_data="ready:week")
+    if not has_day:
+        b.button(text="➕ Собрать меню на день", callback_data="daymenu:start")
+    if not has_week:
+        b.button(text=f"➕ Собрать план на {week_days} дня", callback_data="weekmenu:start")
+    b.adjust(1)
     return b.as_markup()
 
 

@@ -10,3 +10,10 @@ favorites.json
 user_data.json
 day_menu.json
 week_menu.json
+web_data/
+# настройки магазинов пользователей (создаётся на сервере)
+store_prefs.json
+# артефакты чужих сессий: архив с обновлением и его распаковка
+cooking_web_update/
+cooking_web_update.zip
+Claude outputs/

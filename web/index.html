@@ -1,0 +1,344 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#2F6B4F">
+<meta name="description" content="Рецепты, меню на день и план питания с калориями, КБЖУ и списком покупок">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png">
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Кухня">
+<title>Кухонный помощник</title>
+<style>
+:root{--bg:#FBF7F2;--surface:#fff;--text:#2B2622;--muted:#6B625A;--line:#E7DED3;--primary:#2F6B4F;--on-primary:#fff;--soft:#E6F0EA;--accent:#FBE3C4;--danger:#A33A2B;--r:16px;--tap:52px}
+@media (prefers-color-scheme:dark){:root{--bg:#1A1714;--surface:#25211D;--text:#F1EAE2;--muted:#B5AA9E;--line:#3A342E;--primary:#7CC5A0;--on-primary:#10261B;--soft:#24352C;--accent:#4A3A22;--danger:#F0907F}}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--text);font:17px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;padding-bottom:calc(var(--tap) + 24px + env(safe-area-inset-bottom))}
+.wrap{max-width:640px;margin:0 auto;padding:16px}
+h1{font-size:24px;line-height:1.25;margin:8px 0 4px}
+.sub{color:var(--muted);margin:0 0 14px;font-size:15px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);margin:0 0 12px;overflow:hidden}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer;-webkit-tap-highlight-color:transparent}
+button:focus-visible,a:focus-visible,input:focus-visible{outline:3px solid var(--primary);outline-offset:2px}
+.btn{display:flex;align-items:center;justify-content:center;gap:8px;min-height:var(--tap);width:100%;padding:12px 16px;border-radius:14px;font-weight:600;background:var(--primary);color:var(--on-primary);text-decoration:none;margin-top:12px}
+.btn.ghost{background:transparent;color:var(--primary);border:2px solid var(--primary)}
+.btn[disabled]{opacity:.6}
+.row{display:flex;gap:10px}
+.chips{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 6px}
+.chip{min-height:44px;padding:0 16px;border-radius:99px;border:1.5px solid var(--line);background:var(--surface);font-size:16px}
+.chip[aria-pressed=true]{background:var(--primary);color:var(--on-primary);border-color:var(--primary);font-weight:600}
+label.f{display:block;font-weight:600;margin:16px 0 6px}
+input[type=text]{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--line);border-radius:12px;background:var(--surface);color:var(--text);font:inherit}
+.acc-head{width:100%;min-height:var(--tap);display:flex;align-items:center;gap:12px;padding:12px 16px;text-align:left}
+.acc-title{flex:1;font-weight:600}.acc-title small{display:block;font-weight:400;color:var(--muted);font-size:14px}
+.chev{transition:transform .2s;color:var(--muted)}.open>.acc-head .chev{transform:rotate(90deg)}
+.acc-body{display:none;padding:0 16px 16px;border-top:1px solid var(--line)}.open>.acc-body{display:block}
+.badge{font-size:13px;padding:2px 10px;border-radius:99px;background:var(--soft);color:var(--primary);font-weight:600;white-space:nowrap}.badge.new{background:var(--accent);color:var(--text)}
+.recipe{white-space:pre-wrap;word-wrap:break-word;font-size:16px;line-height:1.6;padding-top:6px}
+.step{display:flex;gap:12px;align-items:flex-start;padding:10px 0;min-height:44px;cursor:pointer}.step input{width:24px;height:24px;margin-top:2px;accent-color:var(--primary);flex:none}.step.checked span{opacity:.5;text-decoration:line-through}
+.links{display:flex;flex-wrap:wrap;gap:8px;margin-top:6px}.links a{min-height:44px;display:inline-flex;align-items:center;padding:0 14px;border-radius:99px;border:1px solid var(--line);color:var(--primary);text-decoration:none;font-size:15px;font-weight:600}
+.item{padding:12px 0;border-top:1px solid var(--line)}.item:first-child{border-top:0}
+.tabs{position:fixed;left:0;right:0;bottom:0;z-index:50;display:flex;background:var(--surface);border-top:1px solid var(--line);padding-bottom:env(safe-area-inset-bottom)}
+.tab{flex:1;min-height:var(--tap);display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:12px;color:var(--muted);padding:6px 0}.tab .ic{font-size:22px;line-height:1}.tab[aria-selected=true]{color:var(--primary);font-weight:700}
+.skeleton{height:64px;border-radius:var(--r);background:linear-gradient(90deg,var(--line),var(--surface),var(--line));background-size:200% 100%;animation:sk 1.2s infinite;margin-bottom:12px}@keyframes sk{to{background-position:-200% 0}}
+@media (prefers-reduced-motion:reduce){.skeleton,.spin{animation:none}.chev{transition:none}}
+.empty,.err{padding:24px 16px;text-align:center;color:var(--muted)}.err{color:var(--danger)}
+.ad{display:block;margin:0 0 12px;text-align:center}.ad img{max-width:100%;border-radius:12px;display:block;margin:0 auto}.ad small{color:var(--muted);font-size:12px}
+.progress{padding:28px 16px;text-align:center}.spin{width:36px;height:36px;border:4px solid var(--line);border-top-color:var(--primary);border-radius:50%;margin:0 auto 12px;animation:rot 1s linear infinite}@keyframes rot{to{transform:rotate(360deg)}}
+.toggle{display:flex;align-items:center;gap:10px;min-height:44px;font-size:15px;color:var(--muted)}
+.seg{display:flex;gap:6px;margin:0 0 14px}.seg .chip{flex:1;padding:0 6px}
+.install{display:flex;gap:12px;align-items:center;padding:14px 8px 14px 16px;background:var(--soft);border-color:transparent}
+.install .t{flex:1;font-size:15px;line-height:1.4}.install .t strong{display:block;font-size:16px}
+.install .btn{width:auto;margin:0;min-height:44px;padding:8px 16px;white-space:nowrap}
+.install .x{min-width:44px;min-height:44px;font-size:20px;color:var(--muted)}
+.install-help{margin:-4px 0 12px;padding:14px 16px;font-size:15px;line-height:1.55}
+.install-bottom{margin-top:18px}
+#print-area{display:none}
+@media print{body>*:not(#print-area){display:none!important}#print-area{display:block;color:#000;background:#fff;font:14pt/1.5 Georgia,serif;white-space:pre-wrap}}
+</style>
+</head>
+<body>
+<div class="wrap" id="main" aria-live="polite"></div>
+<nav class="tabs" role="tablist" aria-label="Разделы">
+  <button class="tab" role="tab" data-tab="new"><span class="ic">🍳</span>Создать</button>
+  <button class="tab" role="tab" data-tab="menus"><span class="ic">🗂</span>Готовые меню</button>
+  <button class="tab" role="tab" data-tab="favs"><span class="ic">⭐</span>Избранное</button>
+</nav>
+<div id="print-area"></div>
+<script>
+(function(){
+  var main=document.getElementById("main"), META=null, dev="", cur="new", wake=null;
+  function ls(k,v){try{if(v===undefined)return localStorage.getItem(k);localStorage.setItem(k,v);}catch(e){return null;}}
+  function esc(s){return String(s).replace(/[&<>"]/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"}[c];});}
+  function sleep(ms){return new Promise(function(r){setTimeout(r,ms);});}
+  function errText(e){return (e&&e instanceof TypeError)?"Нет соединения с интернетом. Проверь сеть и обнови страницу.":((e&&e.message)||"Не удалось загрузить. Проверь интернет.");}
+
+  // ---- установка на главный экран (PWA) ----
+  var deferredInstall=null, framed=false;
+  try{framed=window.self!==window.top;}catch(e){framed=true;}
+  var UA=navigator.userAgent||"";
+  var standalone=(window.matchMedia&&window.matchMedia("(display-mode: standalone)").matches)||navigator.standalone===true;
+  var isIOS=/iPad|iPhone|iPod/.test(UA)||(navigator.platform==="MacIntel"&&navigator.maxTouchPoints>1);
+  var inApp=/Telegram|FBAN|FBAV|Instagram|VKClient|; wv\)/i.test(UA);
+  window.addEventListener("beforeinstallprompt",function(e){e.preventDefault();deferredInstall=e;fillInstall();});
+  window.addEventListener("appinstalled",function(){deferredInstall=null;standalone=true;fillInstall();});
+  if("serviceWorker" in navigator){window.addEventListener("load",function(){try{navigator.serviceWorker.register("/sw.js").catch(function(){});}catch(e){}});}
+  function installHelp(){
+    if(framed) return 'Эта страница встроена в другой сайт — установить её отсюда нельзя. Открой приложение отдельно и добавь уже оттуда.<a class="btn" style="margin-top:12px" href="'+esc(location.origin+"/")+'" target="_blank" rel="noopener">Открыть приложение</a>';
+    if(isIOS&&inApp) return 'Сейчас страница открыта внутри другого приложения (Telegram и т.п.), здесь нет кнопки «На экран Домой». Открой её в Safari: нажми «⋯» → «Открыть в Safari» и повтори.';
+    if(isIOS) return '1. Нажми «Поделиться» — квадрат со стрелкой вверх внизу экрана Safari.<br>2. Прокрути список и выбери пункт «На экран Домой».<br>3. Нажми «Добавить». Иконка появится на главном экране.';
+    if(inApp) return 'Сейчас страница открыта внутри другого приложения. Открой её в Chrome: нажми «⋮» → «Открыть в браузере», потом повтори.';
+    return 'Открой меню браузера («⋮» или «⋯») и выбери «Добавить на главный экран» или «Установить приложение».';
+  }
+  function installCard(){
+    var hidden=parseInt(ls("pwa_x")||"0",10);
+    if(standalone||(hidden&&Date.now()-hidden<14*864e5)) return "";
+    var btn=framed?'<a class="btn" href="'+esc(location.origin+"/")+'" target="_blank" rel="noopener">Открыть</a>':'<button class="btn" data-install="t">'+(deferredInstall?"Установить":"Как?")+'</button>';
+    return '<div class="card install"><div class="t"><strong>📲 На главный экран</strong>Откроется как приложение — всегда под рукой.</div>'+btn+'<button class="x" data-install-close="1" aria-label="Скрыть">✕</button></div><div id="install-help"></div>';
+  }
+  function fillInstall(){
+    var top=document.getElementById("install-top"), bot=document.getElementById("install-bottom");
+    if(top) top.innerHTML=installCard();
+    if(bot) bot.innerHTML=standalone?"":'<button class="btn ghost" data-install="b">📲 Добавить на главный экран</button><div id="install-help-b"></div>';
+  }
+  function showInstallHelp(where){
+    var box=document.getElementById(where==="b"?"install-help-b":"install-help");
+    if(box) box.innerHTML='<div class="card install-help">'+installHelp()+'</div>';
+  }
+  function doInstall(where){
+    if(deferredInstall){
+      var p=deferredInstall;deferredInstall=null;
+      // prompt() возвращает Promise и может отказать (не жест пользователя, событие уже использовано) —
+      // в этом случае вместо тишины показываем текстовую подсказку
+      var fallback=function(){fillInstall();showInstallHelp(where);};
+      try{
+        Promise.resolve(p.prompt()).then(function(){return p.userChoice;})
+          .then(function(c){if(c&&c.outcome==="accepted")standalone=true;fillInstall();}).catch(fallback);
+        return;
+      }catch(e){fallback();return;}
+    }
+    showInstallHelp(where);
+  }
+
+  // ---- устройство (без регистрации): код хранится в браузере ----
+  function ensureDevice(force){
+    dev=force?"":(ls("dev")||"");
+    if(dev) return Promise.resolve();
+    return fetch("/api/device",{method:"POST"}).then(function(r){if(!r.ok)throw new Error("Не удалось подключиться");return r.json();}).then(function(j){dev=j.device;ls("dev",dev);});
+  }
+  function call(method,path,body,retry){
+    var o={method:method,headers:{"X-Device":dev}};
+    if(body){o.headers["Content-Type"]="application/json";o.body=JSON.stringify(body);}
+    return fetch(path,o).then(function(r){
+      if(r.status===401&&!retry) return ensureDevice(true).then(function(){return call(method,path,body,true);});
+      if(!r.ok) return r.json().catch(function(){return {};}).then(function(j){var e=new Error(typeof j.detail==="string"&&j.detail!=="device"?j.detail:("Ошибка "+r.status));e.status=r.status;throw e;});
+      return r.json();
+    });
+  }
+  function runJob(start,label){
+    main.innerHTML='<div class="card progress"><div class="spin"></div><div>'+esc(label)+'</div><div class="sub">Обычно 20–60 секунд. Не закрывай страницу.</div></div>';
+    return start.then(function(j){
+      function poll(n){return sleep(2000).then(function(){return call("GET","/api/job/"+j.job);}).then(function(s){
+        if(s.status==="done")return s.result; if(s.status==="error")throw new Error(s.error||"Не получилось"); if(n>150)throw new Error("Слишком долго, попробуй ещё раз"); return poll(n+1);});}
+      return poll(0);
+    });
+  }
+
+  // ---- реклама (баннеры задаются в /admin) ----
+  function adSlot(slot){
+    var id="ad-"+slot+"-"+Math.random().toString(36).slice(2,7);
+    setTimeout(function(){
+      fetch("/api/ad?slot="+slot,{headers:{"X-Device":dev}}).then(function(r){return r.json();}).then(function(j){
+        var el=document.getElementById(id); if(!el||!j.ad) return;
+        el.innerHTML='<a class="ad" href="'+esc(j.ad.go)+'" target="_blank" rel="sponsored noopener"><img src="'+esc(j.ad.image)+'" alt="'+esc(j.ad.title)+'" loading="lazy"><small>Реклама</small></a>';
+      }).catch(function(){});
+    },0);
+    return '<div id="'+id+'"></div>';
+  }
+
+  // ---- разметка ----
+  function accordion(title,sub,badge,body,open){
+    return '<div class="card acc'+(open?' open':'')+'"><button class="acc-head" aria-expanded="'+(!!open)+'"><span class="acc-title">'+title+(sub?'<small>'+sub+'</small>':'')+'</span>'+(badge||'')+'<span class="chev" aria-hidden="true">▶</span></button><div class="acc-body">'+body+'</div></div>';
+  }
+  function recipeHTML(text){
+    var out=[],plain=[];
+    function flush(){if(plain.length){out.push('<div class="recipe">'+esc(plain.join("\n"))+'</div>');plain=[];}}
+    String(text).split("\n").forEach(function(l){ if(/^\s*\d+[.)]\s+/.test(l)){flush();out.push('<label class="step"><input type="checkbox"><span>'+esc(l.trim())+'</span></label>');} else plain.push(l);});
+    flush();return out.join("");
+  }
+  window.__r={};
+  function actions(title,text,noSave){
+    var id="r"+Math.random().toString(36).slice(2,8); window.__r[id]={title:title,text:text};
+    return '<div class="row"><button class="btn" data-pdf="'+id+'">📄 Скачать PDF</button>'+(noSave?'':'<button class="btn ghost" data-save="'+id+'">⭐ Сохранить</button>')+'</div>'+
+      ('wakeLock' in navigator?'<label class="toggle"><input type="checkbox" class="k-wake"> Не гасить экран, пока готовлю</label>':'');
+  }
+
+  // ---- PDF: настоящий файл с сервера (чтобы рецепт не потерялся); если сервер не смог — диалог печати ----
+  function fileName(s){return (String(s||"").replace(/[\\\/:*?"<>|\u0000-\u001f]+/g," ").trim().slice(0,80)||"recipe")+".pdf";}
+  function printFallback(items){
+    document.getElementById("print-area").textContent=items.map(function(i){return i.title+"\n\n"+i.text;}).join("\n\n\n");
+    window.print();
+  }
+  function exportPdf(items,name,btn,retry){
+    if(btn&&!retry){btn.setAttribute("data-label",btn.textContent);btn.disabled=true;btn.textContent="⏳ Готовлю PDF…";}
+    var restore=function(){if(btn){btn.disabled=false;btn.textContent=btn.getAttribute("data-label")||btn.textContent;}};
+    return fetch("/api/pdf",{method:"POST",headers:{"X-Device":dev,"Content-Type":"application/json"},body:JSON.stringify({items:items,name:name})}).then(function(r){
+      if(r.status===401&&!retry) return ensureDevice(true).then(function(){return exportPdf(items,name,btn,true);});
+      if(!r.ok) throw new Error("pdf "+r.status);
+      return r.blob().then(function(blob){
+        var fname=fileName(name), file=null;
+        try{file=new File([blob],fname,{type:"application/pdf"});}catch(e){}
+        // iPhone в режиме приложения: ссылка-скачивание открыла бы PDF без кнопки «назад» — отдаём через «Поделиться»
+        if(file&&isIOS&&standalone&&navigator.canShare&&navigator.canShare({files:[file]})) return navigator.share({files:[file],title:name}).catch(function(){});
+        var url=URL.createObjectURL(blob),a=document.createElement("a");
+        a.href=url;a.download=fname;document.body.appendChild(a);a.click();a.remove();
+        setTimeout(function(){URL.revokeObjectURL(url);},15000);
+      }).then(restore);
+    }).catch(function(){restore();printFallback(items);});
+  }
+  function shoppingHTML(items,title){
+    if(!items||!items.length) return "";
+    var h="";items.forEach(function(it){h+='<div class="item"><strong>'+esc(it.name)+'</strong>'+(it.amount?' — '+esc(it.amount):'')+'<div class="links">'+it.links.map(function(l){return '<a href="'+esc(l.url)+'" target="_blank" rel="noopener">'+esc(l.store)+'</a>';}).join("")+'</div></div>';});
+    return accordion("🛒 "+(title||"Где купить продукты"),"ссылки на поиск в магазинах","",h,false);
+  }
+  function fail(e,back){
+    main.innerHTML='<div class="card err">'+esc(errText(e))+'</div><button class="btn ghost" id="retry">'+(back?"Назад":"Повторить")+'</button>';
+    document.getElementById("retry").onclick=function(){show(back||cur);};
+  }
+  function cacheFavs(){call("GET","/api/favorites").then(function(d){ls("favcache",JSON.stringify(d.items));}).catch(function(){});}
+
+  // ---- вкладка «Создать» ----
+  var F={mode:"recipe",cuisine:"classic",meals:["breakfast","lunch","dinner"],time:"Не важно",servings:2,appliance:["stove"]};
+  function chips(list,sel,name,multi){return '<div class="chips" data-name="'+name+'" data-multi="'+(multi?1:0)+'">'+list.map(function(x){var on=multi?sel.indexOf(x.key)>=0:sel===x.key;return '<button class="chip" data-key="'+esc(x.key)+'" aria-pressed="'+on+'">'+esc(x.label)+'</button>';}).join("")+'</div>';}
+  function viewNew(){
+    var m=META, times=["15 мин","30 мин","45 мин","60 мин","Не важно"].map(function(x){return {key:x,label:x};}), sv=[1,2,3,4,5,6].map(function(x){return {key:String(x),label:String(x)};});
+    var h='<h1>Что приготовим?</h1><p class="sub">Ответь на несколько вопросов — подберу рецепт, посчитаю калории и покажу, где купить продукты.</p><div id="install-top"></div>'+adSlot("top");
+    h+='<div class="seg" data-name="mode">'+[["recipe","Рецепт"],["day","Меню на день"],["week","План на "+m.week_days+" дня"]].map(function(x){return '<button class="chip" data-key="'+x[0]+'" aria-pressed="'+(F.mode===x[0])+'">'+x[1]+'</button>';}).join("")+'</div>';
+    h+='<label class="f">Тип питания</label>'+chips(m.cuisines,F.cuisine,"cuisine",false);
+    if(F.cuisine==="macro_goal") h+='<label class="f" for="macro">Цель по КБЖУ</label><input type="text" id="macro" maxlength="200" placeholder="500 ккал, белки 40 г" value="'+esc(F.macro||"")+'">';
+    if(F.mode!=="recipe") h+='<label class="f">Приёмы пищи</label>'+chips(m.meals,F.meals,"meals",true);
+    h+='<label class="f" for="pref">Что использовать или какое блюдо хочется</label><input type="text" id="pref" maxlength="300" placeholder="курица, рис или «хочу плов»" value="'+esc(F.pref||"")+'">';
+    h+='<label class="f" for="exc">Что исключить</label><input type="text" id="exc" maxlength="300" placeholder="орехи, грибы, лук" value="'+esc(F.exc||"")+'">';
+    h+='<label class="f">Время на готовку</label>'+chips(times,F.time,"time",false);
+    h+='<label class="f">Порций</label>'+chips(sv,String(F.servings),"servings",false);
+    h+='<label class="f">В чём готовим</label>'+chips(m.appliances,F.appliance,"appliance",true);
+    h+='<button class="btn" id="go">🔍 Подобрать</button><p class="sub" style="margin-top:10px">Лимит: '+m.limit+' подборов в сутки на устройство.</p><div class="install-bottom" id="install-bottom"></div>';
+    main.innerHTML=h;
+    fillInstall();
+  }
+  function saveText(){var g=function(i){var e=document.getElementById(i);return e?e.value:"";};if(document.getElementById("pref")){F.pref=g("pref");F.exc=g("exc");F.macro=g("macro");}}
+  function submitNew(){
+    saveText();
+    var body={cuisine:F.cuisine,macro_goal:F.cuisine==="macro_goal"?(F.macro||""):"",preferred:F.pref||"",excluded:F.exc||"",time:F.time,servings:F.servings,appliance:F.appliance,meals:F.meals};
+    if(!body.appliance.length){alert("Выбери, в чём готовить");return;}
+    if(F.mode!=="recipe"&&!body.meals.length){alert("Выбери хотя бы один приём пищи");return;}
+    var path={recipe:"/api/recipe",day:"/api/daymenu",week:"/api/week"}[F.mode];
+    var label={recipe:"Ищу рецепты и подбираю лучший…",day:"Собираю меню на день…",week:"Считаю корзину и план…"}[F.mode];
+    runJob(call("POST",path,body),label).then(function(res){
+      if(F.mode==="recipe"){
+        main.innerHTML='<h1>'+esc(res.title)+'</h1><div class="card" style="padding:4px 16px 16px">'+recipeHTML(res.text)+actions(res.title,res.text)+'</div>'+shoppingHTML(res.shopping)+adSlot("inline")+'<button class="btn ghost" id="again">🍳 Подобрать ещё</button>';
+        document.getElementById("again").onclick=function(){show("new");};
+        window.scrollTo(0,0);
+      } else { ls("sub",F.mode); show("menus"); }
+    }).catch(function(e){fail(e,"new");});
+  }
+
+  // ---- вкладка «Готовые меню» ----
+  function viewMenus(){
+    return call("GET","/api/overview").then(function(o){
+      if(!o.has_day&&!o.has_week) return '<h1>Готовые меню</h1><div class="card empty">Пока пусто. Собери меню на день или план на несколько дней во вкладке «Создать».</div>';
+      var sub=ls("sub"); if(sub!=="day"&&sub!=="week") sub=o.has_week?"week":"day"; if(sub==="day"&&!o.has_day)sub="week"; if(sub==="week"&&!o.has_week)sub="day";
+      var head='<h1>Готовые меню</h1><div class="seg">'+(o.has_day?'<button class="chip" data-sub="day" aria-pressed="'+(sub==="day")+'">На день</button>':'')+(o.has_week?'<button class="chip" data-sub="week" aria-pressed="'+(sub==="week")+'">План на несколько дней</button>':'')+'</div>';
+      return (sub==="day"?viewDay():viewWeek()).then(function(h){return head+h;});
+    });
+  }
+  // кнопка «всё одним PDF»: items хранятся в window.__r, как и у одиночных рецептов
+  function bulkButton(label,items,name){
+    var id="a"+Math.random().toString(36).slice(2,8); window.__r[id]={items:items,name:name};
+    return '<button class="btn" data-pdfall="'+id+'">'+label+'</button>';
+  }
+  function viewDay(){return call("GET","/api/day").then(function(d){
+    var items=d.meals.map(function(x){return {title:x.label+": "+x.title,text:x.text};});
+    if(d.shopping&&d.shopping.length) items.push({title:"Список покупок",text:d.shopping.map(function(s){return "- "+s.name;}).join("\n")});
+    var h=bulkButton("📄 Всё меню — одним PDF",items,"Меню на день")+'<div style="height:12px"></div>';
+    d.meals.forEach(function(x){h+=accordion(esc(x.label),esc(x.title),"",recipeHTML(x.text)+actions(x.title,x.text),false);});
+    return h+shoppingHTML(d.shopping,"Продукты на день")+adSlot("inline");});}
+  function viewWeek(){return call("GET","/api/week").then(function(w){
+    var h="",pdfItems=[],adv=(w.basket&&w.basket.advice)||"";
+    if(adv) pdfItems.push({title:"Корзина и хранение продуктов",text:adv});
+    w.days.forEach(function(day){day.meals.forEach(function(ml){pdfItems.push({title:"День "+day.day+" · "+ml.label+": "+ml.title,text:ml.text});});});
+    h+=bulkButton("📄 Весь план — одним PDF",pdfItems,"План питания")+'<div style="height:12px"></div>';
+    w.days.forEach(function(day){
+      var all=day.done_count===day.total;
+      var badge=all?'<span class="badge">✅</span>':day.generated?'<span class="badge">'+day.done_count+'/'+day.total+'</span>':day.is_next?'<span class="badge new">новый</span>':'<span class="badge">🔒</span>';
+      var body="";
+      if(!day.generated) body=day.is_next?'<button class="btn" data-cook="1">🍳 Приготовить меню дня '+day.day+'</button>':'<p class="empty">Откроется после предыдущего дня.</p>';
+      day.meals.forEach(function(ml){body+=accordion((ml.done?'✅ ':'')+esc(ml.label),esc(ml.title),"",recipeHTML(ml.text)+actions(ml.title,ml.text)+(ml.done?'':'<button class="btn" data-done="'+ml.index+'">✅ Приготовил</button>'),false);});
+      if(day.extra_shopping&&day.extra_shopping.length) body+=shoppingHTML(day.extra_shopping,"Докупить к этому дню");
+      h+=accordion("День "+day.day,"",badge,body,day.is_next||(day.generated&&!all));
+    });
+    var b=w.basket,inner=b.priced_text?'<div class="recipe">'+esc(b.priced_text)+'</div>':"";
+    b.items.forEach(function(it){inner+='<div class="item"><strong>'+esc(it.name)+'</strong> — '+esc(it.amount)+'<div class="links">'+it.links.map(function(l){return '<a href="'+esc(l.url)+'" target="_blank" rel="noopener">'+esc(l.store)+'</a>';}).join("")+'</div></div>';});
+    var ti=adv.indexOf("💡"),tips=ti>=0?adv.slice(ti).replace(/\*/g,""):"";
+    return h+accordion("🛒 Корзина на весь план","продукты и магазины","",inner,false)+
+      (tips?accordion("💡 Хранение и разморозка","как не испортить продукты","",'<div class="recipe">'+esc(tips)+'</div>',false):"")+adSlot("inline");});}
+
+  // ---- вкладка «Избранное» ----
+  function viewFavs(){
+    return call("GET","/api/favorites").then(function(d){ls("favcache",JSON.stringify(d.items));return d.items;},function(){try{return JSON.parse(ls("favcache")||"[]");}catch(e){return [];}}).then(function(items){
+      if(!items.length) return '<h1>Избранное</h1><div class="card empty">Пока пусто. Нажми «⭐ Сохранить» под понравившимся рецептом — он останется на этом устройстве, регистрация не нужна.</div>';
+      var h='<h1>Избранное</h1><p class="sub">Хранится в этом браузере. Если очистить данные браузера, список пропадёт — чтобы не потерять, скачай PDF.</p>';
+      h+=bulkButton("📄 Всё избранное — одним PDF",items.map(function(f){return {title:f.title,text:f.text};}),"Избранные рецепты")+'<div style="height:12px"></div>';
+      items.forEach(function(f){h+=accordion(esc(f.title),"","",recipeHTML(f.text)+actions(f.title,f.text,true)+'<button class="btn ghost" data-del="'+esc(f.id)+'">🗑 Удалить</button>',false);});
+      return h;});
+  }
+
+  var VIEWS={menus:viewMenus,favs:viewFavs};
+  function show(tab){
+    cur=tab;ls("tab",tab);
+    Array.prototype.forEach.call(document.querySelectorAll(".tab"),function(t){t.setAttribute("aria-selected",t.getAttribute("data-tab")===tab);});
+    if(tab==="new"){viewNew();window.scrollTo(0,0);return;}
+    main.innerHTML='<div class="skeleton"></div><div class="skeleton"></div><div class="skeleton"></div>';
+    Promise.resolve(VIEWS[tab]()).then(function(h){main.innerHTML=h;window.scrollTo(0,0);}).catch(fail);
+  }
+
+  // ---- единый обработчик кликов ----
+  document.addEventListener("click",function(ev){
+    var t=ev.target; if(!t.closest) return; var b;
+    if(b=t.closest(".acc-head")){var c=b.parentNode,o=c.classList.toggle("open");b.setAttribute("aria-expanded",o);return;}
+    if(b=t.closest(".step")){b.classList.toggle("checked",b.querySelector("input").checked);return;}
+    if(b=t.closest(".k-wake")){ if(b.checked){navigator.wakeLock.request("screen").then(function(l){wake=l;}).catch(function(){b.checked=false;});} else if(wake){wake.release();wake=null;} return;}
+    if(b=t.closest(".tab")){show(b.getAttribute("data-tab"));return;}
+    if(b=t.closest(".chip")){
+      if(b.hasAttribute("data-sub")){ls("sub",b.getAttribute("data-sub"));show("menus");return;}
+      var box=b.parentNode,name=box.getAttribute("data-name"); if(!name) return;
+      saveText(); var k=b.getAttribute("data-key"),multi=box.getAttribute("data-multi")==="1";
+      if(multi){var a=F[name],i=a.indexOf(k);if(i>=0)a.splice(i,1);else a.push(k);} else F[name]=(name==="servings")?parseInt(k,10):k;
+      viewNew();return;
+    }
+    if(t.id==="go"){submitNew();return;}
+    if(b=t.closest("[data-save]")){var r=window.__r[b.getAttribute("data-save")];b.disabled=true;call("POST","/api/favorites",{title:r.title,text:r.text}).then(function(){b.textContent="✅ Сохранено";cacheFavs();}).catch(function(e){b.disabled=false;alert(e.message);});return;}
+    if(b=t.closest("[data-pdf]")){var r2=window.__r[b.getAttribute("data-pdf")];exportPdf([{title:r2.title,text:r2.text}],r2.title,b);return;}
+    if(b=t.closest("[data-pdfall]")){var r3=window.__r[b.getAttribute("data-pdfall")];exportPdf(r3.items,r3.name,b);return;}
+    if(b=t.closest("[data-install]")){doInstall(b.getAttribute("data-install"));return;}
+    if(b=t.closest("[data-install-close]")){ls("pwa_x",String(Date.now()));fillInstall();return;}
+    if(b=t.closest("[data-done]")){b.disabled=true;call("POST","/api/week/done/"+b.getAttribute("data-done")).then(function(){show("menus");}).catch(fail);return;}
+    if(b=t.closest("[data-del]")){if(confirm("Удалить из избранного?"))call("DELETE","/api/favorites/"+b.getAttribute("data-del")).then(function(){cacheFavs();show("favs");}).catch(fail);return;}
+    if(b=t.closest("[data-cook]")){runJob(call("POST","/api/week/cook"),"Готовлю меню на день…").then(function(){show("menus");}).catch(function(e){fail(e,"menus");});return;}
+  });
+
+  // без интернета берём справочник из кэша — тогда хотя бы «Избранное» откроется
+  ensureDevice().then(function(){return fetch("/api/meta").then(function(r){if(!r.ok)throw new Error("meta "+r.status);return r.json();});})
+    .then(function(m){ls("metacache",JSON.stringify(m));return m;})
+    .catch(function(e){var c=ls("metacache");if(c){try{return JSON.parse(c);}catch(x){}}throw e;})
+    .then(function(m){
+      META=m; call("POST","/api/visit").catch(function(){}); show("new");
+    }).catch(function(e){main.innerHTML='<div class="card err">'+esc(errText(e))+'</div>';});
+})();
+</script>
+</body>
+</html>

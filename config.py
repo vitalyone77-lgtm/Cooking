@@ -46,3 +46,41 @@ REMINDER_ENABLED = os.getenv("REMINDER_ENABLED", "true").lower() == "true"
 REMINDER_HOUR = int(os.getenv("REMINDER_HOUR", "14"))
 REMINDER_MINUTE = int(os.getenv("REMINDER_MINUTE", "0"))
 REMINDER_TIMEZONE = os.getenv("REMINDER_TIMEZONE", "Europe/Moscow")
+
+# ---------------------------------------------------------------------------
+# Магазины (пакет stores/)
+# ---------------------------------------------------------------------------
+# Шаблоны ссылок на поиск товара в магазине. {q} — url-кодированный запрос.
+# Ссылки на Лавку и Купер НЕ проверены (сайты закрыты от автоматических запросов) —
+# если ссылка не открывает поиск, поправь шаблон здесь или через .env, код менять не нужно.
+STORE_URL_FIVEKA = os.getenv("STORE_URL_FIVEKA", "https://5ka.ru/search/?text={q}")
+STORE_URL_VKUSVILL = os.getenv("STORE_URL_VKUSVILL", "https://vkusvill.ru/search/?q={q}")
+STORE_URL_LAVKA = os.getenv("STORE_URL_LAVKA", "https://lavka.yandex.ru/search?text={q}")
+STORE_URL_KUPER = os.getenv("STORE_URL_KUPER", "https://kuper.ru/search?keywords={q}")
+
+# ВкусВилл: официальный (экспериментальный) MCP-сервер — единственный магазин, у которого
+# бот получает реальные цены и собирает ссылку-корзину. Без ключей.
+VKUSVILL_PRICES_ENABLED = os.getenv("VKUSVILL_PRICES_ENABLED", "true").lower() == "true"
+VKUSVILL_MCP_URLS = [
+    u.strip() for u in os.getenv(
+        "VKUSVILL_MCP_URL", "https://mcp.vkusvill.ru/mcp,https://mcp001.vkusvill.ru/mcp"
+    ).split(",") if u.strip()
+]
+VKUSVILL_MCP_API_KEY = os.getenv("VKUSVILL_MCP_API_KEY", "")
+# Общий лимит времени на подсчёт цен корзины (секунды) — дальше показываем только ссылки
+STORE_PRICES_TIMEOUT = float(os.getenv("STORE_PRICES_TIMEOUT", "40"))
+
+# ---------------------------------------------------------------------------
+# Веб-версия (web_api.py + web/index.html) — работает на своём поддомене, см. DEPLOY_WEB.md
+# ---------------------------------------------------------------------------
+WEB_SECRET = os.getenv("WEB_SECRET", "")               # подпись cookie админки (/admin)
+WEB_APP_URL = os.getenv("WEB_APP_URL", "")             # например https://menu.pump-um.ru
+# УСТАРЕЛО (схема «страница на Тильде + API») — нигде не используется, можно удалить из .env
+WEB_ALLOWED_ORIGINS = [
+    o.strip() for o in os.getenv("WEB_ALLOWED_ORIGINS", WEB_APP_URL).split(",") if o.strip()
+]
+
+# Автономная веб-версия (web_api.py отдаёт и страницу, и API)
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "")            # пароль входа в /admin
+WEB_DAILY_LIMIT = int(os.getenv("WEB_DAILY_LIMIT", "12"))   # генераций в сутки на одно устройство
+WEB_DATA_DIR = os.getenv("WEB_DATA_DIR", "web_data")        # база и данные веба (отдельно от бота)

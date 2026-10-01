@@ -11,10 +11,11 @@ import logging
 from aiogram import Bot, Dispatcher, F
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
-from aiogram.filters import CommandStart
+from aiogram.exceptions import TelegramBadRequest
+from aiogram.filters import CommandStart, Command, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.types import Message, CallbackQuery
+from aiogram.types import Message, CallbackQuery, BotCommand
 
 import config
 import keyboards as kb
@@ -29,6 +30,8 @@ from storage import save_last_request
 from reminders import setup_scheduler
 from favorites import add_favorite, get_favorites, get_favorite, remove_favorite, search_favorites
 from last_recipe import set_last_recipe, get_last_recipe
+from stores import prefs as store_prefs
+from stores.basket import build_priced_basket
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -44,112 +47,213 @@ bot = Bot(token=config.BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseM
 dp = Dispatcher(storage=MemoryStorage())
 
 
-# ---------- Старт анкеты ----------
+# ---------- Вспомогательное ----------
+
+HELP_TEXT = (
+    "❓ *Справка*\n\n"
+    "Я помогаю решить, что приготовить: подбираю рецепт, считаю калории и продукты, "
+    "показываю, где их купить.\n\n"
+    "*Внизу три кнопки (они всегда на месте):*\n"
+    "📋 *Показать меню* — выбрать тип питания и получить рецепт, собрать меню на день или на "
+    f"{config.WEEK_MENU_DAYS} дня, открыть избранное.\n"
+    "🗂 *Готовые меню* — открыть уже собранное меню на день и план на несколько дней.\n"
+    "❓ *Справка* — этот текст.\n\n"
+    "*Команды:* /menu — меню, /ready — готовые меню, /stores — выбор магазинов, "
+    "/app — веб-версия для телефона, /help — справка.\n\n"
+    "Каждый день в 14:00 я напоминаю о новом блюде. Если что-то зависло — /start."
+)
+
+
+async def answer_long(message: Message, text: str, reply_markup=None, **kwargs):
+    """Отправляет длинный текст частями (лимит Telegram — 4096 символов), разметка — на последней."""
+    limit = 3900
+    parts, buf = [], ""
+    for para in text.split("\n"):
+        if len(buf) + len(para) + 1 > limit and buf:
+            parts.append(buf)
+            buf = ""
+        buf += (("\n" if buf else "") + para)[:limit]
+    if buf:
+        parts.append(buf)
+    for i, part in enumerate(parts):
+        last = i == len(parts) - 1
+        markup = reply_markup if last else None
+        try:
+            await message.answer(part, reply_markup=markup, **kwargs)
+        except TelegramBadRequest:
+            # Сломалась Markdown-разметка (например, «_» или «*» в названии товара) — шлём без неё
+            await message.answer(part, reply_markup=markup, parse_mode=None, **kwargs)
+
+
+async def show_main_menu(message: Message, state: FSMContext, intro: str = "Что готовим? Выбери тип питания/кухни:"):
+    await state.clear()
+    await message.answer(intro, reply_markup=kb.cuisine_kb())
+    await state.set_state(RecipeForm.cuisine)
+
+
+async def show_ready_menus(message: Message, state: FSMContext):
+    """
+    Средняя кнопка нижнего меню: открывает ГОТОВЫЕ меню. Если есть только одно (дневное или
+    на несколько дней) — открывает его сразу; если оба — даёт выбор; если ни одного — предлагает собрать.
+    """
+    await state.clear()
+    chat_id = message.chat.id
+    has_day = day_menu.has_menu(chat_id)
+    has_week = week_menu.has_plan(chat_id)
+    if has_day and not has_week:
+        text, markup = day_menu.build_summary_view(chat_id)
+        await message.answer(text, reply_markup=markup)
+    elif has_week and not has_day:
+        text, markup = week_menu.build_status_view(chat_id)
+        await message.answer(text, reply_markup=markup)
+    else:
+        title = "🗂 Готовые меню — что открыть?" if has_day else "🗂 Готовых меню пока нет. Собрать?"
+        await message.answer(title, reply_markup=kb.ready_hub_kb(has_day, has_week, config.WEEK_MENU_DAYS))
+
+
+# ---------- Старт ----------
 
 @dp.message(CommandStart())
 async def cmd_start(message: Message, state: FSMContext):
     await state.clear()
     # Reply-клавиатура и инлайн-клавиатура — разные типы reply_markup, за один вызов
     # можно прикрепить только один, поэтому нижнее меню отправляем отдельным сообщением.
-    await message.answer("Меню открыто внизу ⌨️ — доступно в любой момент.", reply_markup=kb.main_reply_kb())
     await message.answer(
-        "Привет! 👋 Я помогу подобрать рецепт под твои предпочтения.\n\n"
-        "Для начала выбери тип питания/кухни:",
-        reply_markup=kb.cuisine_kb(),
+        "Привет! 👋 Я кухонный помощник. Внизу — постоянные кнопки: "
+        "«Показать меню», «Готовые меню» и «Справка».",
+        reply_markup=kb.main_reply_kb(),
     )
-    await state.set_state(RecipeForm.cuisine)
+    await show_main_menu(message, state, "Для начала выбери тип питания/кухни:")
+
+
+@dp.message(Command("menu"))
+async def cmd_menu(message: Message, state: FSMContext):
+    await show_main_menu(message, state)
+
+
+@dp.message(Command("ready"))
+async def cmd_ready(message: Message, state: FSMContext):
+    await show_ready_menus(message, state)
+
+
+@dp.message(Command("help"))
+async def cmd_help(message: Message, state: FSMContext):
+    await state.clear()
+    await message.answer(HELP_TEXT, reply_markup=kb.main_reply_kb())
+
+
+@dp.message(Command("stores"))
+async def cmd_stores(message: Message):
+    await message.answer(STORES_TEXT, reply_markup=kb.stores_kb(store_prefs.get_enabled(message.chat.id)))
+
+
+@dp.message(Command("app"))
+async def cmd_app(message: Message):
+    if not config.WEB_APP_URL:
+        await message.answer("Веб-версия пока не настроена (нужен WEB_APP_URL в .env).")
+        return
+    await message.answer(
+        "🌐 Веб-версия работает отдельно от Telegram, регистрация не нужна:\n"
+        f"{config.WEB_APP_URL}\n\nОткрой на телефоне и добавь на главный экран."
+    )
 
 
 @dp.callback_query(F.data == "confirm:restart")
 async def restart(callback: CallbackQuery, state: FSMContext):
-    await state.clear()
-    await callback.message.answer(
-        "Хорошо, начнём заново! Выбери тип питания/кухни:",
-        reply_markup=kb.cuisine_kb(),
-    )
-    await state.set_state(RecipeForm.cuisine)
+    await show_main_menu(callback.message, state, "Хорошо, начнём заново! Выбери тип питания/кухни:")
+    await callback.answer()
+
+
+@dp.callback_query(F.data == "menu:open")
+async def menu_open(callback: CallbackQuery, state: FSMContext):
+    await show_main_menu(callback.message, state)
+    await callback.answer()
+
+
+@dp.callback_query(F.data == "help:open")
+async def help_open(callback: CallbackQuery):
+    await callback.message.answer(HELP_TEXT)
+    await callback.answer()
+
+
+# ---------- Магазины ----------
+
+STORES_TEXT = (
+    "🏪 *Магазины*\nОтметь, в каких магазинах показывать ссылки на поиск продуктов. "
+    "Для ВкусВилла дополнительно считаю корзину с ценами (если сервис доступен)."
+)
+
+
+@dp.callback_query(F.data == "stores:open")
+async def stores_open(callback: CallbackQuery):
+    await callback.message.answer(STORES_TEXT, reply_markup=kb.stores_kb(store_prefs.get_enabled(callback.message.chat.id)))
+    await callback.answer()
+
+
+@dp.callback_query(F.data.startswith("stores:toggle:"))
+async def stores_toggle(callback: CallbackQuery):
+    enabled = store_prefs.toggle(callback.message.chat.id, callback.data.split(":", 2)[2])
+    await callback.message.edit_reply_markup(reply_markup=kb.stores_kb(enabled))
     await callback.answer()
 
 
 # ---------- Постоянное нижнее меню (reply-keyboard) ----------
 # Зарегистрированы раньше остальных message-хэндлеров, чтобы иметь приоритет: даже если
-# пользователь сейчас в середине анкеты (ждём текст для preferred/excluded/...), нажатие
-# кнопки нижнего меню должно перехватывать управление, а не восприниматься как ответ на
-# текущий шаг анкеты.
+# пользователь сейчас в середине анкеты, нажатие кнопки нижнего меню перехватывает управление.
 
-@dp.message(F.text == kb.BTN_COOK)
-async def menu_btn_cook(message: Message, state: FSMContext):
+@dp.message(F.text == kb.BTN_MENU)
+async def menu_btn_menu(message: Message, state: FSMContext):
+    await show_main_menu(message, state)
+
+
+@dp.message(F.text == kb.BTN_READY)
+async def menu_btn_ready(message: Message, state: FSMContext):
+    await show_ready_menus(message, state)
+
+
+@dp.message(F.text == kb.BTN_HELP)
+async def menu_btn_help(message: Message, state: FSMContext):
     await state.clear()
-    await message.answer("Выбери тип питания/кухни:", reply_markup=kb.cuisine_kb())
-    await state.set_state(RecipeForm.cuisine)
+    await message.answer(HELP_TEXT)
 
 
-@dp.message(F.text == kb.BTN_DAY_MENU)
-async def menu_btn_day_menu(message: Message, state: FSMContext):
-    """
-    Кнопка в ПОСТОЯННОМ нижнем меню открывает ПОСЛЕДНЕЕ уже собранное меню на день
-    (оно хранится на диске, так что доступно даже на следующий день после сборки).
-    Собрать новое меню — через кнопку «📅 Меню на день» в обычном (всплывающем) меню.
-    """
-    await state.clear()
-    view = day_menu.build_summary_view(message.chat.id)
-    if view:
-        text, markup = view
-        await message.answer(text, reply_markup=markup)
-    else:
-        await message.answer(
-            "У тебя пока нет собранного меню на день.",
-            reply_markup=kb.day_menu_missing_kb(),
-        )
-
-
-@dp.message(F.text == kb.BTN_WEEK_MENU)
-async def menu_btn_week_menu(message: Message, state: FSMContext):
-    """
-    Открывает ПОСЛЕДНИЙ НЕ ПРИГОТОВЛЕННЫЙ рецепт плана питания (а не сводку) — так проще
-    продолжить готовить оттуда, где остановился. Собрать новый план — через кнопку
-    «📆 Меню на N дня» во всплывающем меню.
-    """
-    await state.clear()
-    chat_id = message.chat.id
-    if not week_menu.has_plan(chat_id):
-        await message.answer(
-            "У тебя пока нет плана питания на несколько дней.",
-            reply_markup=kb.week_menu_missing_kb(),
-        )
+# Кнопки старых версий: клавиатура могла остаться у пользователя в чате. Обрабатываем и
+# заодно подставляем новую клавиатуру.
+@dp.message(F.text.in_({kb.LEGACY_BTN_COOK, kb.LEGACY_BTN_FAVORITES, kb.LEGACY_BTN_DAY_MENU, kb.LEGACY_BTN_WEEK_MENU}))
+async def legacy_buttons(message: Message, state: FSMContext):
+    await message.answer("Обновил нижнее меню ⌨️", reply_markup=kb.main_reply_kb())
+    if message.text == kb.LEGACY_BTN_FAVORITES:
+        favs = get_favorites(message.chat.id)
+        if favs:
+            await state.clear()
+            await message.answer(f"⭐ Твоё избранное ({len(favs)}):", reply_markup=kb.favorites_list_kb(favs))
+            return
+    if message.text in (kb.LEGACY_BTN_DAY_MENU, kb.LEGACY_BTN_WEEK_MENU):
+        await show_ready_menus(message, state)
         return
+    await show_main_menu(message, state)
 
-    index = week_menu.next_uncooked_index(chat_id)
-    status_msg = await message.answer("⏳ Секунду...")
-    try:
-        slot = await week_menu.ensure_slot(chat_id, index)
-    except Exception as e:
-        logger.exception("Ошибка при открытии текущего дня плана питания")
-        view = week_menu.build_status_view(chat_id)
-        if view:
-            text, markup = view
-            await status_msg.edit_text(text, reply_markup=markup)
-        else:
-            await status_msg.edit_text(f"😔 Не получилось открыть план: {e}")
+
+@dp.callback_query(F.data == "ready:day")
+async def ready_day(callback: CallbackQuery):
+    view = day_menu.build_summary_view(callback.message.chat.id)
+    if not view:
+        await callback.answer("Меню на день не найдено.", show_alert=True)
         return
+    text, markup = view
+    await callback.message.edit_text(text, reply_markup=markup)
+    await callback.answer()
 
-    text, markup = week_menu.build_slot_view(chat_id, slot)
-    await status_msg.edit_text(text, reply_markup=markup)
 
-
-@dp.message(F.text == kb.BTN_FAVORITES)
-async def menu_btn_favorites(message: Message, state: FSMContext):
-    await state.clear()
-    favs = get_favorites(message.chat.id)
-    if favs:
-        await message.answer(f"⭐ Твоё избранное ({len(favs)}):", reply_markup=kb.favorites_list_kb(favs))
-    else:
-        await message.answer(
-            "Пока в избранном пусто. Понравившийся рецепт можно сохранить кнопкой "
-            "«⭐ В избранное» после его получения.",
-            reply_markup=kb.cuisine_kb(),
-        )
-        await state.set_state(RecipeForm.cuisine)
+@dp.callback_query(F.data == "ready:week")
+async def ready_week(callback: CallbackQuery):
+    view = week_menu.build_status_view(callback.message.chat.id)
+    if not view:
+        await callback.answer("План не найден.", show_alert=True)
+        return
+    text, markup = view
+    await callback.message.edit_text(text, reply_markup=markup)
+    await callback.answer()
 
 
 # ---------- Шаг 1: кухня ----------
@@ -350,7 +454,7 @@ async def step_confirm_go(callback: CallbackQuery, state: FSMContext):
         dish_title = extract_dish_title(recipe_text)
         save_last_request(callback.message.chat.id, data, dish_title)
 
-        shopping_message = format_shopping_message(shopping_terms)
+        shopping_message = format_shopping_message(shopping_terms, callback.message.chat.id)
         full_display_text = recipe_text + ("\n\n" + shopping_message if shopping_message else "")
         set_last_recipe(callback.message.chat.id, dish_title, full_display_text, data.get("cuisine"))
     except Exception as e:
@@ -400,7 +504,7 @@ async def dm_step_meals(callback: CallbackQuery, state: FSMContext):
             return
         await state.update_data(meals=list(selected))
         await callback.message.edit_reply_markup()
-        await callback.message.answer("Теперь выбери тип питания/кухни:", reply_markup=kb.cuisine_kb())
+        await callback.message.answer("Теперь выбери тип питания/кухни:", reply_markup=kb.cuisine_kb(with_extras=False))
         await state.set_state(DayMenuForm.cuisine)
         await callback.answer()
         return
@@ -649,7 +753,7 @@ async def wm_step_meals(callback: CallbackQuery, state: FSMContext):
             return
         await state.update_data(meals=list(selected))
         await callback.message.edit_reply_markup()
-        await callback.message.answer("Теперь выбери тип питания/кухни:", reply_markup=kb.cuisine_kb())
+        await callback.message.answer("Теперь выбери тип питания/кухни:", reply_markup=kb.cuisine_kb(with_extras=False))
         await state.set_state(WeekMenuForm.cuisine)
         await callback.answer()
         return
@@ -828,7 +932,9 @@ async def wm_step_confirm_go(callback: CallbackQuery, state: FSMContext):
     chat_id = callback.message.chat.id
 
     try:
-        basket_text = await week_menu.start_week_plan(chat_id, meals, config.WEEK_MENU_DAYS, data)
+        basket_text, shopping_message = await week_menu.start_week_plan(
+            chat_id, meals, config.WEEK_MENU_DAYS, data
+        )
     except Exception as e:
         logger.exception("Ошибка при сборке продуктовой корзины плана питания")
         await status_msg.edit_text(
@@ -839,10 +945,67 @@ async def wm_step_confirm_go(callback: CallbackQuery, state: FSMContext):
         return
 
     await status_msg.delete()
-    await callback.message.answer(basket_text, disable_web_page_preview=True)
+    await answer_long(callback.message, basket_text, disable_web_page_preview=True)
+    if shopping_message:
+        await answer_long(callback.message, shopping_message, disable_web_page_preview=True)
+
+    info = week_menu.get_basket_info(chat_id)
+    if info and config.VKUSVILL_PRICES_ENABLED:
+        price_msg = await callback.message.answer("💰 Считаю стоимость корзины во ВкусВилле...")
+        priced = await build_priced_basket(info["inventory_initial"])
+        if priced:
+            week_menu.save_priced_basket(chat_id, priced)
+            await price_msg.delete()
+            await answer_long(callback.message, priced, disable_web_page_preview=True)
+        else:
+            await price_msg.edit_text("ℹ️ Цены ВкусВилла сейчас недоступны — воспользуйся ссылками выше.")
 
     text, markup = week_menu.build_status_view(chat_id)
     await callback.message.answer(text, reply_markup=markup)
+
+
+async def _maybe_send_day_shopping(callback: CallbackQuery, slot: dict):
+    """Если день только что сгенерирован и в нём есть продукты сверх основной корзины — присылаем ссылки на докупку."""
+    if slot.get("just_generated") and slot.get("shopping_message"):
+        await callback.message.answer(
+            "➕ *К этому дню понадобится докупить:*\n" + slot["shopping_message"],
+            disable_web_page_preview=True,
+        )
+
+
+@dp.callback_query(F.data.startswith("weekmenu:open:"))
+async def weekmenu_open_day(callback: CallbackQuery):
+    """Раскрывает/сворачивает день плана (0 — свернуть всё) правкой того же сообщения."""
+    day = int(callback.data.split(":", 2)[2])
+    view = week_menu.build_status_view(callback.message.chat.id, open_day=day)
+    if not view:
+        await callback.answer("План не найден.", show_alert=True)
+        return
+    text, markup = view
+    await callback.message.edit_text(text, reply_markup=markup)
+    await callback.answer()
+
+
+@dp.callback_query(F.data == "weekmenu:noop")
+async def weekmenu_noop(callback: CallbackQuery):
+    await callback.answer("Сначала приготовь предыдущий день 🙂")
+
+
+@dp.callback_query(F.data == "weekmenu:basket")
+async def weekmenu_basket(callback: CallbackQuery):
+    chat_id = callback.message.chat.id
+    info = week_menu.get_basket_info(chat_id)
+    if not info:
+        await callback.answer("План не найден.", show_alert=True)
+        return
+    await callback.answer()
+    if info["basket_text"]:
+        await answer_long(callback.message, info["basket_text"], disable_web_page_preview=True)
+    links = format_shopping_message(list(info["inventory_initial"].keys()), chat_id)
+    if links:
+        await answer_long(callback.message, links, disable_web_page_preview=True)
+    if info["priced"]:
+        await answer_long(callback.message, info["priced"], disable_web_page_preview=True)
 
 
 @dp.callback_query(F.data == "weekmenu:cook_next")
@@ -866,6 +1029,7 @@ async def weekmenu_cook_next(callback: CallbackQuery):
 
     text, markup = week_menu.build_slot_view(chat_id, slot)
     await callback.message.edit_text(text, reply_markup=markup)
+    await _maybe_send_day_shopping(callback, slot)
 
 
 @dp.callback_query(F.data.startswith("weekmenu:slot:"))
@@ -878,6 +1042,7 @@ async def weekmenu_slot(callback: CallbackQuery):
         return
     text, markup = week_menu.build_slot_view(callback.message.chat.id, slot)
     await callback.message.edit_text(text, reply_markup=markup)
+    await _maybe_send_day_shopping(callback, slot)
     await callback.answer()
 
 
@@ -903,6 +1068,7 @@ async def weekmenu_done(callback: CallbackQuery):
 
     text, markup = week_menu.build_slot_view(chat_id, slot)
     await callback.message.edit_text(text, reply_markup=markup)
+    await _maybe_send_day_shopping(callback, slot)
 
 
 @dp.callback_query(F.data == "weekmenu:status")
@@ -997,6 +1163,16 @@ async def favorite_save(callback: CallbackQuery):
     await callback.answer("Добавлено в избранное ⭐")
 
 
+# ---------- Любой другой текст вне анкеты ----------
+# Должен быть зарегистрирован ПОСЛЕДНИМ. Если человек пишет что-то вне анкеты, возвращаем ему
+# нижнее меню (оно могло пропасть) и главное меню — вместо тишины.
+
+@dp.message(StateFilter(None), F.text)
+async def fallback_text(message: Message, state: FSMContext):
+    await message.answer("Не совсем понял 🙂 Вот меню:", reply_markup=kb.main_reply_kb())
+    await show_main_menu(message, state)
+
+
 # ---------- Запуск ----------
 
 async def main():
@@ -1005,6 +1181,14 @@ async def main():
 
     if config.REMINDER_ENABLED:
         setup_scheduler(bot, dp)
+
+    await bot.set_my_commands([
+        BotCommand(command="menu", description="Показать меню"),
+        BotCommand(command="ready", description="Готовые меню"),
+        BotCommand(command="stores", description="Выбор магазинов"),
+        BotCommand(command="app", description="Веб-версия для телефона"),
+        BotCommand(command="help", description="Справка"),
+    ])
 
     logger.info("Бот запущен")
     await dp.start_polling(bot)

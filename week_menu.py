@@ -39,7 +39,7 @@ from prompts import (
     build_day_menu_user_prompt,
     build_week_day_extra_instructions,
 )
-from shopping import extract_base_products, extract_used_base_products
+from shopping import extract_base_products, extract_used_base_products, format_shopping_message
 
 logger = logging.getLogger(__name__)
 
@@ -90,10 +90,11 @@ def _flat_slots(state: dict) -> list[tuple[int, str]]:
     ]
 
 
-async def start_week_plan(chat_id: int, meal_keys: list[str], days_total: int, base_data: dict) -> str:
+async def start_week_plan(chat_id: int, meal_keys: list[str], days_total: int, base_data: dict) -> tuple[str, str]:
     """
     Считает продуктовую корзину на весь период, сохраняет начальное состояние плана и
-    возвращает человекочитаемый текст (список покупок + советы по хранению) для показа.
+    возвращает (человекочитаемый текст со списком покупок и советами по хранению,
+    сообщение со ссылками на поиск каждого продукта в Пятёрочке).
     """
     meal_labels = [day_menu.meal_label(mk) for mk in meal_keys]
     messages = [
@@ -112,13 +113,15 @@ async def start_week_plan(chat_id: int, meal_keys: list[str], days_total: int, b
         "days_total": days_total,
         "inventory": dict(inventory),
         "inventory_initial": dict(inventory),
+        "basket_text": display_text,
         "history_titles": [],
         "days": {},
         "current_day": 1,
         "progress_index": 0,
     })
 
-    return display_text
+    shopping_message = format_shopping_message(list(inventory.keys()), chat_id)
+    return display_text, shopping_message
 
 
 def _match_inventory_key(inventory: dict, name: str) -> str | None:
@@ -178,12 +181,35 @@ async def _generate_day(chat_id: int, state: dict) -> dict:
             logger.warning(f"Не нашёл '{name}' из ИСПОЛЬЗОВАНО_БАЗОВЫЕ в остатках плана {chat_id}")
 
     day_meals = {r["meal_key"]: {"title": r["title"], "text": r["text"]} for r in meal_results}
-    state["days"][str(day_number)] = {"order": meal_keys, "meals": day_meals}
+    # В ссылки на докупку выносим только то, чего НЕТ в основной корзине (специи/соусы и т.п.,
+    # разовые под конкретное блюдо) — базовые продукты уже получили свою ссылку в списке покупок
+    # при сборке плана, повторять их здесь означало бы дублировать те же ссылки на каждый день.
+    all_terms = _merge_terms(r["shopping_terms"] for r in meal_results)
+    extra_terms = [t for t in all_terms if not _match_inventory_key(state["inventory_initial"], t)]
+    day_shopping_message = format_shopping_message(extra_terms, chat_id)
+    state["days"][str(day_number)] = {
+        "order": meal_keys,
+        "meals": day_meals,
+        "shopping_message": day_shopping_message,
+    }
     state["history_titles"].extend(r["title"] for r in meal_results)
     state["current_day"] = day_number + 1
 
     _save(chat_id, state)
     return state
+
+
+def _merge_terms(term_lists) -> list[str]:
+    """Объединяет продукты из нескольких блюд, убирая повторы (без учёта регистра)."""
+    seen = set()
+    merged = []
+    for terms in term_lists:
+        for term in terms:
+            key = term.strip().lower()
+            if key and key not in seen:
+                seen.add(key)
+                merged.append(term.strip())
+    return merged
 
 
 async def ensure_slot(chat_id: int, index: int) -> dict:
@@ -202,10 +228,12 @@ async def ensure_slot(chat_id: int, index: int) -> dict:
         raise ValueError("индекс слота вне диапазона плана")
 
     day_number, meal_key = slots[index]
+    just_generated = False
     if str(day_number) not in state["days"]:
         if day_number != state["current_day"]:
             raise RuntimeError("нельзя открыть день вне очереди — сначала приготовь предыдущие")
         state = await _generate_day(chat_id, state)
+        just_generated = True
 
     day_entry = state["days"][str(day_number)]
     return {
@@ -214,6 +242,8 @@ async def ensure_slot(chat_id: int, index: int) -> dict:
         "day_number": day_number,
         "days_total": state["days_total"],
         "meal_key": meal_key,
+        "just_generated": just_generated,
+        "shopping_message": day_entry.get("shopping_message", ""),
         "meal": day_entry["meals"][meal_key],
         "is_next_uncooked": index == state["progress_index"],
     }
@@ -251,43 +281,100 @@ def build_slot_view(chat_id: int, slot: dict) -> tuple[str, InlineKeyboardMarkup
         b.button(text="✅ Готово — следующий рецепт", callback_data=f"weekmenu:done:{index}")
     else:
         b.button(text="✅ Готово — план завершён", callback_data=f"weekmenu:done:{index}")
-    b.button(text="⬅️ К плану", callback_data="weekmenu:status")
+    b.button(text="⬅️ К плану", callback_data=f"weekmenu:open:{day_number}")
     b.adjust(2, 1, 1)
     return text, b.as_markup()
 
 
-def build_status_view(chat_id: int) -> tuple[str, InlineKeyboardMarkup] | None:
+def _default_open_day(state: dict) -> int:
+    n = max(1, len(state["meal_keys"]))
+    return min(state["progress_index"] // n + 1, state["days_total"])
+
+
+def build_status_view(chat_id: int, open_day: int | None = None) -> tuple[str, InlineKeyboardMarkup] | None:
+    """
+    План по дням в виде раскрывающегося списка (аккордеон): заголовок каждого дня — кнопка,
+    по нажатию день раскрывается (блюда-кнопки + «Готовить»), остальные сворачиваются.
+    open_day=None — раскрыть день, на котором остановился прогресс; open_day=0 — всё свёрнуто.
+    """
     state = _load(chat_id)
     if not state:
         return None
 
     days_total = state["days_total"]
-    cooked_days = sorted(int(d) for d in state["days"].keys())
-    remaining = [f"{name} — {amount}" for name, amount in state["inventory"].items() if amount > 0]
+    meal_keys = state["meal_keys"]
+    n = len(meal_keys)
+    if open_day is None:
+        open_day = _default_open_day(state)
 
-    lines = [f"📆 План питания на {days_total} дня — приготовлено дней: {len(cooked_days)}/{days_total}"]
+    cooked = min(state["progress_index"], days_total * n)
+    remaining = [f"{name} — {amount}" for name, amount in state["inventory"].items() if amount > 0]
+    lines = [f"📆 План питания на {days_total} дня — приготовлено блюд: {cooked}/{days_total * n}"]
     if remaining:
         lines.append("Остатки продуктов: " + ", ".join(remaining))
     text = "\n".join(lines)
 
     b = InlineKeyboardBuilder()
-    slots = _flat_slots(state)
-    for i, (day_num, meal_key) in enumerate(slots):
-        if day_num not in cooked_days:
-            continue
-        m = state["days"][str(day_num)]["meals"][meal_key]
-        short_title = m["title"] if len(m["title"]) <= 26 else m["title"][:23] + "..."
-        mark = "✅ " if i < state["progress_index"] else ""
-        b.button(
-            text=f"{mark}Д{day_num} {MEAL_LABELS[meal_key]}: {short_title}",
-            callback_data=f"weekmenu:slot:{i}",
-        )
-    if state["current_day"] <= days_total:
-        b.button(text=f"🍳 Готовить день {state['current_day']}", callback_data="weekmenu:cook_next")
-    else:
-        b.button(text="🎉 План завершён — собрать новый", callback_data="weekmenu:start")
+    for day in range(1, days_total + 1):
+        first = (day - 1) * n
+        done_count = max(0, min(n, state["progress_index"] - first))
+        if done_count == n:
+            badge = "✅"
+        elif str(day) in state["days"]:
+            badge = f"{done_count}/{n}"
+        elif day == state["current_day"]:
+            badge = "новый"
+        else:
+            badge = "🔒"
+        is_open = day == open_day
+        arrow = "▼" if is_open else "▶"
+        b.button(text=f"{arrow} День {day} · {badge}",
+                 callback_data=f"weekmenu:open:{0 if is_open else day}")
+        if is_open:
+            if str(day) in state["days"]:
+                for j, meal_key in enumerate(meal_keys):
+                    m = state["days"][str(day)]["meals"][meal_key]
+                    short_title = m["title"] if len(m["title"]) <= 30 else m["title"][:27] + "..."
+                    mark = "✅ " if first + j < state["progress_index"] else ""
+                    b.button(text=f"   {mark}{MEAL_LABELS[meal_key]}: {short_title}",
+                             callback_data=f"weekmenu:slot:{first + j}")
+            elif day == state["current_day"]:
+                b.button(text=f"   🍳 Приготовить меню дня {day}", callback_data="weekmenu:cook_next")
+            else:
+                b.button(text="   🔒 Откроется после предыдущего дня", callback_data="weekmenu:noop")
+    b.button(text="🛒 Корзина и магазины", callback_data="weekmenu:basket")
+    if state["current_day"] > days_total and state["progress_index"] >= days_total * n:
+        b.button(text="🎉 Собрать новый план", callback_data="weekmenu:start")
     b.adjust(1)
     return text, b.as_markup()
+
+
+def get_basket_info(chat_id: int) -> dict | None:
+    """Данные для экрана «Корзина»: текст корзины от ИИ, продукты, сохранённый расчёт цен."""
+    state = _load(chat_id)
+    if not state:
+        return None
+    return {
+        "basket_text": state.get("basket_text", ""),
+        "inventory_initial": state["inventory_initial"],
+        "priced": state.get("priced_basket", ""),
+    }
+
+
+def save_priced_basket(chat_id: int, text: str) -> None:
+    state = _load(chat_id)
+    if not state:
+        return
+    state["priced_basket"] = text
+    _save(chat_id, state)
+
+
+def day_of_slot(chat_id: int, index: int) -> int | None:
+    state = _load(chat_id)
+    if not state:
+        return None
+    slots = _flat_slots(state)
+    return slots[index][0] if 0 <= index < len(slots) else None
 
 
 def next_uncooked_index(chat_id: int) -> int | None:
