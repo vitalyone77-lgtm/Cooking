@@ -56,7 +56,8 @@ REMINDER_TIMEZONE = os.getenv("REMINDER_TIMEZONE", "Europe/Moscow")
 STORE_URL_FIVEKA = os.getenv("STORE_URL_FIVEKA", "https://5ka.ru/search/?text={q}")
 STORE_URL_VKUSVILL = os.getenv("STORE_URL_VKUSVILL", "https://vkusvill.ru/search/?q={q}")
 STORE_URL_LAVKA = os.getenv("STORE_URL_LAVKA", "https://lavka.yandex.ru/search?text={q}")
-STORE_URL_KUPER = os.getenv("STORE_URL_KUPER", "https://kuper.ru/search?keywords={q}")
+STORE_URL_PEREKRESTOK = os.getenv("STORE_URL_PEREKRESTOK", "https://www.perekrestok.ru/cat/search?search={q}")
+STORE_URL_KUPER = os.getenv("STORE_URL_KUPER", "https://web.kuper.ru/multisearch?q={q}")
 
 # ВкусВилл: официальный (экспериментальный) MCP-сервер — единственный магазин, у которого
 # бот получает реальные цены и собирает ссылку-корзину. Без ключей.

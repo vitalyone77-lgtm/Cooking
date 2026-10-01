@@ -63,7 +63,7 @@ HELP_TEXT = (
     "🗂 *Готовые меню* — открыть уже собранное меню на день и план на несколько дней.\n"
     "❓ *Справка* — этот текст.\n\n"
     "Под рецептом, меню и планом есть кнопка «🛒 Найти продукты в магазине»: выбираешь магазин "
-    "(Пятёрочка, ВкусВилл, Лавка, Купер) — и получаешь короткий список со ссылками на поиск.\n\n"
+    "(Пятёрочка, ВкусВилл, Перекрёсток, Лавка, Купер) — и получаешь короткий список со ссылками на поиск.\n\n"
     "*Команды:* /menu — меню, /ready — готовые меню, /stores — выбор магазинов, "
     "/app — веб-версия для телефона, /help — справка.\n\n"
     "Каждый день в 14:00 я напоминаю о новом блюде. Если что-то зависло — /start."
@@ -111,10 +111,14 @@ def resolve_shopping_terms(message: Message, ctx: str) -> list[str]:
     """ctx: r — рецепт (сообщение, на которое ответили), d — меню на день, w — корзина плана, wd<N> — докупить к дню N."""
     chat_id = message.chat.id
     if ctx == "r":
-        src = message.reply_to_message
-        if not src:
-            return []
-        return _recipe_terms.get((chat_id, src.message_id)) or terms_from_recipe_text(src.text or "")
+        # кнопка может стоять на самом сообщении с рецептом, а выбор магазина — ответом на него
+        for src in (message.reply_to_message, message):
+            if not src:
+                continue
+            terms = _recipe_terms.get((chat_id, src.message_id)) or terms_from_recipe_text(src.text or "")
+            if terms:
+                return terms
+        return []
     if ctx == "d":
         return day_menu.get_shopping_terms(chat_id)
     if ctx == "w":
@@ -172,8 +176,11 @@ def resolve_shopping_amounts(message: Message, ctx: str) -> dict[str, int]:
     """Количества продуктов (граммы, яйца — штуки) для сборки корзины: из рецепта, меню на день или корзины плана."""
     chat_id = message.chat.id
     if ctx == "r":
-        src = message.reply_to_message
-        return amounts_from_recipe_text(src.text or "") if src else {}
+        for src in (message.reply_to_message, message):
+            amounts = amounts_from_recipe_text(src.text or "") if src else {}
+            if amounts:
+                return amounts
+        return {}
     if ctx == "d":
         return day_menu.get_shopping_amounts(chat_id)
     if ctx == "w":

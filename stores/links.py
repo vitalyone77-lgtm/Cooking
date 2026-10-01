@@ -10,9 +10,10 @@ STORES: dict[str, tuple[str, str, str]] = {
     "fiveka": ("Пятёрочка", "Пятёрочка", config.STORE_URL_FIVEKA),
     "vkusvill": ("ВкусВилл", "ВкусВилл", config.STORE_URL_VKUSVILL),
     "lavka": ("Лавка", "Яндекс Лавка", config.STORE_URL_LAVKA),
+    "perekrestok": ("Перекрёсток", "Перекрёсток", config.STORE_URL_PEREKRESTOK),
     "kuper": ("Купер", "Купер (СберМаркет)", config.STORE_URL_KUPER),
 }
-DEFAULT_STORES = ["fiveka", "vkusvill", "lavka", "kuper"]
+DEFAULT_STORES = ["fiveka", "vkusvill", "perekrestok", "lavka", "kuper"]
 
 
 def search_url(store: str, term: str) -> str:
