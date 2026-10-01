@@ -27,7 +27,8 @@ from states import RecipeForm, FavoritesForm, DayMenuForm, WeekMenuForm
 from search import search_recipes, format_results_for_prompt
 from ai import generate_recipe
 from shopping import (
-    extract_shopping_terms, format_shopping_message, extract_dish_title, format_store_links, terms_from_recipe_text,
+    extract_shopping_terms, extract_dish_title, format_store_links, terms_from_recipe_text,
+    amounts_from_recipe_text, merge_amounts,
 )
 from storage import save_last_request
 from reminders import setup_scheduler
@@ -156,12 +157,48 @@ async def shop_store(callback: CallbackQuery):
         await callback.answer("Не нашёл список продуктов — открой рецепт заново.", show_alert=True)
         return
     enabled = store_prefs.get_enabled(chat_id)
-    text = format_shopping_message(terms, chat_id) if store == "all" else format_store_links(terms, store)
+    if store not in enabled:
+        await callback.answer("Этот магазин выключен в /stores", show_alert=True)
+        return
+    text = format_store_links(terms, store)
     await edit_text_safe(
         callback.message, text, reply_markup=kb.store_pick_kb(ctx, enabled, current=store),
         disable_web_page_preview=True,
     )
     await callback.answer()
+
+
+def resolve_shopping_amounts(message: Message, ctx: str) -> dict[str, int]:
+    """Количества продуктов (граммы, яйца — штуки) для сборки корзины: из рецепта, меню на день или корзины плана."""
+    chat_id = message.chat.id
+    if ctx == "r":
+        src = message.reply_to_message
+        return amounts_from_recipe_text(src.text or "") if src else {}
+    if ctx == "d":
+        return day_menu.get_shopping_amounts(chat_id)
+    if ctx == "w":
+        info = week_menu.get_basket_info(chat_id)
+        return dict(info["inventory_initial"]) if info else {}
+    return {}
+
+
+@dp.callback_query(F.data.startswith("shop:cart:"))
+async def shop_cart(callback: CallbackQuery):
+    """Собирает корзину во ВкусВилле: подбирает товары и упаковки, считает цену, даёт ссылку «открыть корзину»."""
+    ctx = callback.data.split(":", 2)[2]
+    amounts = resolve_shopping_amounts(callback.message, ctx)
+    if not amounts:
+        await callback.answer("В рецепте нет продуктов с количеством — собрать корзину не из чего.", show_alert=True)
+        return
+    await callback.answer()
+    scope = {"r": "этот рецепт", "d": "весь день", "w": "весь план"}.get(ctx, "весь план")
+    wait = await callback.message.answer("💰 Собираю корзину во ВкусВилле…")
+    priced = await build_priced_basket(amounts, scope)
+    if priced:
+        await wait.delete()
+        await answer_long(callback.message, priced, disable_web_page_preview=True)
+    else:
+        await wait.edit_text("ℹ️ ВкусВилл сейчас не ответил или ничего не нашёл — открой список ссылок и ищи продукты вручную.")
 
 
 async def show_main_menu(message: Message, state: FSMContext, intro: str = "Что готовим? Выбери тип питания/кухни:"):

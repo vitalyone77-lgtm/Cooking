@@ -135,6 +135,56 @@ def format_shopping_message(terms: list[str], chat_id: int | None = None) -> str
     return "\n".join(lines)
 
 
+_AMOUNT_RE = re.compile(r"(\d+(?:[.,]\d+)?)\s*(кг|гр|г|мл|л|шт)(?![а-яёa-z])", re.IGNORECASE)
+
+
+def amounts_from_recipe_text(text: str) -> dict[str, int]:
+    """
+    Из раздела «Продукты:» рецепта достаёт количества: {продукт: граммы} (мл считаем за граммы, яйца — штуки).
+    Строки без числа («соль — по вкусу», «2 ст.л.») пропускаются: их в магазине обычно не считают.
+    Нужно для сборки корзины ВкусВилла под рецепт или меню на день.
+    """
+    header = _PRODUCTS_HEADER_RE.search(text or "")
+    if not header:
+        return {}
+    result: dict[str, int] = {}
+    for line in text[header.end():].splitlines():
+        s = line.strip()
+        if not s:
+            if result:
+                break
+            continue
+        if not _BULLET_RE.match(s):
+            break
+        item = _BULLET_RE.sub("", s)
+        name_part, sep, rest = re.sub(r"\([^)]*\)", "", item).partition(" — ")
+        if not sep:
+            name_part, sep, rest = item.partition(" — ")
+        name = name_part.strip(" .*_`").lower()
+        if not name or "," in name or name in ("вода", "кипяток", "лёд", "лед", "вода питьевая"):
+            continue  # воду из крана не покупаем
+        grams = pieces = 0.0
+        for m in _AMOUNT_RE.finditer(item.partition(" — ")[2]):
+            value, unit = float(m.group(1).replace(",", ".")), m.group(2).lower()
+            if unit == "шт":
+                pieces = pieces or value
+            elif not grams:
+                grams = value * (1000 if unit in ("кг", "л") else 1)
+        amount = grams or (pieces if "яйц" in name else 0)
+        if amount > 0:
+            result[name] = result.get(name, 0) + int(round(amount))
+    return result
+
+
+def merge_amounts(parts: list[dict[str, int]]) -> dict[str, int]:
+    """Складывает количества одних и тех же продуктов из нескольких блюд."""
+    total: dict[str, int] = {}
+    for d in parts:
+        for k, v in d.items():
+            total[k] = total.get(k, 0) + v
+    return total
+
+
 def terms_from_recipe_text(text: str) -> list[str]:
     """Продукты из раздела «Продукты:» готового текста рецепта (для кнопки «Найти продукты в магазине»)."""
     return _terms_from_products_section(text or "")

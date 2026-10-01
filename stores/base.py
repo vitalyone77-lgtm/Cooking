@@ -44,6 +44,7 @@ class Offer:
     url: str = ""
     product_id: str = ""       # id товара в магазине (для корзины)
     approx: bool = False       # размер упаковки оценён приблизительно (например, "цена за кг")
+    by_weight: bool = False    # весовой товар: цена за 1 кг, количество можно брать дробное (1,5 кг)
 
 
 @dataclass
@@ -52,7 +53,7 @@ class CartLine:
     need_name: str             # что нужно по рецепту ("куриное филе")
     need_g: float              # сколько нужно грамм
     offer: Offer
-    count: int                 # число упаковок
+    count: float               # число упаковок (для весового товара — килограммы, может быть дробным)
 
     @property
     def total_price(self) -> float:

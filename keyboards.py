@@ -239,14 +239,17 @@ def shopping_btn_kb(ctx: str) -> InlineKeyboardMarkup:
 
 
 def store_pick_kb(ctx: str, enabled: list[str], current: str | None = None) -> InlineKeyboardMarkup:
-    """Выбор магазина для списка продуктов; текущий помечен ✅, «Все магазины» — старый формат со всеми ссылками."""
+    """
+    Выбор ОДНОГО магазина для списка продуктов (каждый раз можно выбрать другой); текущий помечен ✅.
+    Для ВкусВилла (ctx r / d / w) добавляется кнопка «Собрать корзину» — реальные цены и ссылка-корзина.
+    """
     from stores.links import STORES
     b = InlineKeyboardBuilder()
     for key in enabled:
         if key in STORES:
             mark = "✅ " if key == current else ""
             b.button(text=f"{mark}{STORES[key][0]}", callback_data=f"shop:s:{ctx}:{key}")
-    mark = "✅ " if current == "all" else ""
-    b.button(text=f"{mark}Все магазины", callback_data=f"shop:s:{ctx}:all")
     b.adjust(2)
+    if current == "vkusvill" and ctx in ("r", "d", "w"):
+        b.row(InlineKeyboardButton(text="🧺 Собрать корзину во ВкусВилле (цены)", callback_data=f"shop:cart:{ctx}"))
     return b.as_markup()

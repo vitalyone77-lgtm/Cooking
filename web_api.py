@@ -230,13 +230,27 @@ async def api_week(p: Params, x_device: str | None = Header(default=None)):
 
     async def work():
         _, shopping_md = await week_menu.start_week_plan(cid, meals, config.WEEK_MENU_DAYS, data)
-        info = week_menu.get_basket_info(cid)
-        priced = await build_priced_basket(info["inventory_initial"]) if info else None
-        if priced:
-            week_menu.save_priced_basket(cid, priced)
         return {"ok": True}
 
     return _start_job(dev_id, work)
+
+
+@app.post("/api/week/cart")
+async def api_week_cart(x_device: str | None = Header(default=None)):
+    """Корзина плана с ценами во ВкусВилле — только по запросу, после выбора магазина (бывает до ~40 с)."""
+    dev_id = _dev(x_device)
+    cid = _cid(dev_id)
+    info = week_menu.get_basket_info(cid)
+    if not info:
+        raise HTTPException(404, "Плана нет")
+    priced = await build_priced_basket(info["inventory_initial"])
+    if not priced:
+        return {"text": "", "link": ""}
+    m = re.search(r"\]\((https?://[^)]+)\)", priced)
+    text = re.sub(r"\[([^\]]+)\]\([^)]+\)", "", priced)
+    text = re.sub(r"[*_`]", "", text)
+    text = "\n".join(ln for ln in text.splitlines() if "Открыть корзину" not in ln)
+    return {"text": text.strip(), "link": m.group(1) if m else ""}
 
 
 @app.post("/api/week/cook")

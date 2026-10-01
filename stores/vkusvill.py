@@ -10,6 +10,7 @@
 Протокол MCP «streamable HTTP»: initialize -> notifications/initialized -> tools/call.
 Ответ может прийти как обычный JSON или как SSE-поток («data: {...}»).
 """
+import html
 import json
 import logging
 import re
@@ -119,10 +120,16 @@ class VkusvillClient:
         logger.debug("ВкусВилл search %r -> %s", query, str(data)[:1500])
         return [o for o in (_to_offer(p) for p in _extract_products(data)) if o]
 
-    async def cart_link(self, items: list[tuple[str, int]]) -> str | None:
-        """items: [(xml_id, количество)]. Возвращает ссылку на корзину или None."""
-        items = items[:20]  # ограничение API
-        products = [{"xml_id": pid, "q": min(int(q), 40)} for pid, q in items if pid]
+    async def cart_link(self, items: list[tuple[str, float]]) -> str | None:
+        """items: [(xml_id, количество)]. Количество дробное для весовых товаров (кг). Возвращает ссылку или None."""
+        products = []
+        for pid, q in items[:20]:  # ограничение API: до 20 позиций
+            try:
+                xml_id = int(pid)          # инструмент требует ЧИСЛО, строка даёт «Invalid type»
+            except (TypeError, ValueError):
+                continue
+            qty = min(max(round(float(q), 2), 0.01), 40.0)
+            products.append({"xml_id": xml_id, "q": int(qty) if qty == int(qty) else qty})
         if not products:
             return None
         data = await self.call_tool("vkusvill_cart_link_create", {"products": products})
@@ -189,7 +196,8 @@ def _num(value) -> float | None:
 
 
 def _to_offer(p: dict) -> Offer | None:
-    name = str(p.get("name") or p.get("title") or "").strip()
+    # Названия приходят с HTML-сущностями («900&nbsp;г»): без раскрытия вес в названии не распознаётся
+    name = html.unescape(str(p.get("name") or p.get("title") or "")).replace("\u00a0", " ").strip()
     price = None
     for k in ("price", "current_price", "cost", "price_rub"):
         if k in p:
@@ -200,8 +208,16 @@ def _to_offer(p: dict) -> Offer | None:
     if not name or not price or not pid:
         return None
 
+    url = str(p.get("url") or p.get("link") or "")
+    if url.startswith("/"):
+        url = "https://vkusvill.ru" + url
+
+    # unit == «кг» — весовой товар: цена за 1 кг, можно брать любое количество (в корзину уходит q в кг)
+    if str(p.get("unit") or "").strip().lower() == "кг":
+        return Offer(store=STORE_KEY, name=name, price=price, pack_g=1000.0, url=url,
+                     product_id=pid, approx=False, by_weight=True)
+
     pack_g = parse_pack_size_g(name)
-    approx = False
     if pack_g is None:
         # Иногда вес лежит в отдельном поле ("weight": "500 г", "unit": "г", "amount": 500)
         for k in ("weight", "volume", "unit_value", "pack", "size"):
@@ -209,8 +225,5 @@ def _to_offer(p: dict) -> Offer | None:
                 pack_g = parse_pack_size_g(str(p[k]))
                 if pack_g:
                     break
-    url = str(p.get("url") or p.get("link") or "")
-    if url.startswith("/"):
-        url = "https://vkusvill.ru" + url
     return Offer(store=STORE_KEY, name=name, price=price, pack_g=pack_g, url=url,
-                 product_id=pid, approx=approx)
+                 product_id=pid, approx=False)

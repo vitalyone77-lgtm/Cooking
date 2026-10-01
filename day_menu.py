@@ -28,7 +28,10 @@ from keyboards import MEAL_LABELS, MEAL_KCAL_SHARE
 from search import search_recipes, format_results_for_prompt
 from ai import generate_recipe, call_llm_with_fallback
 from prompts import DAY_MENU_SYSTEM_PROMPT, DAY_MENU_BLOCK_DELIMITER, build_day_menu_user_prompt
-from shopping import extract_shopping_terms, extract_dish_title, format_shopping_message, terms_from_recipe_text
+from shopping import (
+    extract_shopping_terms, extract_dish_title, format_shopping_message, terms_from_recipe_text,
+    amounts_from_recipe_text, merge_amounts,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -267,6 +270,14 @@ def get_shopping_terms(chat_id: int) -> list[str]:
     return _merge_shopping_terms(
         [terms_from_recipe_text(m.get("text", "")) for m in entry["meals"].values() if m.get("ok")]
     )
+
+
+def get_shopping_amounts(chat_id: int) -> dict[str, int]:
+    """Количества продуктов на весь день (граммы, яйца — штуки) для сборки корзины магазина."""
+    entry = _load_menu(chat_id)
+    if not entry:
+        return {}
+    return merge_amounts([amounts_from_recipe_text(m.get("text", "")) for m in entry["meals"].values() if m.get("ok")])
 
 
 def build_summary_view(chat_id: int) -> tuple[str, InlineKeyboardMarkup] | None:
