@@ -150,7 +150,7 @@ async def _run(inventory: dict[str, int], scope: str) -> str | None:
         return None
 
     try:
-        sem = asyncio.Semaphore(4)
+        sem = asyncio.Semaphore(2)
         items = [(n, a) for n, a in inventory.items() if a > 0]
         results = await asyncio.gather(*[_cart_for_term(client, sem, n, float(a)) for n, a in items])
 

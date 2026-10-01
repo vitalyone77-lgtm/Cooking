@@ -266,7 +266,7 @@ input[type=text]{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid
     h+='<label class="f">Время на готовку</label>'+chips(times,F.time,"time",false);
     h+='<label class="f">Порций</label>'+chips(sv,String(F.servings),"servings",false);
     h+='<label class="f">В чём готовим</label>'+chips(m.appliances,F.appliance,"appliance",true);
-    h+='<button class="btn" id="go">🔍 Подобрать</button><p class="sub" style="margin-top:10px">Лимит: '+m.limit+' подборов в сутки на устройство.</p><div class="install-bottom" id="install-bottom"></div>';
+    h+='<button class="btn" id="go">🔍 Подобрать</button><div class="install-bottom" id="install-bottom"></div>';
     main.innerHTML=h;
     fillInstall();
   }

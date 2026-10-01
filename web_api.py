@@ -135,8 +135,7 @@ def _spend(dev_id: int, kind: str):
     if kind in LIMITS:
         n, days, label = LIMITS[kind]
         if web_db.count_since(dev_id, kind, _msk_midnight(days - 1)) >= n:
-            when = "завтра" if days == 1 else "через пару дней"
-            raise HTTPException(429, f"Лимит исчерпан: {n} {label}. Приходи {when} 🙂")
+            raise HTTPException(429, "На сегодня лимитов больше нет 🙂 Приходи завтра." if days == 1 else "Лимит на этот план исчерпан — новый можно будет составить через пару дней 🙂")
     web_db.log_event(dev_id, "gen")
     web_db.log_event(dev_id, kind)
 

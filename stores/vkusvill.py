@@ -10,6 +10,7 @@
 Протокол MCP «streamable HTTP»: initialize -> notifications/initialized -> tools/call.
 Ответ может прийти как обычный JSON или как SSE-поток («data: {...}»).
 """
+import asyncio
 import html
 import json
 import logging
@@ -116,7 +117,13 @@ class VkusvillClient:
     # ---- высокоуровневые операции ----
 
     async def search(self, query: str) -> list[Offer]:
-        data = await self.call_tool("vkusvill_products_search", {"q": query})
+        data = None
+        for attempt in range(4):
+            data = await self.call_tool("vkusvill_products_search", {"q": query})
+            if isinstance(data, dict) and data.get("code") == "rate_limited":
+                await asyncio.sleep(1.5 * (attempt + 1))      # лимит запросов ВкусВилла — ждём и повторяем
+                continue
+            break
         logger.debug("ВкусВилл search %r -> %s", query, str(data)[:1500])
         return [o for o in (_to_offer(p) for p in _extract_products(data)) if o]
 
