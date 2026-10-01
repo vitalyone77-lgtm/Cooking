@@ -175,8 +175,8 @@ exit
 |---|---|
 | Сайт не открывается, «502 Bad Gateway» | `systemctl status cooking-web --no-pager`; порт в nginx должен быть 8101 |
 | «Подключение не защищено» | не выпущен сертификат — шаг 4.6; DNS — шаг 1 |
-| Страница открылась, но «Подобрать» даёт ошибку | ключи ИИ в `.env` (`journalctl -u cooking-web`), дневной лимит `WEB_DAILY_LIMIT` |
-| «Дневной лимит исчерпан» | это лимит на устройство (по умолчанию 12 в сутки); поменяй `WEB_DAILY_LIMIT` и перезапусти `cooking-web` |
+| Страница открылась, но «Подобрать» даёт ошибку | ключи ИИ в `.env` (`journalctl -u cooking-web`), лимиты `WEB_LIMIT_*` |
+| «На сегодня лимитов больше нет» | лимиты на устройство: 3 блюда и 1 меню на день в сутки, 1 план на 3 дня; меняются в `.env` (`WEB_LIMIT_RECIPE`, `WEB_LIMIT_DAYMENU`, `WEB_LIMIT_WEEK`), затем `systemctl restart cooking-web` |
 | Админка не пускает | пароль из `ADMIN_PASSWORD`; после 5 неверных попыток — пауза 10 минут |
 | PDF не скачивается, открывается окно печати | на сервере нет шрифта — проверь `ls /usr/share/fonts/truetype/dejavu` (должен быть `DejaVuSans.ttf`), или задай `PDF_FONT` в `.env` |
 | После `update_cooking.bat` бот не отвечает | `journalctl -u Cooking -n 50 --no-pager`; откат на версию, которая работала до этого обновления: `cd /root/Cooking && git reset --hard 6bd9cbb && systemctl restart Cooking` (ещё глубже — тег `before-week-menu`: состояние до плана питания) |
