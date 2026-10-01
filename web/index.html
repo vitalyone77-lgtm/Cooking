@@ -11,7 +11,20 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Кухня">
-<title>Кухонный помощник</title>
+<title>Кухонный помощник — рецепты, меню на день и план питания с КБЖУ</title>
+<link rel="canonical" href="https://menu.pump-um.ru/">
+<meta name="robots" content="index,follow,max-image-preview:large">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Кухонный помощник">
+<meta property="og:locale" content="ru_RU">
+<meta property="og:title" content="Кухонный помощник — рецепты, меню на день и план питания с КБЖУ">
+<meta property="og:description" content="Бесплатно и без регистрации: рецепт по твоим продуктам, меню на день, план на 3 дня, калории и КБЖУ, список покупок со ссылками на магазины, PDF.">
+<meta property="og:url" content="https://menu.pump-um.ru/">
+<meta property="og:image" content="https://menu.pump-um.ru/icons/icon-512.png">
+<meta name="twitter:card" content="summary">
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"WebApplication","name":"Кухонный помощник","url":"https://menu.pump-um.ru/","applicationCategory":"LifestyleApplication","operatingSystem":"Любой (веб, можно добавить на главный экран)","inLanguage":"ru","description":"Подбор рецептов по продуктам и кухне, меню на день и план питания на 3 дня с калориями и КБЖУ, список покупок со ссылками на магазины, скачивание в PDF. Без регистрации.","offers":{"@type":"Offer","price":"0","priceCurrency":"RUB"},"featureList":["Рецепт с калориями и КБЖУ","Меню на день","План питания на 3 дня","Список покупок и корзина ВкусВилл","Скачивание в PDF"]}</script>
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"FAQPage","mainEntity":[{"@type":"Question","name":"Нужна ли регистрация?","acceptedAnswer":{"@type":"Answer","text":"Нет. Приложение работает без регистрации, данные хранятся на твоём устройстве."}},{"@type":"Question","name":"Сколько стоит?","acceptedAnswer":{"@type":"Answer","text":"Бесплатно. Есть дневные лимиты: 3 рецепта, 1 меню на день, 1 план на 3 дня."}},{"@type":"Question","name":"Как посчитать КБЖУ и калории блюда?","acceptedAnswer":{"@type":"Answer","text":"Выбери кухню и приём пищи — рецепт придёт с калорийностью и белками, жирами, углеводами на порцию."}},{"@type":"Question","name":"Можно ли получить список покупок?","acceptedAnswer":{"@type":"Answer","text":"Да. Выбери магазин (Пятёрочка, ВкусВилл, Яндекс Лавка, Купер) — откроются ссылки на поиск продуктов, для ВкусВилла можно собрать корзину с ценами."}}]}</script>
+
 <style>
 :root{--bg:#FBF7F2;--surface:#fff;--text:#2B2622;--muted:#6B625A;--line:#E7DED3;--primary:#2F6B4F;--on-primary:#fff;--soft:#E6F0EA;--accent:#FBE3C4;--danger:#A33A2B;--r:16px;--tap:52px}
 @media (prefers-color-scheme:dark){:root{--bg:#1A1714;--surface:#25211D;--text:#F1EAE2;--muted:#B5AA9E;--line:#3A342E;--primary:#7CC5A0;--on-primary:#10261B;--soft:#24352C;--accent:#4A3A22;--danger:#F0907F}}
@@ -62,7 +75,7 @@ input[type=text]{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid
 </style>
 </head>
 <body>
-<div class="wrap" id="main" aria-live="polite"></div>
+<div class="wrap" id="main" aria-live="polite"><h1>Кухонный помощник</h1><p>Бесплатный помощник по питанию без регистрации: подбирает рецепты по кухне и продуктам, составляет меню на день и план питания на 3 дня с калориями и КБЖУ, делает список покупок со ссылками на Пятёрочку, ВкусВилл, Яндекс Лавку и Купер и скачивает рецепты в PDF. Работает в браузере, можно добавить на главный экран телефона.</p><noscript><p>Для работы приложения включите JavaScript.</p></noscript></div>
 <nav class="tabs" role="tablist" aria-label="Разделы">
   <button class="tab" role="tab" data-tab="new"><span class="ic">🍳</span>Создать</button>
   <button class="tab" role="tab" data-tab="menus"><span class="ic">🗂</span>Готовые меню</button>
@@ -91,6 +104,7 @@ input[type=text]{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid
     if(framed) return 'Эта страница встроена в другой сайт — установить её отсюда нельзя. Открой приложение отдельно и добавь уже оттуда.<a class="btn" style="margin-top:12px" href="'+esc(location.origin+"/")+'" target="_blank" rel="noopener">Открыть приложение</a>';
     if(isIOS&&inApp) return 'Сейчас страница открыта внутри другого приложения (Telegram и т.п.), здесь нет кнопки «На экран Домой». Открой её в Safari: нажми «⋯» → «Открыть в Safari» и повтори.';
     if(isIOS) return '1. Нажми «Поделиться» — квадрат со стрелкой вверх внизу экрана Safari.<br>2. Прокрути список и выбери пункт «На экран Домой».<br>3. Нажми «Добавить». Иконка появится на главном экране.';
+    if(/OPR\/|Opera/.test(UA)) return 'Opera: нажми «⋮» (или «⋯») → «Добавить на главный экран» (в некоторых версиях — «Главная страница» → «Ярлык на главный экран»). Если пункта нет — открой сайт в Chrome. Если ярлык не появился, разреши Opera «Создание ярлыков» в настройках Android: Настройки → Приложения → Opera → Разрешения.'; 
     if(inApp) return 'Сейчас страница открыта внутри другого приложения. Открой её в Chrome: нажми «⋮» → «Открыть в браузере», потом повтори.';
     return 'Открой меню браузера («⋮» или «⋯») и выбери «Добавить на главный экран» или «Установить приложение».';
   }

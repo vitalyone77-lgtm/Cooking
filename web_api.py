@@ -559,3 +559,49 @@ app.mount("/icons", StaticFiles(directory=BASE / "web" / "icons"), name="icons")
 @app.get("/api/health")
 def health():
     return {"ok": True}
+
+
+# ---------------- SEO / GEO: robots, sitemap, llms.txt ----------------
+
+def _site() -> str:
+    return (config.WEB_APP_URL or "https://menu.pump-um.ru").rstrip("/")
+
+
+@app.middleware("http")
+async def _noindex_private(request: Request, call_next):
+    resp = await call_next(request)
+    if request.url.path.startswith(("/api", "/admin", "/go", "/uploads")):
+        resp.headers["X-Robots-Tag"] = "noindex, nofollow"
+    return resp
+
+
+@app.get("/robots.txt")
+def robots():
+    body = ("User-agent: *\nAllow: /\nDisallow: /api/\nDisallow: /admin\nDisallow: /go/\nDisallow: /uploads/\n\n"
+            f"Sitemap: {_site()}/sitemap.xml\n")
+    return Response(body, media_type="text/plain; charset=utf-8")
+
+
+@app.get("/sitemap.xml")
+def sitemap():
+    body = ('<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
+            f"  <url><loc>{_site()}/</loc><changefreq>weekly</changefreq><priority>1.0</priority></url>\n</urlset>\n")
+    return Response(body, media_type="application/xml")
+
+
+@app.get("/llms.txt")
+def llms():
+    body = (
+        "# Кухонный помощник\n\n"
+        "> Бесплатный русскоязычный веб-помощник по питанию без регистрации: рецепты по кухне и продуктам, "
+        "меню на день, план питания на 3 дня, калории и КБЖУ, список покупок, PDF.\n\n"
+        "## Возможности\n"
+        "- Рецепт с калорийностью и КБЖУ на порцию, учитывает кухню (классическая, аюрведа, спорт и др.) и технику\n"
+        "- Меню на день по приёмам пищи с общим списком покупок\n"
+        "- План питания на 3 дня с единой корзиной продуктов и учётом остатков\n"
+        "- Ссылки на поиск продуктов в Пятёрочке, ВкусВилле, Яндекс Лавке, Купере; корзина с ценами во ВкусВилле\n"
+        "- Скачивание в PDF, добавление на главный экран телефона (PWA)\n"
+        "- Есть Telegram-бот с теми же функциями\n\n"
+        f"## Ссылки\n- [Приложение]({_site()}/)\n"
+    )
+    return Response(body, media_type="text/plain; charset=utf-8")
