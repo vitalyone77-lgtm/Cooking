@@ -203,6 +203,7 @@ def restart_kb() -> InlineKeyboardMarkup:
 def recipe_result_kb() -> InlineKeyboardMarkup:
     """Кнопки под готовым рецептом: добавить в избранное / новый рецепт."""
     b = InlineKeyboardBuilder()
+    b.button(text="🛒 Найти продукты в магазине", callback_data="shop:open:r")
     b.button(text="⭐ В избранное", callback_data="fav:save")
     b.button(text="🍳 Подобрать ещё рецепт", callback_data="confirm:restart")
     b.adjust(1)
@@ -223,7 +224,29 @@ def favorites_list_kb(favorites: list[dict]) -> InlineKeyboardMarkup:
 
 def favorite_view_kb(fav_id: str) -> InlineKeyboardMarkup:
     b = InlineKeyboardBuilder()
+    b.button(text="🛒 Найти продукты в магазине", callback_data="shop:open:r")
     b.button(text="🗑 Удалить из избранного", callback_data=f"fav:delete:{fav_id}")
     b.button(text="⬅️ К списку избранного", callback_data="favorites:open")
     b.adjust(1)
+    return b.as_markup()
+
+
+def shopping_btn_kb(ctx: str) -> InlineKeyboardMarkup:
+    """Одна кнопка «Найти продукты в магазине» (ctx: r — рецепт, d — меню на день, w — корзина плана, wd<N> — докупить к дню N)."""
+    b = InlineKeyboardBuilder()
+    b.button(text="🛒 Найти продукты в магазине", callback_data=f"shop:open:{ctx}")
+    return b.as_markup()
+
+
+def store_pick_kb(ctx: str, enabled: list[str], current: str | None = None) -> InlineKeyboardMarkup:
+    """Выбор магазина для списка продуктов; текущий помечен ✅, «Все магазины» — старый формат со всеми ссылками."""
+    from stores.links import STORES
+    b = InlineKeyboardBuilder()
+    for key in enabled:
+        if key in STORES:
+            mark = "✅ " if key == current else ""
+            b.button(text=f"{mark}{STORES[key][0]}", callback_data=f"shop:s:{ctx}:{key}")
+    mark = "✅ " if current == "all" else ""
+    b.button(text=f"{mark}Все магазины", callback_data=f"shop:s:{ctx}:all")
+    b.adjust(2)
     return b.as_markup()

@@ -417,7 +417,7 @@ def _admin_cookie() -> str:
 
 
 def _need_admin(request: Request):
-    if not config.ADMIN_PASSWORD or not hmac.compare_digest(request.cookies.get("adm", ""), _admin_cookie()):
+    if not config.ADMIN_PASSWORD or not hmac.compare_digest(request.cookies.get("adm", "").encode(), _admin_cookie().encode()):
         raise HTTPException(401, "admin")
 
 
@@ -428,7 +428,7 @@ async def admin_login(request: Request, response: Response):
     if len(fails) >= 5:
         raise HTTPException(429, "Слишком много попыток, подожди 10 минут")
     body = await request.json()
-    if not config.ADMIN_PASSWORD or not hmac.compare_digest(str(body.get("password", "")), config.ADMIN_PASSWORD):
+    if not config.ADMIN_PASSWORD or not hmac.compare_digest(str(body.get("password", "")).encode(), config.ADMIN_PASSWORD.encode()):
         fails.append(time.time())
         _login_fail[ip] = fails
         raise HTTPException(401, "Неверный пароль")

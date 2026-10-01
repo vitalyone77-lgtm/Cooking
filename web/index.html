@@ -200,10 +200,22 @@ input[type=text]{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid
       }).then(restore);
     }).catch(function(){restore();printFallback(items);});
   }
+  // ---- выбор магазина в блоках «Где купить»: показываем ссылки только выбранного магазина (запоминается) ----
+  var STORE_PICK=ls("store")||"all";
+  function storeLink(l){return '<a data-store="'+esc(l.store)+'" href="'+esc(l.url)+'" target="_blank" rel="noopener">'+esc(l.store)+'</a>';}
+  function storeChips(items){
+    var h='<div class="chips" style="margin:12px 0 4px"><button class="chip" data-store-pick="all" aria-pressed="false">Все магазины</button>';
+    ((items[0]&&items[0].links)||[]).forEach(function(l){h+='<button class="chip" data-store-pick="'+esc(l.store)+'" aria-pressed="false">'+esc(l.store)+'</button>';});
+    return h+'</div>';
+  }
+  function applyStore(){
+    Array.prototype.forEach.call(document.querySelectorAll("[data-store-pick]"),function(c){c.setAttribute("aria-pressed",String(c.getAttribute("data-store-pick")===STORE_PICK));});
+    Array.prototype.forEach.call(document.querySelectorAll(".links a[data-store]"),function(a){a.style.display=(STORE_PICK==="all"||a.getAttribute("data-store")===STORE_PICK)?"":"none";});
+  }
   function shoppingHTML(items,title){
     if(!items||!items.length) return "";
-    var h="";items.forEach(function(it){h+='<div class="item"><strong>'+esc(it.name)+'</strong>'+(it.amount?' — '+esc(it.amount):'')+'<div class="links">'+it.links.map(function(l){return '<a href="'+esc(l.url)+'" target="_blank" rel="noopener">'+esc(l.store)+'</a>';}).join("")+'</div></div>';});
-    return accordion("🛒 "+(title||"Где купить продукты"),"ссылки на поиск в магазинах","",h,false);
+    var h=storeChips(items);items.forEach(function(it){h+='<div class="item"><strong>'+esc(it.name)+'</strong>'+(it.amount?' — '+esc(it.amount):'')+'<div class="links">'+it.links.map(storeLink).join("")+'</div></div>';});
+    return accordion("🛒 "+(title||"Найти продукты в магазине"),"выбери магазин — ссылки на поиск","",h,false);
   }
   function fail(e,back){
     main.innerHTML='<div class="card err">'+esc(errText(e))+'</div><button class="btn ghost" id="retry">'+(back?"Назад":"Повторить")+'</button>';
@@ -242,6 +254,7 @@ input[type=text]{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid
       if(F.mode==="recipe"){
         main.innerHTML='<h1>'+esc(res.title)+'</h1><div class="card" style="padding:4px 16px 16px">'+recipeHTML(res.text)+actions(res.title,res.text)+'</div>'+shoppingHTML(res.shopping)+adSlot("inline")+'<button class="btn ghost" id="again">🍳 Подобрать ещё</button>';
         document.getElementById("again").onclick=function(){show("new");};
+        applyStore();
         window.scrollTo(0,0);
       } else { ls("sub",F.mode); show("menus"); }
     }).catch(function(e){fail(e,"new");});
@@ -282,7 +295,8 @@ input[type=text]{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid
       h+=accordion("День "+day.day,"",badge,body,day.is_next||(day.generated&&!all));
     });
     var b=w.basket,inner=b.priced_text?'<div class="recipe">'+esc(b.priced_text)+'</div>':"";
-    b.items.forEach(function(it){inner+='<div class="item"><strong>'+esc(it.name)+'</strong> — '+esc(it.amount)+'<div class="links">'+it.links.map(function(l){return '<a href="'+esc(l.url)+'" target="_blank" rel="noopener">'+esc(l.store)+'</a>';}).join("")+'</div></div>';});
+    if(b.items.length) inner+=storeChips(b.items);
+    b.items.forEach(function(it){inner+='<div class="item"><strong>'+esc(it.name)+'</strong> — '+esc(it.amount)+'<div class="links">'+it.links.map(storeLink).join("")+'</div></div>';});
     var ti=adv.indexOf("💡"),tips=ti>=0?adv.slice(ti).replace(/\*/g,""):"";
     return h+accordion("🛒 Корзина на весь план","продукты и магазины","",inner,false)+
       (tips?accordion("💡 Хранение и разморозка","как не испортить продукты","",'<div class="recipe">'+esc(tips)+'</div>',false):"")+adSlot("inline");});}
@@ -303,7 +317,7 @@ input[type=text]{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid
     Array.prototype.forEach.call(document.querySelectorAll(".tab"),function(t){t.setAttribute("aria-selected",t.getAttribute("data-tab")===tab);});
     if(tab==="new"){viewNew();window.scrollTo(0,0);return;}
     main.innerHTML='<div class="skeleton"></div><div class="skeleton"></div><div class="skeleton"></div>';
-    Promise.resolve(VIEWS[tab]()).then(function(h){main.innerHTML=h;window.scrollTo(0,0);}).catch(fail);
+    Promise.resolve(VIEWS[tab]()).then(function(h){main.innerHTML=h;applyStore();window.scrollTo(0,0);}).catch(fail);
   }
 
   // ---- единый обработчик кликов ----
@@ -313,6 +327,7 @@ input[type=text]{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid
     if(b=t.closest(".step")){b.classList.toggle("checked",b.querySelector("input").checked);return;}
     if(b=t.closest(".k-wake")){ if(b.checked){navigator.wakeLock.request("screen").then(function(l){wake=l;}).catch(function(){b.checked=false;});} else if(wake){wake.release();wake=null;} return;}
     if(b=t.closest(".tab")){show(b.getAttribute("data-tab"));return;}
+    if(b=t.closest("[data-store-pick]")){STORE_PICK=b.getAttribute("data-store-pick");ls("store",STORE_PICK);applyStore();return;}
     if(b=t.closest(".chip")){
       if(b.hasAttribute("data-sub")){ls("sub",b.getAttribute("data-sub"));show("menus");return;}
       var box=b.parentNode,name=box.getAttribute("data-name"); if(!name) return;

@@ -28,7 +28,7 @@ from keyboards import MEAL_LABELS, MEAL_KCAL_SHARE
 from search import search_recipes, format_results_for_prompt
 from ai import generate_recipe, call_llm_with_fallback
 from prompts import DAY_MENU_SYSTEM_PROMPT, DAY_MENU_BLOCK_DELIMITER, build_day_menu_user_prompt
-from shopping import extract_shopping_terms, extract_dish_title, format_shopping_message
+from shopping import extract_shopping_terms, extract_dish_title, format_shopping_message, terms_from_recipe_text
 
 logger = logging.getLogger(__name__)
 
@@ -245,16 +245,28 @@ async def generate_day_menu(chat_id: int, selected_meals: list[str], base_data: 
             *[_generate_one_meal(meal_key, base_data, selected_meals) for meal_key in selected_meals]
         )
 
+    terms = _merge_shopping_terms([r["shopping_terms"] for r in results if r["ok"]])
     _save_menu(chat_id, {
         "order": selected_meals,
         "meals": {r["meal_key"]: {"title": r["title"], "text": r["text"], "ok": r["ok"]} for r in results},
+        "shopping_terms": terms,
     })
 
-    shopping_message = format_shopping_message(
-        _merge_shopping_terms([r["shopping_terms"] for r in results if r["ok"]]), chat_id
-    )
+    shopping_message = format_shopping_message(terms, chat_id)
 
     return {"meals": results, "shopping_message": shopping_message}
+
+
+def get_shopping_terms(chat_id: int) -> list[str]:
+    """Продукты на весь день для кнопки «Найти продукты в магазине» (у старых меню — разбор текстов блюд)."""
+    entry = _load_menu(chat_id)
+    if not entry:
+        return []
+    if entry.get("shopping_terms"):
+        return list(entry["shopping_terms"])
+    return _merge_shopping_terms(
+        [terms_from_recipe_text(m.get("text", "")) for m in entry["meals"].values() if m.get("ok")]
+    )
 
 
 def build_summary_view(chat_id: int) -> tuple[str, InlineKeyboardMarkup] | None:
@@ -277,6 +289,7 @@ def build_summary_view(chat_id: int) -> tuple[str, InlineKeyboardMarkup] | None:
         emoji_label = MEAL_LABELS[meal_key]
         short_title = m["title"] if len(m["title"]) <= 30 else m["title"][:27] + "..."
         b.button(text=f"{emoji_label}: {short_title}", callback_data=f"daymenu:show:{meal_key}")
+    b.button(text="🛒 Найти продукты в магазине", callback_data="shop:open:d")
     b.button(text="🔄 Собрать меню заново", callback_data="daymenu:start")
     b.adjust(1)
     return text, b.as_markup()

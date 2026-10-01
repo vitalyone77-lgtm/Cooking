@@ -7,6 +7,7 @@
 """
 import asyncio
 import logging
+from collections import OrderedDict
 
 from aiogram import Bot, Dispatcher, F
 from aiogram.client.default import DefaultBotProperties
@@ -25,7 +26,9 @@ from cuisines import cuisine_label, MACRO_GOAL_KEY
 from states import RecipeForm, FavoritesForm, DayMenuForm, WeekMenuForm
 from search import search_recipes, format_results_for_prompt
 from ai import generate_recipe
-from shopping import extract_shopping_terms, format_shopping_message, extract_dish_title
+from shopping import (
+    extract_shopping_terms, format_shopping_message, extract_dish_title, format_store_links, terms_from_recipe_text,
+)
 from storage import save_last_request
 from reminders import setup_scheduler
 from favorites import add_favorite, get_favorites, get_favorite, remove_favorite, search_favorites
@@ -58,6 +61,8 @@ HELP_TEXT = (
     f"{config.WEEK_MENU_DAYS} дня, открыть избранное.\n"
     "🗂 *Готовые меню* — открыть уже собранное меню на день и план на несколько дней.\n"
     "❓ *Справка* — этот текст.\n\n"
+    "Под рецептом, меню и планом есть кнопка «🛒 Найти продукты в магазине»: выбираешь магазин "
+    "(Пятёрочка, ВкусВилл, Лавка, Купер) — и получаешь короткий список со ссылками на поиск.\n\n"
     "*Команды:* /menu — меню, /ready — готовые меню, /stores — выбор магазинов, "
     "/app — веб-версия для телефона, /help — справка.\n\n"
     "Каждый день в 14:00 я напоминаю о новом блюде. Если что-то зависло — /start."
@@ -83,6 +88,80 @@ async def answer_long(message: Message, text: str, reply_markup=None, **kwargs):
         except TelegramBadRequest:
             # Сломалась Markdown-разметка (например, «_» или «*» в названии товара) — шлём без неё
             await message.answer(part, reply_markup=markup, parse_mode=None, **kwargs)
+
+
+# ---------- Кнопка «🛒 Найти продукты в магазине» ----------
+# Список ссылок не показываем сразу (он длинный): под рецептом/меню/планом стоит кнопка → выбор магазина →
+# короткий список ссылок только на этот магазин. Продукты берутся не из памяти, а из данных, которые
+# переживают перезапуск: для рецепта — из текста сообщения, на которое ответили (с запасом в памяти — точные названия
+# из служебной строки ИИ), для меню и плана — из сохранённых файлов.
+
+_recipe_terms: "OrderedDict[tuple[int, int], list[str]]" = OrderedDict()
+
+
+def remember_recipe_terms(chat_id: int, message_id: int, terms: list[str]) -> None:
+    if terms:
+        _recipe_terms[(chat_id, message_id)] = terms
+        while len(_recipe_terms) > 300:
+            _recipe_terms.popitem(last=False)
+
+
+def resolve_shopping_terms(message: Message, ctx: str) -> list[str]:
+    """ctx: r — рецепт (сообщение, на которое ответили), d — меню на день, w — корзина плана, wd<N> — докупить к дню N."""
+    chat_id = message.chat.id
+    if ctx == "r":
+        src = message.reply_to_message
+        if not src:
+            return []
+        return _recipe_terms.get((chat_id, src.message_id)) or terms_from_recipe_text(src.text or "")
+    if ctx == "d":
+        return day_menu.get_shopping_terms(chat_id)
+    if ctx == "w":
+        info = week_menu.get_basket_info(chat_id)
+        return list(info["inventory_initial"].keys()) if info else []
+    if ctx.startswith("wd") and ctx[2:].isdigit():
+        return week_menu.get_day_shopping_terms(chat_id, int(ctx[2:]))
+    return []
+
+
+async def edit_text_safe(message: Message, text: str, reply_markup=None, **kwargs):
+    try:
+        await message.edit_text(text, reply_markup=reply_markup, **kwargs)
+    except TelegramBadRequest as e:
+        if "message is not modified" in str(e):
+            return
+        await message.edit_text(text, reply_markup=reply_markup, parse_mode=None, **kwargs)
+
+
+@dp.callback_query(F.data.startswith("shop:open:"))
+async def shop_open(callback: CallbackQuery):
+    ctx = callback.data.split(":", 2)[2]
+    if not resolve_shopping_terms(callback.message, ctx):
+        await callback.answer("Не нашёл список продуктов — открой рецепт заново.", show_alert=True)
+        return
+    # Ответом на сообщение с рецептом: так по нему же восстановим продукты на следующем шаге
+    await callback.message.reply(
+        "🛒 В каком магазине искать продукты?",
+        reply_markup=kb.store_pick_kb(ctx, store_prefs.get_enabled(callback.message.chat.id)),
+    )
+    await callback.answer()
+
+
+@dp.callback_query(F.data.startswith("shop:s:"))
+async def shop_store(callback: CallbackQuery):
+    _, _, ctx, store = callback.data.split(":", 3)
+    chat_id = callback.message.chat.id
+    terms = resolve_shopping_terms(callback.message, ctx)
+    if not terms:
+        await callback.answer("Не нашёл список продуктов — открой рецепт заново.", show_alert=True)
+        return
+    enabled = store_prefs.get_enabled(chat_id)
+    text = format_shopping_message(terms, chat_id) if store == "all" else format_store_links(terms, store)
+    await edit_text_safe(
+        callback.message, text, reply_markup=kb.store_pick_kb(ctx, enabled, current=store),
+        disable_web_page_preview=True,
+    )
+    await callback.answer()
 
 
 async def show_main_menu(message: Message, state: FSMContext, intro: str = "Что готовим? Выбери тип питания/кухни:"):
@@ -454,9 +533,7 @@ async def step_confirm_go(callback: CallbackQuery, state: FSMContext):
         dish_title = extract_dish_title(recipe_text)
         save_last_request(callback.message.chat.id, data, dish_title)
 
-        shopping_message = format_shopping_message(shopping_terms, callback.message.chat.id)
-        full_display_text = recipe_text + ("\n\n" + shopping_message if shopping_message else "")
-        set_last_recipe(callback.message.chat.id, dish_title, full_display_text, data.get("cuisine"))
+        set_last_recipe(callback.message.chat.id, dish_title, recipe_text, data.get("cuisine"))
     except Exception as e:
         logger.exception("Ошибка при подборе рецепта")
         await status_msg.edit_text(
@@ -467,16 +544,9 @@ async def step_confirm_go(callback: CallbackQuery, state: FSMContext):
         return
 
     await status_msg.delete()
-    await callback.message.answer(recipe_text)
-
-    if shopping_message:
-        await callback.message.answer(
-            shopping_message,
-            reply_markup=kb.recipe_result_kb(),
-            disable_web_page_preview=True,
-        )
-    else:
-        await callback.message.answer("Готово! 🍽", reply_markup=kb.recipe_result_kb())
+    # Рецепт и кнопки («Найти продукты в магазине», «В избранное», «Ещё рецепт») — одним сообщением
+    sent = await callback.message.answer(recipe_text, reply_markup=kb.recipe_result_kb())
+    remember_recipe_terms(callback.message.chat.id, sent.message_id, shopping_terms)
 
 
 # ---------- Меню на день ----------
@@ -695,11 +765,9 @@ async def dm_step_confirm_go(callback: CallbackQuery, state: FSMContext):
 
     await status_msg.delete()
 
+    # Список продуктов — по кнопке «🛒 Найти продукты в магазине» в самом меню (day_menu.build_summary_view)
     text, markup = day_menu.build_summary_view(callback.message.chat.id)
     await callback.message.answer(text, reply_markup=markup)
-
-    if summary["shopping_message"]:
-        await callback.message.answer(summary["shopping_message"], disable_web_page_preview=True)
 
 
 @dp.callback_query(F.data.startswith("daymenu:show:"))
@@ -932,7 +1000,7 @@ async def wm_step_confirm_go(callback: CallbackQuery, state: FSMContext):
     chat_id = callback.message.chat.id
 
     try:
-        basket_text, shopping_message = await week_menu.start_week_plan(
+        basket_text, _links = await week_menu.start_week_plan(
             chat_id, meals, config.WEEK_MENU_DAYS, data
         )
     except Exception as e:
@@ -945,9 +1013,9 @@ async def wm_step_confirm_go(callback: CallbackQuery, state: FSMContext):
         return
 
     await status_msg.delete()
-    await answer_long(callback.message, basket_text, disable_web_page_preview=True)
-    if shopping_message:
-        await answer_long(callback.message, shopping_message, disable_web_page_preview=True)
+    await answer_long(
+        callback.message, basket_text, reply_markup=kb.shopping_btn_kb("w"), disable_web_page_preview=True
+    )
 
     info = week_menu.get_basket_info(chat_id)
     if info and config.VKUSVILL_PRICES_ENABLED:
@@ -958,7 +1026,9 @@ async def wm_step_confirm_go(callback: CallbackQuery, state: FSMContext):
             await price_msg.delete()
             await answer_long(callback.message, priced, disable_web_page_preview=True)
         else:
-            await price_msg.edit_text("ℹ️ Цены ВкусВилла сейчас недоступны — воспользуйся ссылками выше.")
+            await price_msg.edit_text(
+                "ℹ️ Цены ВкусВилла сейчас недоступны — воспользуйся кнопкой «🛒 Найти продукты в магазине» выше."
+            )
 
     text, markup = week_menu.build_status_view(chat_id)
     await callback.message.answer(text, reply_markup=markup)
@@ -966,10 +1036,11 @@ async def wm_step_confirm_go(callback: CallbackQuery, state: FSMContext):
 
 async def _maybe_send_day_shopping(callback: CallbackQuery, slot: dict):
     """Если день только что сгенерирован и в нём есть продукты сверх основной корзины — присылаем ссылки на докупку."""
-    if slot.get("just_generated") and slot.get("shopping_message"):
+    terms = slot.get("shopping_terms") or []
+    if slot.get("just_generated") and terms:
         await callback.message.answer(
-            "➕ *К этому дню понадобится докупить:*\n" + slot["shopping_message"],
-            disable_web_page_preview=True,
+            f"➕ К дню {slot['day_number']} нужно докупить ещё {len(terms)} продукт(ов) сверх общей корзины.",
+            reply_markup=kb.shopping_btn_kb(f"wd{slot['day_number']}"),
         )
 
 
@@ -1000,10 +1071,11 @@ async def weekmenu_basket(callback: CallbackQuery):
         return
     await callback.answer()
     if info["basket_text"]:
-        await answer_long(callback.message, info["basket_text"], disable_web_page_preview=True)
-    links = format_shopping_message(list(info["inventory_initial"].keys()), chat_id)
-    if links:
-        await answer_long(callback.message, links, disable_web_page_preview=True)
+        await answer_long(
+            callback.message, info["basket_text"], reply_markup=kb.shopping_btn_kb("w"), disable_web_page_preview=True
+        )
+    else:
+        await callback.message.answer("🛒 Корзина плана:", reply_markup=kb.shopping_btn_kb("w"))
     if info["priced"]:
         await answer_long(callback.message, info["priced"], disable_web_page_preview=True)
 

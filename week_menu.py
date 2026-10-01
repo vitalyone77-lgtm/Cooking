@@ -191,6 +191,7 @@ async def _generate_day(chat_id: int, state: dict) -> dict:
         "order": meal_keys,
         "meals": day_meals,
         "shopping_message": day_shopping_message,
+        "shopping_terms": extra_terms,
     }
     state["history_titles"].extend(r["title"] for r in meal_results)
     state["current_day"] = day_number + 1
@@ -244,6 +245,7 @@ async def ensure_slot(chat_id: int, index: int) -> dict:
         "meal_key": meal_key,
         "just_generated": just_generated,
         "shopping_message": day_entry.get("shopping_message", ""),
+        "shopping_terms": day_entry.get("shopping_terms", []),
         "meal": day_entry["meals"][meal_key],
         "is_next_uncooked": index == state["progress_index"],
     }
@@ -391,3 +393,10 @@ def current_day_first_index(chat_id: int) -> int | None:
     if not state or state["current_day"] > state["days_total"]:
         return None
     return (state["current_day"] - 1) * len(state["meal_keys"])
+
+
+def get_day_shopping_terms(chat_id: int, day_number: int) -> list[str]:
+    """Продукты, которые нужно докупить к дню плана сверх общей корзины (для кнопки «Найти продукты в магазине»)."""
+    state = _load(chat_id)
+    day = state["days"].get(str(day_number)) if state else None
+    return list(day.get("shopping_terms", [])) if day else []

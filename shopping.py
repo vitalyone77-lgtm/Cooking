@@ -4,7 +4,7 @@
 """
 import re
 
-from stores.links import search_url, short_name
+from stores.links import search_url, short_name, full_name
 from stores.prefs import get_enabled
 
 SEARCH_TERMS_RE = re.compile(r"ПРОДУКТЫ_СПИСОК:\s*(.+)", re.IGNORECASE)
@@ -19,14 +19,49 @@ def extract_dish_title(recipe_text: str) -> str:
     return match.group(1).strip() if match else ""
 
 
+_PRODUCTS_HEADER_RE = re.compile(r"^\s*[*_]*Продукты[*_]*:?[*_]*\s*$", re.IGNORECASE | re.MULTILINE)
+_BULLET_RE = re.compile(r"^[-•–*]\s+")
+
+
+def _terms_from_products_section(text: str) -> list[str]:
+    """
+    Запасной разбор: если ИИ пропустил служебную строку «ПРОДУКТЫ_СПИСОК», берём названия
+    из раздела «Продукты:» самого рецепта (до тире с количеством, без скобок). Лучше ссылки
+    по названиям из рецепта, чем пустой список покупок.
+    """
+    header = _PRODUCTS_HEADER_RE.search(text)
+    if not header:
+        return []
+    terms: list[str] = []
+    seen: set[str] = set()
+    for line in text[header.end():].splitlines():
+        s = line.strip()
+        if not s:
+            if terms:
+                break
+            continue
+        if not _BULLET_RE.match(s):
+            break  # начался следующий раздел («Инструкция» и т.п.)
+        item = _BULLET_RE.sub("", s)
+        item = re.sub(r"\([^)]*\)", "", item)
+        item = re.split(r"\s[—–-]\s", item, maxsplit=1)[0]
+        for part in item.split(","):
+            name = part.strip(" .*_`")
+            if name and name.lower() not in seen:
+                seen.add(name.lower())
+                terms.append(name)
+    return terms[:30]
+
+
 def extract_shopping_terms(recipe_text: str) -> tuple[str, list[str]]:
     """
     Ищет в тексте рецепта техническую строку "ПРОДУКТЫ_СПИСОК: ...", убирает её
-    из текста и возвращает (очищенный_текст, список_продуктов).
+    из текста и возвращает (очищенный_текст, список_продуктов). Если строки нет —
+    продукты берутся из раздела «Продукты:» рецепта.
     """
     match = SEARCH_TERMS_RE.search(recipe_text)
     if not match:
-        return recipe_text.strip(), []
+        return recipe_text.strip(), _terms_from_products_section(recipe_text)
 
     terms_raw = match.group(1)
     terms = [t.strip(" .") for t in terms_raw.split(",") if t.strip(" .")]
@@ -97,4 +132,26 @@ def format_shopping_message(terms: list[str], chat_id: int | None = None) -> str
         links = " · ".join(f"[{short_name(s)}]({search_url(s, term)})" for s in stores)
         lines.append(f"• {term} — {links}")
     lines.append("\n_Ссылки открывают поиск по сайту магазина. Магазины можно выбрать в «🏪 Магазины»._")
+    return "\n".join(lines)
+
+
+def terms_from_recipe_text(text: str) -> list[str]:
+    """Продукты из раздела «Продукты:» готового текста рецепта (для кнопки «Найти продукты в магазине»)."""
+    return _terms_from_products_section(text or "")
+
+
+def _link_label(term: str) -> str:
+    """Название продукта как текст Markdown-ссылки: без символов, ломающих разметку."""
+    return re.sub(r"[\[\]*_`]", "", term).strip() or term
+
+
+def format_store_links(terms: list[str], store: str) -> str:
+    """Список продуктов со ссылками на поиск ТОЛЬКО в одном магазине (коротко, по одной ссылке на строку)."""
+    if not terms:
+        return ""
+    lines = [f"🛒 *Продукты — {full_name(store)}*", ""]
+    for term in terms:
+        lines.append(f"• [{_link_label(term)}]({search_url(store, term)})")
+    lines.append("")
+    lines.append("_Нажми на продукт — откроется поиск в магазине. Другой магазин — кнопки ниже._")
     return "\n".join(lines)
