@@ -12,6 +12,7 @@ import re
 
 import config
 from .base import Offer, CartLine
+from .units import is_pieces, pieces_to_grams
 from .optimizer import choose_packs
 from .vkusvill import VkusvillClient
 
@@ -53,6 +54,13 @@ def _stem(word: str) -> str:
 def _is_piece_item(name: str) -> bool:
     n = name.lower()
     return any(w in n for w in _PIECE_WORDS)
+
+
+def _normalize_need(term: str, need: float) -> float:
+    """«бананы=9» — штуки: яйца оставляем штуками, фрукты переводим в граммы по среднему весу."""
+    if _is_piece_item(term) or not is_pieces(term, need):
+        return need
+    return pieces_to_grams(term, need)
 
 
 def _alts(stem: str) -> tuple[str, ...]:
@@ -102,6 +110,7 @@ def _prepare_offers(term: str, offers: list[Offer]) -> list[Offer]:
 
 async def _cart_for_term(client: VkusvillClient, sem: asyncio.Semaphore,
                          term: str, need: float) -> tuple[str, list[CartLine]]:
+    need = _normalize_need(term, need)
     async with sem:
         try:
             offers = await client.search(term)
@@ -160,7 +169,7 @@ async def _run(inventory: dict[str, int], scope: str) -> str | None:
                 not_found.append(term)
                 continue
             unit = "шт" if _is_piece_item(term) else None
-            need_txt = f"{int(need)} шт" if unit else _fmt_g(need)
+            need_txt = f"{int(need)} шт" if (unit or is_pieces(term, need)) else _fmt_g(need)
             parts = []
             for cl in cart:
                 total += cl.total_price

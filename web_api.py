@@ -41,7 +41,7 @@ from ai import generate_recipe
 from cuisines import CUISINE_LABELS
 from keyboards import MEAL_LABELS
 from search import search_recipes, format_results_for_prompt
-from shopping import extract_shopping_terms, extract_dish_title, amounts_from_recipe_text
+from shopping import extract_shopping_terms, extract_dish_title, amounts_from_recipe_text, _fmt_amount
 from storage import get_all_users
 from stores.links import STORES, DEFAULT_STORES, search_url, short_name
 from stores.basket import build_priced_basket
@@ -347,7 +347,7 @@ def week(x_device: str | None = Header(default=None)):
                      "done_count": max(0, min(n, state["progress_index"] - first)), "total": n,
                      "extra_shopping": json.loads(extra) if extra else []})
     info = week_menu.get_basket_info(cid)
-    items = [{"name": k, "amount": v,
+    items = [{"name": k, "amount": _fmt_amount(k, v),
               "links": [{"store": short_name(s), "url": search_url(s, k)} for s in DEFAULT_STORES]}
              for k, v in info["inventory_initial"].items()]
     priced = re.sub(r"[*_`]|\[([^\]]+)\]\(([^)]+)\)", lambda m: m.group(1) or "", info["priced"] or "")

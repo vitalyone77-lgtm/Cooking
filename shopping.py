@@ -6,6 +6,7 @@ import re
 
 from stores.links import search_url, short_name, full_name
 from stores.prefs import get_enabled
+from stores.units import is_pieces
 
 SEARCH_TERMS_RE = re.compile(r"ПРОДУКТЫ_СПИСОК:\s*(.+)", re.IGNORECASE)
 DISH_TITLE_RE = re.compile(r"^\s*🍽\s*(.+)$", re.MULTILINE)
@@ -170,7 +171,7 @@ def amounts_from_recipe_text(text: str) -> dict[str, int]:
                 pieces = pieces or value
             elif not grams:
                 grams = value * (1000 if unit in ("кг", "л") else 1)
-        amount = grams or (pieces if "яйц" in name else 0)
+        amount = grams or (pieces if is_pieces(name, pieces) else 0)
         if amount > 0:
             result[name] = result.get(name, 0) + int(round(amount))
     return result
@@ -196,7 +197,7 @@ def _link_label(term: str) -> str:
 
 
 def _fmt_amount(name: str, value: int) -> str:
-    if "яйц" in name.lower() and value < 100:
+    if is_pieces(name, value):
         return f"{value} шт"
     if value >= 1000:
         return f"{value / 1000:.1f}".rstrip("0").rstrip(".").replace(".", ",") + " кг"
