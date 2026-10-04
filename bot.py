@@ -579,43 +579,9 @@ async def reminder_ok(callback: CallbackQuery):
 
 @dp.callback_query(F.data == "reminder:next")
 async def reminder_next(callback: CallbackQuery, state: FSMContext):
-    """Нажатие кнопки «Найти другой рецепт» — генерируем новый рецепт."""
-    chat_id = callback.message.chat.id
-    
-    # Получаем сохранённые параметры
-    data = get_last_request(chat_id)
-    if not data:
-        await callback.answer("Параметры не найдены, попробуй /menu", show_alert=True)
-        return
-    
+    """Нажатие кнопки «Найти другой рецепт» — открываем меню выбора параметров."""
     await callback.answer()
-    await callback.message.edit_reply_markup()
-    
-    # Генерируем новый рецепт
-    status_msg = await callback.message.answer("🔎 Ищу рецепты...")
-    
-    try:
-        search_query, results = await search_recipes(data)
-        await status_msg.edit_text(f"🤖 Подбираю рецепт...")
-        
-        results_text = format_results_for_prompt(results)
-        recipe_text = await generate_recipe(data, search_query, results_text)
-        recipe_text, shopping_terms = extract_shopping_terms(recipe_text)
-        
-        if not recipe_text.strip():
-            await status_msg.edit_text("Не удалось составить рецепт, попробуй позже.")
-            return
-        
-        dish_title = extract_dish_title(recipe_text)
-        set_last_recipe(chat_id, dish_title, recipe_text, data.get("cuisine"))
-        
-        await status_msg.delete()
-        sent = await callback.message.answer(recipe_text, reply_markup=kb.recipe_result_kb())
-        remember_recipe_terms(chat_id, sent.message_id, shopping_terms)
-        
-    except Exception as e:
-        logger.exception("Ошибка при подборе рецепта в напоминании")
-        await status_msg.edit_text(f"Ошибка: {e}\n\nПопробуй позже.")
+    await show_main_menu(callback.message, state, "Подобрать другой рецепт — выбери параметры:")
 
 
 # ---------- Меню на день ----------
