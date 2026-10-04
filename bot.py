@@ -30,7 +30,7 @@ from shopping import (
     extract_shopping_terms, extract_dish_title, format_store_links, terms_from_recipe_text,
     amounts_from_recipe_text, merge_amounts,
 )
-from storage import save_last_request, get_last_request, set_last_recipe
+from storage import save_last_request, get_last_request
 from reminders import setup_scheduler
 from favorites import add_favorite, get_favorites, get_favorite, remove_favorite, search_favorites
 from last_recipe import set_last_recipe, get_last_recipe
