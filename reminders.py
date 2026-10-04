@@ -5,21 +5,17 @@
 import logging
 
 from aiogram import Bot, Dispatcher
-from aiogram.fsm.storage.base import StorageKey
-from aiogram.fsm.context import FSMContext
 from aiogram.types import InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 import config
-import keyboards as kb
-from cuisines import CUISINE_LABELS
-from search import search_recipes, format_results_for_prompt
 from ai import generate_recipe
+from last_recipe import set_last_recipe
+from search import search_recipes, format_results_for_prompt
 from shopping import extract_shopping_terms, extract_dish_title
-from states import RecipeForm
-from storage import get_all_users, set_last_recipe, save_last_request
+from storage import get_all_users, save_last_request
 
 logger = logging.getLogger(__name__)
 
