@@ -6,6 +6,8 @@ import logging
 import threading
 from pathlib import Path
 
+from jsonio import write_json_atomic
+
 from .links import STORES, DEFAULT_STORES
 
 logger = logging.getLogger(__name__)
@@ -49,6 +51,5 @@ def toggle(chat_id: int, store: str) -> list[str]:
     with _lock:
         data = _read()
         data[str(chat_id)] = [s for s in STORES if s in current]
-        with open(PREFS_FILE, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
+        write_json_atomic(PREFS_FILE, data)
     return get_enabled(chat_id)

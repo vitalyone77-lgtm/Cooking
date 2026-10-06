@@ -16,7 +16,7 @@ from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import CommandStart, Command, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.types import Message, CallbackQuery, BotCommand
+from aiogram.types import Message, CallbackQuery, BotCommand, ErrorEvent
 
 import config
 import keyboards as kb
@@ -37,6 +37,7 @@ from last_recipe import set_last_recipe, get_last_recipe
 from stores import prefs as store_prefs
 from stores.links import DEFAULT_STORES
 from stores.basket import build_priced_basket
+from tg_safety import SafeSendMiddleware
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -49,7 +50,28 @@ APPLIANCE_LABELS = {
 }
 
 bot = Bot(token=config.BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.MARKDOWN))
+bot.session.middleware(SafeSendMiddleware())   # битая разметка ИИ, длинные тексты, «not modified»
 dp = Dispatcher(storage=MemoryStorage())
+
+
+@dp.errors()
+async def on_error(event: ErrorEvent):
+    """Любая непойманная ошибка в обработчике: пишем в лог и коротко сообщаем пользователю, а не молчим."""
+    logger.exception("Ошибка при обработке обновления", exc_info=event.exception)
+    upd = event.update
+    chat_id = None
+    try:
+        if upd.callback_query:
+            chat_id = upd.callback_query.message.chat.id if upd.callback_query.message else None
+            await upd.callback_query.answer()
+        elif upd.message:
+            chat_id = upd.message.chat.id
+        if chat_id:
+            await bot.send_message(chat_id, "😔 Что-то пошло не так. Попробуй ещё раз или нажми /start.",
+                                   parse_mode=None)
+    except Exception:  # noqa: BLE001 — сообщить не удалось (например, бот заблокирован), лог уже есть
+        pass
+    return True
 
 
 # ---------- Вспомогательное ----------
@@ -572,9 +594,9 @@ async def step_confirm_go(callback: CallbackQuery, state: FSMContext):
 
 @dp.callback_query(F.data == "reminder:ok")
 async def reminder_ok(callback: CallbackQuery):
-    """Нажатие кнопки «Приготовить» в напоминании — просто убираем кнопки."""
-    await callback.message.edit_reply_markup()
-    await callback.answer()
+    """«Приготовить» в напоминании — под рецептом появляются обычные кнопки: продукты, избранное, ещё рецепт."""
+    await callback.message.edit_reply_markup(reply_markup=kb.recipe_result_kb())
+    await callback.answer("Отлично! Ниже — продукты и избранное")
 
 
 @dp.callback_query(F.data == "reminder:next")

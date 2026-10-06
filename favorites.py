@@ -8,6 +8,8 @@ import threading
 import time
 from pathlib import Path
 
+from jsonio import write_json_atomic
+
 logger = logging.getLogger(__name__)
 
 FAVORITES_FILE = Path(__file__).parent / "favorites.json"
@@ -26,8 +28,7 @@ def _read_all() -> dict:
 
 
 def _write_all(data: dict) -> None:
-    with open(FAVORITES_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+    write_json_atomic(FAVORITES_FILE, data)
 
 
 def add_favorite(chat_id: int, title: str, text: str, cuisine: str) -> str:

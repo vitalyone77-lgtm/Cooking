@@ -9,6 +9,7 @@ ai.py, search.py, prompts.py, day_menu.py, week_menu.py, favorites.py, shopping.
 портят друг другу JSON-файлы.
 """
 import asyncio
+from html import escape
 import hashlib
 import hmac
 import json
@@ -21,13 +22,15 @@ from pathlib import Path
 from urllib.parse import quote
 
 from fastapi import FastAPI, Header, HTTPException, Request, Response, UploadFile, File, Form as FForm
-from fastapi.responses import FileResponse, RedirectResponse, JSONResponse
+from fastapi.middleware.gzip import GZipMiddleware
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 import config
 import web_db
 import web_pdf
+import seo_pages
 import day_menu
 import week_menu
 import favorites as fav_mod
@@ -48,6 +51,7 @@ from stores.basket import build_priced_basket
 
 BASE = Path(__file__).parent
 app = FastAPI(title="Kitchen", docs_url=None, redoc_url=None, openapi_url=None)
+app.add_middleware(GZipMiddleware, minimum_size=1000)   # HTML/JS сайта в 3-4 раза меньше по сети
 app.mount("/uploads", StaticFiles(directory=web_db.DATA_DIR / "uploads"), name="uploads")
 
 APPLIANCES = {"airfryer": "Аэрогриль", "multicooker": "Мультиварка", "oven": "Духовка", "stove": "Плита"}
@@ -192,6 +196,14 @@ def job(job_id: str, x_device: str | None = Header(default=None)):
 _new_dev_log: dict[str, list[float]] = {}
 
 
+def _prune(log: dict[str, list[float]], window: float) -> None:
+    """Счётчики попыток по IP: удаляем устаревшие, чтобы словарь не рос бесконечно."""
+    if len(log) > 1000:
+        now = time.time()
+        for k in [k for k, v in log.items() if not v or now - v[-1] > window]:
+            log.pop(k, None)
+
+
 @app.post("/api/device")
 def new_device(request: Request):
     ip = request.headers.get("x-forwarded-for", request.client.host if request.client else "?").split(",")[0].strip()
@@ -200,6 +212,7 @@ def new_device(request: Request):
         raise HTTPException(429, "Слишком много новых устройств с одного адреса")
     hist.append(time.time())
     _new_dev_log[ip] = hist
+    _prune(_new_dev_log, 3600)
     return {"device": web_db.create_device()}
 
 
@@ -463,12 +476,12 @@ _login_fail: dict[str, list[float]] = {}
 
 
 def _admin_cookie() -> str:
-    key = (config.WEB_SECRET or "x").encode()
+    key = config.WEB_SECRET.encode()
     return hmac.new(key, ("admin:" + config.ADMIN_PASSWORD).encode(), hashlib.sha256).hexdigest()
 
 
 def _need_admin(request: Request):
-    if not config.ADMIN_PASSWORD or not hmac.compare_digest(request.cookies.get("adm", "").encode(), _admin_cookie().encode()):
+    if not (config.ADMIN_PASSWORD and config.WEB_SECRET) or not hmac.compare_digest(request.cookies.get("adm", "").encode(), _admin_cookie().encode()):
         raise HTTPException(401, "admin")
 
 
@@ -478,10 +491,16 @@ async def admin_login(request: Request, response: Response):
     fails = [t for t in _login_fail.get(ip, []) if time.time() - t < 600]
     if len(fails) >= 5:
         raise HTTPException(429, "Слишком много попыток, подожди 10 минут")
-    body = await request.json()
-    if not config.ADMIN_PASSWORD or not hmac.compare_digest(str(body.get("password", "")).encode(), config.ADMIN_PASSWORD.encode()):
+    try:
+        body = await request.json()
+    except ValueError:
+        raise HTTPException(400, "Неверный запрос")
+    if not isinstance(body, dict):
+        raise HTTPException(400, "Неверный запрос")
+    if not (config.ADMIN_PASSWORD and config.WEB_SECRET) or not hmac.compare_digest(str(body.get("password", "")).encode(), config.ADMIN_PASSWORD.encode()):
         fails.append(time.time())
         _login_fail[ip] = fails
+        _prune(_login_fail, 600)
         raise HTTPException(401, "Неверный пароль")
     resp = JSONResponse({"ok": True})
     resp.set_cookie("adm", _admin_cookie(), httponly=True, samesite="strict",
@@ -538,9 +557,33 @@ def admin_ad_delete(ad_id: int, request: Request):
 
 # ---------------- страницы ----------------
 
+def _verify_meta() -> str:
+    """Метатеги подтверждения прав на сайт для Яндекс Вебмастера и Google Search Console (коды — в .env)."""
+    tags = []
+    if config.YANDEX_VERIFICATION:
+        tags.append(f'<meta name="yandex-verification" content="{escape(config.YANDEX_VERIFICATION)}">')
+    if config.GOOGLE_SITE_VERIFICATION:
+        tags.append(f'<meta name="google-site-verification" content="{escape(config.GOOGLE_SITE_VERIFICATION)}">')
+    return "".join(tags)
+
+
 @app.get("/")
 def index():
-    return FileResponse(BASE / "web" / "index.html", media_type="text/html; charset=utf-8")
+    html = (BASE / "web" / "index.html").read_text(encoding="utf-8").replace("<!--VERIFY-->", _verify_meta(), 1)
+    return HTMLResponse(html, headers={"Cache-Control": "no-cache"})
+
+
+@app.get("/pitanie")
+def seo_index():
+    return HTMLResponse(seo_pages.render_index(_site()))
+
+
+@app.get("/pitanie/{slug}")
+def seo_page(slug: str):
+    html = seo_pages.render_page(slug, _site())
+    if html is None:
+        raise HTTPException(404, "Страница не найдена")
+    return HTMLResponse(html)
 
 
 @app.get("/admin")
@@ -592,8 +635,13 @@ def robots():
 
 @app.get("/sitemap.xml")
 def sitemap():
+    lastmod = time.strftime("%Y-%m-%d", time.gmtime(max(
+        (BASE / "web" / "index.html").stat().st_mtime, (BASE / "seo_pages.py").stat().st_mtime)))
+    urls = [("/", "1.0")] + [(p, "0.8" if p != "/pitanie" else "0.6") for p in seo_pages.all_paths()]
+    rows = "".join(f"  <url><loc>{_site()}{p}</loc><lastmod>{lastmod}</lastmod><priority>{pr}</priority></url>\n"
+                   for p, pr in urls)
     body = ('<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
-            f"  <url><loc>{_site()}/</loc><changefreq>weekly</changefreq><priority>1.0</priority></url>\n</urlset>\n")
+            + rows + "</urlset>\n")
     return Response(body, media_type="application/xml")
 
 
@@ -607,10 +655,12 @@ def llms():
         "- Рецепт с калорийностью и КБЖУ на порцию, учитывает кухню (классическая, аюрведа, спорт и др.) и технику\n"
         "- Меню на день по приёмам пищи с общим списком покупок\n"
         "- План питания на 3 дня с единой корзиной продуктов и учётом остатков\n"
-        "- Ссылки на поиск продуктов в Пятёрочке, ВкусВилле, Яндекс Лавке, Купере; корзина с ценами во ВкусВилле\n"
+        "- Ссылки на поиск продуктов в Пятёрочке, ВкусВилле, Перекрёстке, Яндекс Лавке, Купере; "
+        "корзина с ценами во ВкусВилле\n"
         "- Скачивание в PDF, добавление на главный экран телефона (PWA)\n"
         "- Есть Telegram-бот с теми же функциями\n\n"
         f"## Ссылки\n- [Приложение]({_site()}/)\n"
+        + "".join(f"- [{p['h1']}]({_site()}/pitanie/{s}): {p['description']}\n" for s, p in seo_pages.PAGES.items())
     )
     return Response(body, media_type="text/plain; charset=utf-8")
 

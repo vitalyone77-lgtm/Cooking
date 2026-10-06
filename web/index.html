@@ -20,8 +20,11 @@
 <meta property="og:title" content="Кухонный помощник — рецепты, меню на день и план питания с КБЖУ">
 <meta property="og:description" content="Бесплатно и без регистрации: рецепт по твоим продуктам, меню на день, план на 3 дня, калории и КБЖУ, список покупок со ссылками на магазины, PDF.">
 <meta property="og:url" content="https://menu.pump-um.ru/">
-<meta property="og:image" content="https://menu.pump-um.ru/icons/icon-512.png">
-<meta name="twitter:card" content="summary">
+<meta property="og:image" content="https://menu.pump-um.ru/icons/og-image.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<!--VERIFY-->
 <script type="application/ld+json">{"@context":"https://schema.org","@type":"WebApplication","name":"Кухонный помощник","url":"https://menu.pump-um.ru/","applicationCategory":"LifestyleApplication","operatingSystem":"Любой (веб, можно добавить на главный экран)","inLanguage":"ru","description":"Подбор рецептов по продуктам и кухне, меню на день и план питания на 3 дня с калориями и КБЖУ, список покупок со ссылками на магазины, скачивание в PDF. Без регистрации.","offers":{"@type":"Offer","price":"0","priceCurrency":"RUB"},"featureList":["Рецепт с калориями и КБЖУ","Меню на день","План питания на 3 дня","Список покупок и корзина ВкусВилл","Скачивание в PDF"]}</script>
 <script type="application/ld+json">{"@context":"https://schema.org","@type":"FAQPage","mainEntity":[{"@type":"Question","name":"Нужна ли регистрация?","acceptedAnswer":{"@type":"Answer","text":"Нет. Приложение работает без регистрации, данные хранятся на твоём устройстве."}},{"@type":"Question","name":"Сколько стоит?","acceptedAnswer":{"@type":"Answer","text":"Бесплатно. Есть дневные лимиты: 3 рецепта, 1 меню на день, 1 план на 3 дня."}},{"@type":"Question","name":"Как посчитать КБЖУ и калории блюда?","acceptedAnswer":{"@type":"Answer","text":"Выбери кухню и приём пищи — рецепт придёт с калорийностью и белками, жирами, углеводами на порцию."}},{"@type":"Question","name":"Можно ли получить список покупок?","acceptedAnswer":{"@type":"Answer","text":"Да. Выбери магазин (Пятёрочка, ВкусВилл, Перекрёсток, Яндекс Лавка, Купер) — откроются ссылки на поиск продуктов, для ВкусВилла можно собрать корзину с ценами."}}]}</script>
 
@@ -75,7 +78,7 @@ input[type=text]{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid
 </style>
 </head>
 <body>
-<div class="wrap" id="main" aria-live="polite"><h1>Кухонный помощник</h1><p>Бесплатный помощник по питанию без регистрации: подбирает рецепты по кухне и продуктам, составляет меню на день и план питания на 3 дня с калориями и КБЖУ, делает список покупок со ссылками на Пятёрочку, ВкусВилл, Яндекс Лавку и Купер и скачивает рецепты в PDF. Работает в браузере, можно добавить на главный экран телефона.</p><noscript><p>Для работы приложения включите JavaScript.</p></noscript></div>
+<div class="wrap" id="main" aria-live="polite"><h1>Кухонный помощник</h1><p>Бесплатный помощник по питанию без регистрации: подбирает рецепты по кухне и продуктам, составляет меню на день и план питания на 3 дня с калориями и КБЖУ, делает список покупок со ссылками на Пятёрочку, ВкусВилл, Яндекс Лавку и Купер и скачивает рецепты в PDF. Работает в браузере, можно добавить на главный экран телефона.</p><p><a href="/pitanie/menu-na-den">Меню на день с КБЖУ</a> · <a href="/pitanie/plan-pitaniya-na-3-dnya">План питания на 3 дня</a> · <a href="/pitanie/chto-prigotovit-iz-produktov">Что приготовить из продуктов</a> · <a href="/pitanie/podbor-po-kbzhu">Подбор по КБЖУ</a> · <a href="/pitanie">Все статьи</a></p><noscript><p>Для работы приложения включите JavaScript.</p></noscript></div>
 <nav class="tabs" role="tablist" aria-label="Разделы">
   <button class="tab" role="tab" data-tab="new"><span class="ic">🍳</span>Создать</button>
   <button class="tab" role="tab" data-tab="menus"><span class="ic">🗂</span>Готовые меню</button>
@@ -266,7 +269,8 @@ input[type=text]{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid
     h+='<label class="f">Время на готовку</label>'+chips(times,F.time,"time",false);
     h+='<label class="f">Порций</label>'+chips(sv,String(F.servings),"servings",false);
     h+='<label class="f">В чём готовим</label>'+chips(m.appliances,F.appliance,"appliance",true);
-    h+='<button class="btn" id="go">🔍 Подобрать</button><div class="install-bottom" id="install-bottom"></div>';
+    h+='<button class="btn" id="go">🔍 Подобрать</button><div class="install-bottom" id="install-bottom"></div>'+
+      '<p class="sub" style="margin-top:18px;font-size:14px">Как это работает: <a href="/pitanie/menu-na-den">меню на день</a> · <a href="/pitanie/plan-pitaniya-na-3-dnya">план на 3 дня</a> · <a href="/pitanie/podbor-po-kbzhu">подбор по КБЖУ</a> · <a href="/pitanie/spisok-pokupok-i-korzina">список покупок</a></p>';
     main.innerHTML=h;
     fillInstall();
   }

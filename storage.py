@@ -8,6 +8,8 @@ import logging
 import threading
 from pathlib import Path
 
+from jsonio import write_json_atomic
+
 logger = logging.getLogger(__name__)
 
 STORAGE_FILE = Path(__file__).parent / "user_data.json"
@@ -26,8 +28,7 @@ def _read_all() -> dict:
 
 
 def _write_all(data: dict) -> None:
-    with open(STORAGE_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+    write_json_atomic(STORAGE_FILE, data)
 
 
 def save_last_request(chat_id: int, form_data: dict, dish_title: str = "") -> None:

@@ -1,10 +1,12 @@
 """
 Ежедневное напоминание — сразу предлагает новый рецепт по сохранённым параметрам.
-Кнопки: «Приготовить» (сохранить рецепт) и «Найти другой рецепт» (переген).
+Кнопки: «Приготовить» (открывает «Найти продукты» / «В избранное») и «Найти другой рецепт» (анкета).
 """
+import asyncio
 import logging
 
 from aiogram import Bot, Dispatcher
+from aiogram.exceptions import TelegramForbiddenError
 from aiogram.types import InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -28,45 +30,53 @@ def reminder_kb() -> InlineKeyboardMarkup:
     return b.as_markup()
 
 
+REMINDER_INTRO = "👋 Идея, что приготовить завтра — по твоим прошлым параметрам:\n\n"
+_PARALLEL = 3            # одновременно готовим рецепты для 3 пользователей (не перегружаем ИИ и поиск)
+_PER_USER_TIMEOUT = 150  # секунд на одного пользователя: поиск + ИИ
+
+
+async def _remind_one(bot: Bot, chat_id: int, data: dict) -> None:
+    # Прошлые параметры, но без названия прошлого блюда — иначе ИИ снова предложит то же самое
+    search_data = dict(data)
+    search_data["preferred"] = ""
+    search_data.pop("dish_title", None)
+
+    search_query, results = await search_recipes(search_data)
+    recipe_text = await generate_recipe(search_data, search_query, format_results_for_prompt(results))
+    recipe_text, _terms = extract_shopping_terms(recipe_text)
+
+    if not recipe_text.strip() or recipe_text.startswith("😔"):
+        # ИИ недоступен — короткое напоминание без рецепта, чем ничего или текст ошибки
+        await bot.send_message(
+            chat_id, "👋 Как насчёт завтра приготовить что-нибудь новое?",
+            reply_markup=InlineKeyboardBuilder().button(text="🍳 Подобрать рецепт", callback_data="menu:open").as_markup(),
+        )
+        return
+
+    dish_title = extract_dish_title(recipe_text)
+    save_last_request(chat_id, search_data, dish_title)
+    set_last_recipe(chat_id, dish_title, recipe_text, search_data.get("cuisine"))
+    await bot.send_message(chat_id, REMINDER_INTRO + recipe_text, reply_markup=reminder_kb())
+
+
 async def send_daily_reminders(bot: Bot, dp: Dispatcher):
     users = get_all_users()
     if not users:
         logger.info("Напоминания: нет ни одного сохранённого пользователя")
         return
+    sem = asyncio.Semaphore(_PARALLEL)
 
-    for chat_id_str, data in users.items():
-        chat_id = int(chat_id_str)
-        
-        # Загружаем сохранённые параметры (без конкретного блюда, чтобы генерировать новый)
-        search_data = dict(data)
-        search_data["preferred"] = ""
-        search_data.pop("dish_title", None)
+    async def guarded(chat_id: int, data: dict):
+        async with sem:
+            try:
+                await asyncio.wait_for(_remind_one(bot, chat_id, data), timeout=_PER_USER_TIMEOUT)
+            except TelegramForbiddenError:
+                logger.info("Напоминание %s: пользователь заблокировал бота", chat_id)
+            except Exception as e:  # noqa: BLE001 — один пользователь не должен ломать рассылку остальным
+                logger.warning("Не удалось отправить напоминание %s: %r", chat_id, e)
 
-        try:
-            # Генерируем рецепт прямо в напоминании
-            search_query, results = await search_recipes(search_data)
-            results_text = format_results_for_prompt(results)
-            recipe_text = await generate_recipe(search_data, search_query, results_text)
-            recipe_text, shopping_terms = extract_shopping_terms(recipe_text)
-
-            if not recipe_text.strip():
-                # Если не получилось, отправляем старое сообщение
-                await bot.send_message(
-                    chat_id,
-                    "👋 Как насчёт завтра приготовить что-нибудь новое? Напиши /menu и выбери параметры.",
-                    reply_markup=InlineKeyboardBuilder().button(text="🍳 Выбрать рецепт", callback_data="menu:open").as_markup()
-                )
-                continue
-
-            dish_title = extract_dish_title(recipe_text)
-            save_last_request(chat_id, search_data, dish_title)
-            set_last_recipe(chat_id, dish_title, recipe_text, search_data.get("cuisine"))
-
-            # Отправляем готовый рецепт с кнопками напоминания
-            await bot.send_message(chat_id, recipe_text, reply_markup=reminder_kb())
-
-        except Exception as e:
-            logger.warning(f"Не удалось отправить напоминание {chat_id}: {e}")
+    await asyncio.gather(*(guarded(int(cid), data) for cid, data in users.items()))
+    logger.info("Напоминания разосланы: %d пользователей", len(users))
 
 
 def setup_scheduler(bot: Bot, dp: Dispatcher) -> AsyncIOScheduler:

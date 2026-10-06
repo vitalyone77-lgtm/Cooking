@@ -21,6 +21,8 @@ import logging
 import threading
 from pathlib import Path
 
+from jsonio import write_json_atomic
+
 from aiogram.types import InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
@@ -51,8 +53,7 @@ def _read_all() -> dict:
 
 
 def _write_all(data: dict) -> None:
-    with open(DAY_MENU_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+    write_json_atomic(DAY_MENU_FILE, data)
 
 
 def _save_menu(chat_id: int, entry: dict) -> None:
