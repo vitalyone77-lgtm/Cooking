@@ -61,11 +61,11 @@ if errorlevel 1 (
 
 echo.
 echo --- Подключаюсь к серверу и обновляю бота ---
-ssh %SERVER% "cd %REMOTE_DIR% && git pull && source venv/bin/activate && pip install -q -r requirements.txt && deactivate && systemctl restart %SERVICE% && (systemctl cat cooking-web >/dev/null 2>&1 && systemctl restart cooking-web && echo --WEB-RESTARTED-- || true) && echo --STATUS-- && systemctl status %SERVICE% --no-pager"
+ssh %SERVER% "bash /root/Cooking/deploy.sh"
 
 echo.
 echo ===============================================
-echo   Готово. Проверь в выводе выше "active (running)".
+echo   Проверь в выводе выше: "ГОТОВО" - обновлено; "ОТКАТ" - была ошибка, работает прошлая версия.
 echo   Потом открой бота в Telegram и проверь.
 echo ===============================================
 echo.
