@@ -321,6 +321,15 @@ def build_user_prompt(data: dict, search_query: str, search_results_text: str) -
         if macro_goal else ""
     )
 
+    avoid = data.get("avoid_titles") or []
+    variety_lines = ""
+    if avoid:
+        variety_lines += ("- Не предлагай эти блюда и очень похожие на них (они уже были недавно), придумай другое: "
+                          + "; ".join(avoid) + "\n")
+    if data.get("variety_hint"):
+        variety_lines += (f"- Для разнообразия желательно: {data['variety_hint']} — но только если это не противоречит "
+                          "правилам кухни, исключениям, времени и технике; иначе выбери другой тип блюда.\n")
+
     return f"""Запрос пользователя на подбор рецепта:
 
 - Тип питания/кухня: {cuisine_name}
@@ -328,7 +337,7 @@ def build_user_prompt(data: dict, search_query: str, search_results_text: str) -
 {macro_goal_line}- Пожелание пользователя (это может быть как список продуктов, так и название конкретного \
 блюда, которое он хочет приготовить — если это название блюда, подбирай именно его): {preferred}
 - Исключить продукты (строго!): {excluded}
-- Время на готовку: {data.get('time', 'не важно')}
+{variety_lines}- Время на готовку: {data.get('time', 'не важно')}
 - Количество порций: {data.get('servings', 2)}
 - Доступная техника приготовления: {appliance_labels}
 

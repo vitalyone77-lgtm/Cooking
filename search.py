@@ -38,6 +38,8 @@ def _build_query(data: dict) -> str:
         parts.append(f"в {', '.join(data['appliance_labels'])}")
     if data.get("time") and data["time"] != "Не важно":
         parts.append(f"быстро за {data['time']}")
+    if data.get("variety_hint"):          # напоминание: каждый день другой тип блюда
+        parts.append(data["variety_hint"])
 
     return " ".join(parts)
 

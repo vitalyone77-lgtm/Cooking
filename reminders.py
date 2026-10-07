@@ -4,6 +4,7 @@
 """
 import asyncio
 import logging
+import random
 
 from aiogram import Bot, Dispatcher
 from aiogram.exceptions import TelegramForbiddenError
@@ -16,7 +17,7 @@ import config
 from ai import generate_recipe
 from search import search_recipes, format_results_for_prompt
 from shopping import extract_shopping_terms, extract_dish_title
-from storage import get_all_users, save_last_request, save_reminder_recipe
+from storage import get_all_users, save_last_request, save_reminder_recipe, push_reminder_history
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +32,10 @@ def reminder_kb() -> InlineKeyboardMarkup:
 
 
 REMINDER_INTRO = "👋 Идея, давай приготовим завтра —"
+# Тип блюда на сегодня — по кругу случайно, чтобы напоминания не предлагали каждый день похожее
+VARIETY_HINTS = ["суп", "рагу или тушёное блюдо", "запеканка", "сытный салат", "каша или блюдо из крупы",
+                 "паста или лапша", "котлеты или тефтели", "блюдо из яиц", "блюдо из бобовых",
+                 "блюдо из овощей", "блюдо из рыбы", "блюдо из птицы", "блюдо из мяса", "плов или ризотто"]
 _PARALLEL = 3            # одновременно готовим рецепты для 3 пользователей (не перегружаем ИИ и поиск)
 _PER_USER_TIMEOUT = 150  # секунд на одного пользователя: поиск + ИИ
 
@@ -45,11 +50,17 @@ def recipe_teaser(recipe_text: str) -> str:
 
 async def _remind_one(bot: Bot, chat_id: int, data: dict) -> None:
     # Прошлые параметры, но без названия прошлого блюда — иначе ИИ снова предложит то же самое
-    search_data = {k: v for k, v in data.items() if k not in ("reminders_off", "reminder_recipe", "dish_title")}
+    search_data = {k: v for k, v in data.items()
+                   if k not in ("reminders_off", "reminder_recipe", "reminder_history", "dish_title")}
     search_data["preferred"] = ""
+    history = data.get("reminder_history") or []
+    recent_hints = {h.get("hint") for h in history[-5:]}
+    hint = random.choice([h for h in VARIETY_HINTS if h not in recent_hints] or VARIETY_HINTS)
+    gen_data = dict(search_data, variety_hint=hint,
+                    avoid_titles=[h["title"] for h in history if h.get("title")] + ([data["dish_title"]] if data.get("dish_title") else []))
 
-    search_query, results = await search_recipes(search_data)
-    recipe_text = await generate_recipe(search_data, search_query, format_results_for_prompt(results))
+    search_query, results = await search_recipes(gen_data)
+    recipe_text = await generate_recipe(gen_data, search_query, format_results_for_prompt(results))
     recipe_text, terms = extract_shopping_terms(recipe_text)
 
     if not recipe_text.strip() or recipe_text.startswith("😔"):
@@ -60,7 +71,9 @@ async def _remind_one(bot: Bot, chat_id: int, data: dict) -> None:
         )
         return
 
-    save_last_request(chat_id, search_data, extract_dish_title(recipe_text))
+    title = extract_dish_title(recipe_text)
+    save_last_request(chat_id, search_data, title)
+    push_reminder_history(chat_id, title, hint)
     # Полный рецепт храним в файле (переживёт перезапуск бота) и показываем по кнопке «Готовить»
     save_reminder_recipe(chat_id, recipe_text, terms)
     await bot.send_message(chat_id, recipe_teaser(recipe_text), reply_markup=reminder_kb())

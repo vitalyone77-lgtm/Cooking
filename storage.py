@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 STORAGE_FILE = Path(__file__).parent / "user_data.json"
 _lock = threading.Lock()
-_KEEP = ("reminders_off", "reminder_recipe")   # выключенная рассылка и рецепт из последнего напоминания
+_KEEP = ("reminders_off", "reminder_recipe", "reminder_history")   # выключенная рассылка и рецепт из последнего напоминания
 
 
 def _read_all() -> dict:
@@ -89,6 +89,13 @@ def reminders_enabled(chat_id: int) -> bool:
 def save_reminder_recipe(chat_id: int, text: str, terms: list[str]) -> None:
     """Полный рецепт из напоминания: в сообщении — только название, рецепт по кнопке «Готовить»."""
     _update(chat_id, reminder_recipe={"text": text, "terms": terms})
+
+
+def push_reminder_history(chat_id: int, title: str, hint: str, keep: int = 14) -> None:
+    """Последние блюда из напоминаний — чтобы следующие дни не повторяли их."""
+    entry = get_last_request(chat_id) or {}
+    hist = (entry.get("reminder_history") or [])[-(keep - 1):] + [{"title": title, "hint": hint}]
+    _update(chat_id, reminder_history=hist)
 
 
 def get_reminder_recipe(chat_id: int) -> dict | None:
