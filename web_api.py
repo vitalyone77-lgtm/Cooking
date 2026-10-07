@@ -615,7 +615,7 @@ def health():
 # ---------------- SEO / GEO: robots, sitemap, llms.txt ----------------
 
 def _site() -> str:
-    return (config.WEB_APP_URL or "https://menu.pump-um.ru").rstrip("/")
+    return (config.WEB_APP_URL or "https://menu.ymayaka.ru").rstrip("/")
 
 
 @app.middleware("http")

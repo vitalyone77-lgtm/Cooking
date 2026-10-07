@@ -23,7 +23,7 @@ OpenRouter) → prompts.py (промпты; ИИ добавляет служеб
 Данные: JSON-файлы (user_data, favorites, day_menu, week_menu, store_prefs) для бота; для веба отдельная папка
 web_data/ (SQLite web.db + такие же JSON). Идентификатор в веб-ядре: chat_id = 10**12 + id устройства.
 Сервер: RUVDS 201.50.117.2, Ubuntu 20.04, /root/Cooking, venv (Python 3.11.9), systemd-служба Cooking (бот), для веба
-— cooking-web (uvicorn :8101) за nginx на https://menu.pump-um.ru (запущено 01.10.2026, сертификат Let's Encrypt).
+— cooking-web (uvicorn :8101) за nginx на https://menu.ymayaka.ru (запущено 01.10.2026, сертификат Let's Encrypt).
 Деплой: update_cooking.bat (git add . → commit → push → ssh: git pull, pip install, restart). Секреты — только в .env.
 На сервере живут и другие проекты (fitness_bot :8081, quest :8091, pm2 :3000 …) — порты не занимать.
 Инструкции: DEPLOY_WEB.md (запуск веба по шагам), .env.example (что в .env), QUESTIONS.md (открытые вопросы).
@@ -220,9 +220,9 @@ Android/Chrome — системное окно, iPhone — инструкция 
 (`uvicorn web_api:app --host 127.0.0.1 --port 8101`) — **работает** (создана 01.10.2026), см. `DEPLOY_WEB.md`. Журналы: `journalctl -u Cooking -n 50 --no-pager`.
 **На том же сервере другие проекты:** `fitness_bot` (порт 8081), `quest.pump-um.ru` (nginx → порт 8091; служба, по-видимому, `peterhoff-web`), pm2-приложение (3000),
 `autobot`, `fx_agent`, `persona_friend`, `storymetaverse`, `vpsguard`, `fail2ban`. Не занимать их порты, не трогать их сайты в nginx.
-**nginx:** сайты `default` (порт 3000) и `quest.pump-um.ru` (→ 8091, сертификат certbot). `menu.pump-um.ru` (→ 8101, сертификат до 30.12.2026, автопродление `certbot.timer`). Файл сайта — `/etc/nginx/sites-available/cooking-web`.
-**Домены:** `pump-um.ru` на reg.ru; `quest.pump-um.ru` и **`menu.pump-um.ru`** → `201.50.117.2` (проверено 01.10.2026). Сайт на Тильде (если нужен)
-получит ссылку или iframe на `https://menu.pump-um.ru`.
+**nginx:** сайты `default` (порт 3000) и `quest.pump-um.ru` (→ 8091, сертификат certbot). `menu.ymayaka.ru` (→ 8101, сертификат до 30.12.2026, автопродление `certbot.timer`). Файл сайта — `/etc/nginx/sites-available/cooking-web`.
+**Домены:** `pump-um.ru` на reg.ru; `quest.pump-um.ru` и **`menu.ymayaka.ru`** → `201.50.117.2` (проверено 01.10.2026). Сайт на Тильде (если нужен)
+получит ссылку или iframe на `https://menu.ymayaka.ru`.
 **Git:** репозиторий `vitalyone77-lgtm/Cooking` (на сервере remote `github-Cooking:…`), ветка `main`. Контрольная точка `before-week-menu`
 (состояние до плана питания). На сервере — последний коммит `main` (актуальный смотри `cd /root/Cooking && git log -1`); до выкладки веба там был `6bd9cbb` — на него можно откатиться: `git reset --hard 6bd9cbb`.
 **Деплой:** `update_cooking.bat` на компьютере: `git add .` → commit → push → по SSH `git pull`, `pip install -r requirements.txt`,
@@ -232,7 +232,7 @@ Android/Chrome — системное окно, iPhone — инструкция 
 
 ## 10. Состояние на 01.10.2026
 - **Всё выложено и работает на сервере:** бот (меню, рецепты, меню на день, план на 3 дня, избранное, магазины с кнопкой «Найти продукты в магазине»,
-  DeepSeek + Tavily) и сайт https://menu.pump-um.ru (форма, PDF, установка на экран, офлайн, админка `/admin` с паролем из `.env`).
+  DeepSeek + Tavily) и сайт https://menu.ymayaka.ru (форма, PDF, установка на экран, офлайн, админка `/admin` с паролем из `.env`).
 - **Проверено на сервере по HTTPS:** страница, манифест, иконки, service worker, `/api/meta`, PDF (шрифт DejaVu), генерация рецепта через DeepSeek + Tavily (ссылки
   на магазины приходят), вход в админку (верный пароль — 200 и cookie, неверный — отказ), бот стартует без ошибок.
 - **Проверено автоматически локально:** сайт в настоящем Chrome (установка, iframe, PDF, офлайн, переключатель магазина), кнопки магазинов и выдача рецепта в боте
@@ -244,7 +244,7 @@ Android/Chrome — системное окно, iPhone — инструкция 
 
 ## 11. Что осталось сделать (по приоритету)
 **Сначала:**
-1. Открыть https://menu.pump-um.ru **с телефона** (мобильная сеть), поставить на главный экран, нажать «Подобрать»; в боте проверить кнопки под рецептом.
+1. Открыть https://menu.ymayaka.ru **с телефона** (мобильная сеть), поставить на главный экран, нажать «Подобрать»; в боте проверить кнопки под рецептом.
 2. Проверить вживую ВкусВилл: создать план на 3 дня → после корзины должна прийти «Корзина ВкусВилл» с ценами; иначе смотреть `journalctl -u Cooking`.
 3. **Перевыпустить ключи:** в ходе работы значения из `.env` (BOT_TOKEN, ключи DeepSeek, Groq, OpenRouter, Tavily) попадали в журналы сессий ассистента.
    BotFather → `/revoke` для токена бота; остальные — в кабинетах сервисов; потом обновить `.env` на сервере и компьютере.

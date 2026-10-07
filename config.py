@@ -77,7 +77,7 @@ STORE_PRICES_TIMEOUT = float(os.getenv("STORE_PRICES_TIMEOUT", "40"))
 WEB_SECRET = os.getenv("WEB_SECRET", "")               # подпись cookie админки (/admin)
 YANDEX_VERIFICATION = os.getenv("YANDEX_VERIFICATION", "")              # код из Яндекс Вебмастера
 GOOGLE_SITE_VERIFICATION = os.getenv("GOOGLE_SITE_VERIFICATION", "")    # код из Google Search Console
-WEB_APP_URL = os.getenv("WEB_APP_URL", "")             # например https://menu.pump-um.ru
+WEB_APP_URL = os.getenv("WEB_APP_URL", "")             # например https://menu.ymayaka.ru
 # УСТАРЕЛО (схема «страница на Тильде + API») — нигде не используется, можно удалить из .env
 WEB_ALLOWED_ORIGINS = [
     o.strip() for o in os.getenv("WEB_ALLOWED_ORIGINS", WEB_APP_URL).split(",") if o.strip()
