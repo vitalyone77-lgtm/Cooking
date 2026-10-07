@@ -30,7 +30,9 @@ from shopping import (
     extract_shopping_terms, extract_dish_title, format_store_links, terms_from_recipe_text,
     amounts_from_recipe_text, merge_amounts,
 )
-from storage import save_last_request, get_last_request
+from storage import (
+    save_last_request, get_last_request, get_reminder_recipe, set_reminders_enabled, reminders_enabled,
+)
 from reminders import setup_scheduler
 from favorites import add_favorite, get_favorites, get_favorite, remove_favorite, search_favorites
 from last_recipe import set_last_recipe, get_last_recipe
@@ -88,7 +90,7 @@ HELP_TEXT = (
     "Под рецептом, меню и планом есть кнопка «🛒 Найти продукты в магазине»: выбираешь магазин "
     "(Пятёрочка, ВкусВилл, Перекрёсток, Лавка, Купер) — и получаешь короткий список со ссылками на поиск.\n\n"
     "*Команды:* /menu — меню, /ready — готовые меню,"
-    "/app — веб-версия для телефона, /help — справка.\n\n"
+    "/app — веб-версия для телефона, /remind — вкл/выкл ежедневные напоминания, /help — справка.\n\n"
     "Каждый день в 14:00 я напоминаю о новом блюде. Если что-то зависло — /start."
 )
 
@@ -285,6 +287,19 @@ async def cmd_ready(message: Message, state: FSMContext):
 async def cmd_help(message: Message, state: FSMContext):
     await state.clear()
     await message.answer(HELP_TEXT, reply_markup=kb.main_reply_kb())
+
+
+@dp.message(Command("remind"))
+async def cmd_remind(message: Message):
+    """Включает/выключает ежедневное напоминание."""
+    enabled = not reminders_enabled(message.chat.id)
+    set_reminders_enabled(message.chat.id, enabled)
+    if enabled:
+        await message.answer(f"🔔 Напоминания включены: каждый день в {config.REMINDER_HOUR:02d}:"
+                             f"{config.REMINDER_MINUTE:02d} пришлю идею блюда по твоим прошлым параметрам.\n"
+                             "Выключить — снова /remind", parse_mode=None)
+    else:
+        await message.answer("🔕 Напоминания выключены. Включить снова — /remind", parse_mode=None)
 
 
 @dp.message(Command("app"))
@@ -599,11 +614,37 @@ async def reminder_ok(callback: CallbackQuery):
     await callback.answer("Отлично! Ниже — продукты и избранное")
 
 
+@dp.callback_query(F.data == "reminder:cook")
+async def reminder_cook(callback: CallbackQuery, state: FSMContext):
+    """«Готовить» в напоминании: присылаем полный рецепт предложенного блюда (он сохранён при рассылке)."""
+    chat_id = callback.message.chat.id
+    saved = get_reminder_recipe(chat_id)
+    if not saved or not saved.get("text"):
+        await callback.answer("Этот рецепт уже недоступен — подберём новый", show_alert=True)
+        await show_main_menu(callback.message, state)
+        return
+    await callback.answer()
+    await callback.message.edit_reply_markup()
+    text = saved["text"]
+    set_last_recipe(chat_id, extract_dish_title(text), text, (get_last_request(chat_id) or {}).get("cuisine"))
+    sent = await callback.message.answer(text, reply_markup=kb.recipe_result_kb())
+    remember_recipe_terms(chat_id, sent.message_id, saved.get("terms") or [])
+
+
 @dp.callback_query(F.data == "reminder:next")
 async def reminder_next(callback: CallbackQuery, state: FSMContext):
-    """Нажатие кнопки «Найти другой рецепт» — открываем меню выбора параметров."""
+    """Нажатие кнопки «Найти другое» — открываем меню выбора параметров."""
     await callback.answer()
     await show_main_menu(callback.message, state, "Подобрать другой рецепт — выбери параметры:")
+
+
+@dp.callback_query(F.data == "reminder:off")
+async def reminder_off(callback: CallbackQuery):
+    set_reminders_enabled(callback.message.chat.id, False)
+    await callback.message.edit_reply_markup()
+    await callback.answer("Напоминания выключены")
+    await callback.message.answer("🔕 Ежедневные напоминания выключены.\nВключить снова — команда /remind",
+                                  parse_mode=None)
 
 
 # ---------- Меню на день ----------
@@ -1315,6 +1356,7 @@ async def main():
         BotCommand(command="menu", description="Показать меню"),
         BotCommand(command="ready", description="Готовые меню"),
         BotCommand(command="app", description="Веб-версия для телефона"),
+        BotCommand(command="remind", description="Вкл/выкл напоминания"),
         BotCommand(command="help", description="Справка"),
     ])
 

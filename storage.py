@@ -14,6 +14,7 @@ logger = logging.getLogger(__name__)
 
 STORAGE_FILE = Path(__file__).parent / "user_data.json"
 _lock = threading.Lock()
+_KEEP = ("reminders_off", "reminder_recipe")   # выключенная рассылка и рецепт из последнего напоминания
 
 
 def _read_all() -> dict:
@@ -35,7 +36,10 @@ def save_last_request(chat_id: int, form_data: dict, dish_title: str = "") -> No
     """Сохраняет последний успешный запрос пользователя (для напоминаний)."""
     with _lock:
         all_data = _read_all()
+        old = all_data.get(str(chat_id)) or {}
         all_data[str(chat_id)] = {
+            # служебные поля напоминания не теряем при новом запросе
+            **{k: old[k] for k in _KEEP if k in old},
             "cuisine": form_data.get("cuisine"),
             "macro_goal": form_data.get("macro_goal", ""),
             "preferred": form_data.get("preferred", ""),
@@ -58,3 +62,34 @@ def get_all_users() -> dict:
     """Возвращает {chat_id: last_request_data} для всех, кто хоть раз получал рецепт."""
     with _lock:
         return _read_all()
+
+
+def _update(chat_id: int, **fields) -> None:
+    with _lock:
+        all_data = _read_all()
+        entry = all_data.setdefault(str(chat_id), {})
+        for k, v in fields.items():
+            if v is None:
+                entry.pop(k, None)
+            else:
+                entry[k] = v
+        _write_all(all_data)
+
+
+def set_reminders_enabled(chat_id: int, enabled: bool) -> None:
+    """Выключить/включить ежедневное напоминание для пользователя."""
+    _update(chat_id, reminders_off=None if enabled else True)
+
+
+def reminders_enabled(chat_id: int) -> bool:
+    entry = get_last_request(chat_id) or {}
+    return not entry.get("reminders_off")
+
+
+def save_reminder_recipe(chat_id: int, text: str, terms: list[str]) -> None:
+    """Полный рецепт из напоминания: в сообщении — только название, рецепт по кнопке «Готовить»."""
+    _update(chat_id, reminder_recipe={"text": text, "terms": terms})
+
+
+def get_reminder_recipe(chat_id: int) -> dict | None:
+    return (get_last_request(chat_id) or {}).get("reminder_recipe")

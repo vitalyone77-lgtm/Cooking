@@ -1,6 +1,6 @@
 """
 Ежедневное напоминание — сразу предлагает новый рецепт по сохранённым параметрам.
-Кнопки: «Приготовить» (открывает «Найти продукты» / «В избранное») и «Найти другой рецепт» (анкета).
+В сообщении — только название и время; кнопки: «Готовить» (полный рецепт), «Найти другое» (анкета), «Выключить напоминания».
 """
 import asyncio
 import logging
@@ -14,36 +14,43 @@ from apscheduler.triggers.cron import CronTrigger
 
 import config
 from ai import generate_recipe
-from last_recipe import set_last_recipe
 from search import search_recipes, format_results_for_prompt
 from shopping import extract_shopping_terms, extract_dish_title
-from storage import get_all_users, save_last_request
+from storage import get_all_users, save_last_request, save_reminder_recipe
 
 logger = logging.getLogger(__name__)
 
 
 def reminder_kb() -> InlineKeyboardMarkup:
     b = InlineKeyboardBuilder()
-    b.button(text="🍳 Приготовить", callback_data="reminder:ok")
-    b.button(text="🔍 Найти другой рецепт", callback_data="reminder:next")
-    b.adjust(1)
+    b.button(text="🍳 Готовить", callback_data="reminder:cook")
+    b.button(text="🔍 Найти другое", callback_data="reminder:next")
+    b.button(text="🔕 Выключить напоминания", callback_data="reminder:off")
+    b.adjust(2, 1)
     return b.as_markup()
 
 
-REMINDER_INTRO = "👋 Идея, что приготовить завтра — по твоим прошлым параметрам:\n\n"
+REMINDER_INTRO = "👋 Идея, давай приготовим завтра —"
 _PARALLEL = 3            # одновременно готовим рецепты для 3 пользователей (не перегружаем ИИ и поиск)
 _PER_USER_TIMEOUT = 150  # секунд на одного пользователя: поиск + ИИ
 
 
+def recipe_teaser(recipe_text: str) -> str:
+    """Короткое превью рецепта: строка с названием (🍽) и строка «⏱ Время | 👥 Порций | 🔥 Способ»."""
+    lines = [ln.strip() for ln in recipe_text.splitlines() if ln.strip()]
+    title = next((ln for ln in lines if ln.startswith("🍽")), lines[0] if lines else "")
+    meta = next((ln for ln in lines if ln.startswith("⏱")), "")
+    return "\n\n".join(x for x in (REMINDER_INTRO, title, meta) if x)
+
+
 async def _remind_one(bot: Bot, chat_id: int, data: dict) -> None:
     # Прошлые параметры, но без названия прошлого блюда — иначе ИИ снова предложит то же самое
-    search_data = dict(data)
+    search_data = {k: v for k, v in data.items() if k not in ("reminders_off", "reminder_recipe", "dish_title")}
     search_data["preferred"] = ""
-    search_data.pop("dish_title", None)
 
     search_query, results = await search_recipes(search_data)
     recipe_text = await generate_recipe(search_data, search_query, format_results_for_prompt(results))
-    recipe_text, _terms = extract_shopping_terms(recipe_text)
+    recipe_text, terms = extract_shopping_terms(recipe_text)
 
     if not recipe_text.strip() or recipe_text.startswith("😔"):
         # ИИ недоступен — короткое напоминание без рецепта, чем ничего или текст ошибки
@@ -53,16 +60,16 @@ async def _remind_one(bot: Bot, chat_id: int, data: dict) -> None:
         )
         return
 
-    dish_title = extract_dish_title(recipe_text)
-    save_last_request(chat_id, search_data, dish_title)
-    set_last_recipe(chat_id, dish_title, recipe_text, search_data.get("cuisine"))
-    await bot.send_message(chat_id, REMINDER_INTRO + recipe_text, reply_markup=reminder_kb())
+    save_last_request(chat_id, search_data, extract_dish_title(recipe_text))
+    # Полный рецепт храним в файле (переживёт перезапуск бота) и показываем по кнопке «Готовить»
+    save_reminder_recipe(chat_id, recipe_text, terms)
+    await bot.send_message(chat_id, recipe_teaser(recipe_text), reply_markup=reminder_kb())
 
 
 async def send_daily_reminders(bot: Bot, dp: Dispatcher):
-    users = get_all_users()
+    users = {cid: d for cid, d in get_all_users().items() if d.get("cuisine") and not d.get("reminders_off")}
     if not users:
-        logger.info("Напоминания: нет ни одного сохранённого пользователя")
+        logger.info("Напоминания: некому отправлять")
         return
     sem = asyncio.Semaphore(_PARALLEL)
 
