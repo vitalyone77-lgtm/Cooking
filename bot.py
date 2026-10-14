@@ -21,6 +21,7 @@ from aiogram.types import Message, CallbackQuery, BotCommand, ErrorEvent
 import config
 import keyboards as kb
 import day_menu
+import missing
 import week_menu
 from cuisines import cuisine_label, MACRO_GOAL_KEY
 from states import RecipeForm, FavoritesForm, DayMenuForm, WeekMenuForm
@@ -645,6 +646,131 @@ async def reminder_off(callback: CallbackQuery):
     await callback.answer("Напоминания выключены")
     await callback.message.answer("🔕 Ежедневные напоминания выключены.\nВключить снова — команда /remind",
                                   parse_mode=None)
+
+
+# ---------- «❌ Нет каких-то продуктов» ----------
+# Пользователь отмечает продукты, которых нет в магазине (или пишет названия ответом) → ИИ заменяет их
+# аналогами или переделывает рецепт / меню на день / план. Выбор хранится в памяти (при перезапуске бота начнётся заново).
+
+_missing_pick: "OrderedDict[tuple[int, int], dict]" = OrderedDict()
+
+
+def _missing_state(chat_id: int, picker_id: int, ctx: str) -> dict:
+    key = (chat_id, picker_id)
+    st = _missing_pick.get(key)
+    if st is None:
+        st = _missing_pick[key] = {"ctx": ctx, "sel": set(), "extra": []}
+        while len(_missing_pick) > 200:
+            _missing_pick.popitem(last=False)
+    return st
+
+
+def _recipe_source(message: Message) -> Message | None:
+    """Сообщение с текстом рецепта: само сообщение с кнопкой или то, на которое оно отвечает (если кнопка — на сообщении выбора магазина)."""
+    for src in (message, message.reply_to_message):
+        if src and src.text and terms_from_recipe_text(src.text):
+            return src
+    return None
+
+
+@dp.callback_query(F.data.startswith("miss:open:"))
+async def miss_open(callback: CallbackQuery):
+    ctx = callback.data.split(":", 2)[2]
+    msg = callback.message
+    anchor = msg
+    if ctx == "r":
+        anchor = _recipe_source(msg)
+        if anchor is None:
+            await callback.answer("Не нашёл рецепт — открой его заново.", show_alert=True)
+            return
+    terms = resolve_shopping_terms(anchor, ctx)
+    if not terms:
+        await callback.answer("Не нашёл список продуктов.", show_alert=True)
+        return
+    picker = await anchor.reply(
+        "❌ Каких продуктов нет в магазине? Отметь нужные кнопками и нажми «Заменить».\n"
+        "Если продукта нет в списке — ответь на это сообщение текстом (названия через запятую).",
+        reply_markup=kb.missing_pick_kb(ctx, terms, set()),
+        parse_mode=None,
+    )
+    _missing_state(msg.chat.id, picker.message_id, ctx)
+    await callback.answer()
+
+
+@dp.callback_query(F.data.startswith("miss:t:"))
+async def miss_toggle(callback: CallbackQuery):
+    _, _, ctx, idx = callback.data.split(":", 3)
+    msg = callback.message
+    anchor = msg.reply_to_message if ctx == "r" else msg
+    terms = resolve_shopping_terms(anchor, ctx) if anchor else []
+    if not idx.isdigit() or int(idx) >= len(terms):
+        await callback.answer("Список изменился — открой кнопку заново.", show_alert=True)
+        return
+    st = _missing_state(msg.chat.id, msg.message_id, ctx)
+    st["sel"] ^= {int(idx)}
+    await msg.edit_reply_markup(reply_markup=kb.missing_pick_kb(ctx, terms, st["sel"]))
+    await callback.answer()
+
+
+@dp.message(F.reply_to_message, F.text, lambda m: (m.chat.id, m.reply_to_message.message_id) in _missing_pick)
+async def miss_text(message: Message):
+    """Ответ текстом на сообщение выбора: добавляет свои названия продуктов, которых нет."""
+    st = _missing_pick[(message.chat.id, message.reply_to_message.message_id)]
+    names = [x for x in (p.strip() for p in message.text.replace("\n", ",").split(",")) if x]
+    st["extra"] = missing.clean_missing(st["extra"] + names)
+    await message.reply(
+        "Добавил: " + ", ".join(st["extra"]) + "\nТеперь нажми «✅ Заменить отмеченные» в сообщении выше.",
+        parse_mode=None,
+    )
+
+
+@dp.callback_query(F.data.startswith("miss:go:"))
+async def miss_go(callback: CallbackQuery):
+    ctx = callback.data.split(":", 2)[2]
+    msg = callback.message
+    chat_id = msg.chat.id
+    anchor = msg.reply_to_message if ctx == "r" else msg
+    terms = resolve_shopping_terms(anchor, ctx) if anchor else []
+    st = _missing_state(chat_id, msg.message_id, ctx)
+    names = missing.clean_missing([terms[i] for i in sorted(st["sel"]) if i < len(terms)] + st["extra"])
+    if not names:
+        await callback.answer("Отметь хотя бы один продукт.", show_alert=True)
+        return
+    await callback.answer()
+    await msg.edit_reply_markup()
+    _missing_pick.pop((chat_id, msg.message_id), None)
+    status = await msg.answer("🔄 Подбираю замену: " + ", ".join(names) + " …", parse_mode=None)
+    try:
+        if ctx == "r":
+            text, new_terms = await missing.adapt_recipe(anchor.text, names)
+            await status.delete()
+            set_last_recipe(chat_id, extract_dish_title(text), text, (get_last_request(chat_id) or {}).get("cuisine"))
+            sent = await msg.answer(text, reply_markup=kb.recipe_result_kb())
+            remember_recipe_terms(chat_id, sent.message_id, new_terms)
+        elif ctx == "d":
+            await missing.rebuild_day(chat_id, names)
+            await status.delete()
+            view = day_menu.build_summary_view(chat_id)
+            await msg.answer("✅ Меню на день пересобрано без: " + ", ".join(names), parse_mode=None)
+            await msg.answer(view[0], reply_markup=view[1])
+        elif ctx == "w":
+            mode = await missing.adjust_plan(chat_id, names)
+            await status.delete()
+            if mode == "rebuild":
+                info = week_menu.get_basket_info(chat_id)
+                await answer_long(msg, "✅ Корзина плана пересобрана без: " + ", ".join(names) + "\n\n" + info["basket_text"],
+                                  reply_markup=kb.shopping_btn_kb("w"), disable_web_page_preview=True)
+            else:
+                await msg.answer(
+                    "✅ Убрал из плана: " + ", ".join(names) + ".\nУже составленные дни не меняются (по ним уже "
+                    "посчитаны остатки), а следующие дни будут без этих продуктов.", parse_mode=None)
+            view = week_menu.build_status_view(chat_id)
+            await msg.answer(view[0], reply_markup=view[1])
+        else:
+            await status.edit_text("Для этого списка замена пока недоступна.", parse_mode=None)
+    except Exception as e:  # noqa: BLE001
+        logger.exception("Ошибка замены недостающих продуктов")
+        await status.edit_text(f"😔 Не получилось подобрать замену: {e}\nПопробуй ещё раз.", parse_mode=None)
 
 
 # ---------- Меню на день ----------

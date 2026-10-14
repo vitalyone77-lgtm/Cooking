@@ -192,6 +192,7 @@ def recipe_result_kb() -> InlineKeyboardMarkup:
     """Кнопки под готовым рецептом: добавить в избранное / новый рецепт."""
     b = InlineKeyboardBuilder()
     b.button(text="🛒 Найти продукты в магазине", callback_data="shop:open:r")
+    b.button(text="❌ Нет каких-то продуктов", callback_data="miss:open:r")
     b.button(text="⭐ В избранное", callback_data="fav:save")
     b.button(text="🍳 Подобрать ещё рецепт", callback_data="confirm:restart")
     b.adjust(1)
@@ -223,6 +224,9 @@ def shopping_btn_kb(ctx: str) -> InlineKeyboardMarkup:
     """Одна кнопка «Найти продукты в магазине» (ctx: r — рецепт, d — меню на день, w — корзина плана, wd<N> — докупить к дню N)."""
     b = InlineKeyboardBuilder()
     b.button(text="🛒 Найти продукты в магазине", callback_data=f"shop:open:{ctx}")
+    if ctx in ("d", "w"):
+        b.button(text="❌ Нет каких-то продуктов", callback_data=f"miss:open:{ctx}")
+    b.adjust(1)
     return b.as_markup()
 
 
@@ -240,4 +244,18 @@ def store_pick_kb(ctx: str, enabled: list[str], current: str | None = None) -> I
     b.adjust(2)
     if current == "vkusvill" and ctx in ("r", "d", "w"):
         b.row(InlineKeyboardButton(text="🧺 Собрать корзину во ВкусВилле (цены)", callback_data=f"shop:cart:{ctx}"))
+    if ctx in ("r", "d", "w"):
+        b.row(InlineKeyboardButton(text="❌ Нет каких-то продуктов", callback_data=f"miss:open:{ctx}"))
+    return b.as_markup()
+
+
+def missing_pick_kb(ctx: str, terms: list[str], selected: set[int]) -> InlineKeyboardMarkup:
+    """Выбор продуктов, которых нет в магазине: кнопка-переключатель на каждый продукт (по номеру — лимит callback_data 64 байта)."""
+    b = InlineKeyboardBuilder()
+    for i, term in enumerate(terms):
+        mark = "❌" if i in selected else "▫️"
+        b.button(text=f"{mark} {term[:40]}", callback_data=f"miss:t:{ctx}:{i}")
+    b.adjust(2)
+    n = len(selected)
+    b.row(InlineKeyboardButton(text="✅ Заменить отмеченные" + (f" ({n})" if n else ""), callback_data=f"miss:go:{ctx}"))
     return b.as_markup()

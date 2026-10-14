@@ -254,6 +254,7 @@ async def generate_day_menu(chat_id: int, selected_meals: list[str], base_data: 
         "order": selected_meals,
         "meals": {r["meal_key"]: {"title": r["title"], "text": r["text"], "ok": r["ok"]} for r in results},
         "shopping_terms": terms,
+        "base_data": base_data,
     })
 
     shopping_message = format_shopping_message(terms, chat_id)
@@ -302,6 +303,7 @@ def build_summary_view(chat_id: int) -> tuple[str, InlineKeyboardMarkup] | None:
         short_title = m["title"] if len(m["title"]) <= 30 else m["title"][:27] + "..."
         b.button(text=f"{emoji_label}: {short_title}", callback_data=f"daymenu:show:{meal_key}")
     b.button(text="🛒 Найти продукты в магазине", callback_data="shop:open:d")
+    b.button(text="❌ Нет каких-то продуктов", callback_data="miss:open:d")
     b.button(text="🔄 Собрать меню заново", callback_data="daymenu:start")
     b.adjust(1)
     return text, b.as_markup()
