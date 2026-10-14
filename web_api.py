@@ -31,6 +31,7 @@ import config
 import web_db
 import web_pdf
 import seo_pages
+import missing as missing_mod
 import day_menu
 import week_menu
 import favorites as fav_mod
@@ -140,6 +141,7 @@ LIMITS = {
     "recipe": (config.WEB_LIMIT_RECIPE, 1, "подбора блюда в сутки"),
     "daymenu": (config.WEB_LIMIT_DAYMENU, 1, "меню на день в сутки"),
     "week": (config.WEB_LIMIT_WEEK, 3, "план питания на 3 дня"),
+    "missing": (config.WEB_LIMIT_MISSING, 1, "замен продуктов в сутки"),
 }
 
 
@@ -701,3 +703,42 @@ async def api_cart(body: CartIn, x_device: str | None = Header(default=None)):
     text = re.sub(r"[*_`]", "", text)
     text = "\n".join(ln for ln in text.splitlines() if "Открыть корзину" not in ln)
     return {"text": text.strip(), "link": m.group(1) if m else ""}
+
+
+class MissingIn(BaseModel):
+    ctx: str = Field(pattern="^(recipe|day|week)$")
+    items: list[str] = Field(min_length=1, max_length=20)
+    text: str = Field("", max_length=20000)     # для рецепта — его текст
+
+
+@app.post("/api/missing")
+async def api_missing(body: MissingIn, x_device: str | None = Header(default=None)):
+    """«Нет каких-то продуктов в магазине»: ИИ заменяет их аналогами или переделывает рецепт / меню на день / план."""
+    dev_id = _dev(x_device)
+    cid = _cid(dev_id)
+    names = missing_mod.clean_missing([i[:80] for i in body.items])
+    if not names:
+        raise HTTPException(400, "Укажи, каких продуктов нет")
+    if body.ctx == "recipe" and not body.text.strip():
+        raise HTTPException(400, "Нет текста рецепта")
+    if body.ctx == "day" and not day_menu.has_menu(cid):
+        raise HTTPException(404, "Меню на день не найдено")
+    if body.ctx == "week" and not week_menu.has_plan(cid):
+        raise HTTPException(404, "План не найден")
+    _spend(dev_id, "missing")
+
+    async def work():
+        if body.ctx == "recipe":
+            text, terms = await missing_mod.adapt_recipe(body.text, names)
+            return {"title": extract_dish_title(text) or "Рецепт", "text": text,
+                    "shopping": with_amounts(links_for(terms), amounts_from_recipe_text(text))}
+        if body.ctx == "day":
+            await missing_mod.rebuild_day(cid, names)
+            terms = day_menu.get_shopping_terms(cid)
+            shopping = with_amounts(links_for(terms), day_menu.get_shopping_amounts(cid))
+            web_db.kv_set(f"dayshop:{cid}", json.dumps(shopping, ensure_ascii=False))
+            return {"ok": True}
+        mode = await missing_mod.adjust_plan(cid, names)
+        return {"ok": True, "mode": mode}
+
+    return _start_job(dev_id, work, "missing")
