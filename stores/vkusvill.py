@@ -128,19 +128,25 @@ class VkusvillClient:
         return [o for o in (_to_offer(p) for p in _extract_products(data)) if o]
 
     async def cart_link(self, items: list[tuple[str, float]]) -> str | None:
-        """items: [(xml_id, количество)]. Количество дробное для весовых товаров (кг). Возвращает ссылку или None."""
-        products = []
+        """items: [(id товара, количество)]. Количество дробное для весовых товаров (кг). Возвращает ссылку или None."""
+        ids = []
         for pid, q in items[:20]:  # ограничение API: до 20 позиций
             try:
-                xml_id = int(pid)          # инструмент требует ЧИСЛО, строка даёт «Invalid type»
+                num = int(pid)             # инструмент требует ЧИСЛО, строка даёт «Invalid type»
             except (TypeError, ValueError):
                 continue
             qty = min(max(round(float(q), 2), 0.01), 40.0)
-            products.append({"xml_id": xml_id, "q": int(qty) if qty == int(qty) else qty})
-        if not products:
+            ids.append((num, int(qty) if qty == int(qty) else qty))
+        if not ids:
             return None
-        data = await self.call_tool("vkusvill_cart_link_create", {"products": products})
-        return _find_url(data)
+        # ВкусВилл переименовывал поле товара (раньше xml_id, сейчас id) — пробуем актуальное, затем старое
+        for key in ("id", "xml_id"):
+            data = await self.call_tool("vkusvill_cart_link_create", {"products": [{key: n, "q": q} for n, q in ids]})
+            link = _find_url(data)
+            if link:
+                return link
+            logger.warning("ВкусВилл: ссылка-корзина не создана (поле %s): %s", key, str(data)[:300])
+        return None
 
 
 def _find_url(data) -> str | None:
