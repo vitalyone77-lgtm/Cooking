@@ -26,7 +26,8 @@ from jsonio import write_json_atomic
 from aiogram.types import InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-from keyboards import MEAL_LABELS, MEAL_KCAL_SHARE
+from keyboards import MEAL_LABELS, MEAL_KCAL_SHARE, SNACK_MEALS
+from cuisines import SNACK_RULE
 from search import search_recipes, format_results_for_prompt
 from ai import generate_recipe, call_llm_with_fallback
 from prompts import DAY_MENU_SYSTEM_PROMPT, DAY_MENU_BLOCK_DELIMITER, build_day_menu_user_prompt
@@ -91,6 +92,8 @@ def _build_meal_data(meal_key: str, base_data: dict, selected_meals: list[str]) 
     label_text = _meal_label_text(meal_key)
 
     preferred = (base_data.get("preferred") or "").strip()
+    if meal_key in SNACK_MEALS:
+        label_text = "сытный белковый перекус с собой"
     data["preferred"] = f"{label_text}. {preferred}" if preferred else label_text
 
     day_goal = (base_data.get("macro_goal") or "").strip()
@@ -166,6 +169,7 @@ async def prepare_meals_info(selected_meals: list[str], base_data: dict) -> list
             "search_query": query,
             "search_results_text": format_results_for_prompt(results),
             "macro_goal": _meal_macro_goal_text(meal_key, base_data, selected_meals),
+            "rule": SNACK_RULE if meal_key in SNACK_MEALS else "",
         }
         for meal_key, (query, results) in zip(selected_meals, search_pairs)
     ]

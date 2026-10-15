@@ -208,6 +208,7 @@ def build_day_menu_user_prompt(meals_info: list[dict], base_data: dict) -> str:
     meals_block = "\n\n".join(
         f"### Приём пищи {i+1}: {m['label']}\n"
         + (f"Доля от дневной цели по КБЖУ: {m['macro_goal']}\n" if m.get("macro_goal") else "")
+        + (f"ОСОБЫЕ ТРЕБОВАНИЯ К ЭТОМУ ПРИЁМУ ПИЩИ (важнее общих правил о калорийности порции): {m['rule']}\n" if m.get("rule") else "")
         + f"Поисковый запрос: \"{m['search_query']}\"\n"
         f"Результаты веб-поиска (вдохновение, не копировать дословно):\n{m['search_results_text']}"
         for i, m in enumerate(meals_info)
@@ -291,6 +292,11 @@ def build_week_basket_user_prompt(meal_labels: list[str], days_total: int, base_
         cuisine_rule = cuisine_prompt_rule(cuisine_key)
 
     meals_list_text = ", ".join(meal_labels)
+    snack_note = ""
+    if any(lb.startswith("Перекус") for lb in meal_labels):
+        from cuisines import SNACK_RULE
+        snack_note = ("\n- Среди приёмов пищи есть ПЕРЕКУСЫ — закладывай в корзину продукты для сытных белковых "
+                      "перекусов, которые не требуют разогрева. Требования к ним: " + SNACK_RULE + "\n")
 
     return f"""Запрос пользователя на продуктовую корзину для питания на {days_total} дня подряд, \
 по {len(meal_labels)} приём(а/ов) пищи в день ({meals_list_text}):
@@ -299,7 +305,7 @@ def build_week_basket_user_prompt(meal_labels: list[str], days_total: int, base_
 - Правила для этого типа питания/кухни: {cuisine_rule}
 - Пожелание пользователя по продуктам: {preferred}
 - Исключить продукты (строго!): {excluded}
-{season_line()}- Количество порций на приём пищи (на человека): {base_data.get('servings', 2)}
+{season_line()}- Количество порций на приём пищи (на человека): {base_data.get('servings', 2)}{snack_note}
 
 Составь список покупок и техническую строку БАЗОВЫЕ_ПРОДУКТЫ строго по формату из системного \
 промпта, рассчитанную на все {days_total} дня и {len(meal_labels)}×{days_total} приёмов пищи \

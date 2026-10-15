@@ -43,6 +43,7 @@ CUISINE_EMOJI = {
     "balanced": "⚖️",
     "athlete_endurance": "🏃",
     "mass_gain": "💪",
+    "snack": "🥜",
 }
 
 
@@ -66,7 +67,7 @@ def cuisine_kb(with_extras: bool = True) -> InlineKeyboardMarkup:
     b.button(text=f"📆 Меню на {config.WEEK_MENU_DAYS} дня", callback_data="weekmenu:start")
     b.button(text="⭐ Избранное", callback_data="favorites:open")
     b.button(text="❓ Справка", callback_data="help:open")
-    b.adjust(2, 2, 2, 2, 1, 2)
+    b.adjust(2, 2, 2, 1, 2, 2)
     return b.as_markup()
 
 
@@ -132,10 +133,12 @@ def appliance_kb(selected: set[str] | None = None) -> InlineKeyboardMarkup:
 MEAL_LABELS = {
     "breakfast": "🍳 Завтрак",
     "brunch": "🥐 Бранч",
+    "snack": "🍎 Перекус 1",
     "lunch": "🍲 Обед",
-    "snack": "🍎 Перекус",
+    "snack2": "🥜 Перекус 2",
     "dinner": "🍽 Ужин",
 }
+SNACK_MEALS = ("snack", "snack2")
 
 # Ориентировочная доля от общей дневной цели по КБЖУ (нормализуется под фактически
 # выбранный набор приёмов пищи в day_menu.py).
@@ -143,7 +146,8 @@ MEAL_KCAL_SHARE = {
     "breakfast": 0.25,
     "brunch": 0.30,
     "lunch": 0.35,
-    "snack": 0.10,
+    "snack": 0.15,
+    "snack2": 0.15,
     "dinner": 0.30,
 }
 
@@ -170,7 +174,7 @@ def meals_kb(selected: set[str] | None = None) -> InlineKeyboardMarkup:
         mark = "✅ " if key in selected else ""
         b.button(text=f"{mark}{label}", callback_data=f"daymeal:{key}")
     b.button(text="Готово ➡️", callback_data="daymeal:done")
-    b.adjust(2, 2, 1, 1)
+    b.adjust(2, 2, 2, 1)
     return b.as_markup()
 
 
