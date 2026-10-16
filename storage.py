@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 STORAGE_FILE = Path(__file__).parent / "user_data.json"
 _lock = threading.Lock()
-_KEEP = ("reminders_off", "reminder_recipe", "reminder_history")   # выключенная рассылка и рецепт из последнего напоминания
+_KEEP = ("reminders_off", "reminder_recipe", "reminder_history", "portion")   # выключенная рассылка и рецепт из последнего напоминания
 
 
 def _read_all() -> dict:
@@ -46,6 +46,7 @@ def save_last_request(chat_id: int, form_data: dict, dish_title: str = "") -> No
             "excluded": form_data.get("excluded", ""),
             "time": form_data.get("time"),
             "servings": form_data.get("servings"),
+            "portion": form_data.get("portion") or old.get("portion"),
             "appliance": form_data.get("appliance", []),
             "appliance_labels": form_data.get("appliance_labels", []),
             "dish_title": dish_title,
@@ -100,3 +101,12 @@ def push_reminder_history(chat_id: int, title: str, hint: str, keep: int = 14) -
 
 def get_reminder_recipe(chat_id: int) -> dict | None:
     return (get_last_request(chat_id) or {}).get("reminder_recipe")
+
+
+def get_portion(chat_id: int) -> str:
+    """Любимый размер порции пользователя (small / normal / large)."""
+    return (get_last_request(chat_id) or {}).get("portion") or "normal"
+
+
+def set_portion(chat_id: int, portion: str) -> None:
+    _update(chat_id, portion=portion)

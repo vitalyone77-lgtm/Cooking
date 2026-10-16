@@ -23,7 +23,7 @@ import keyboards as kb
 import day_menu
 import missing
 import week_menu
-from cuisines import cuisine_label, MACRO_GOAL_KEY
+from cuisines import cuisine_label, MACRO_GOAL_KEY, PORTION_LABELS, PORTION_ORDER
 from states import RecipeForm, FavoritesForm, DayMenuForm, WeekMenuForm
 from search import search_recipes, format_results_for_prompt
 from ai import generate_recipe
@@ -33,6 +33,7 @@ from shopping import (
 )
 from storage import (
     save_last_request, get_last_request, get_reminder_recipe, set_reminders_enabled, reminders_enabled,
+    get_portion, set_portion,
 )
 from reminders import setup_scheduler
 from favorites import add_favorite, get_favorites, get_favorite, remove_favorite, search_favorites
@@ -545,6 +546,7 @@ async def step_appliance(callback: CallbackQuery, state: FSMContext):
 
 async def show_summary(message: Message, state: FSMContext):
     data = await state.get_data()
+    portion = get_portion(message.chat.id)
     macro_goal = data.get("macro_goal")
     text = (
         "📋 Проверим запрос:\n\n"
@@ -554,9 +556,10 @@ async def show_summary(message: Message, state: FSMContext):
         f"Исключить: {data.get('excluded') or '—'}\n"
         f"Время: {data.get('time')}\n"
         f"Порций: {data.get('servings')}\n"
+        f"Размер порции: {PORTION_LABELS[data.get('portion') or portion]}\n"
         f"Техника: {', '.join(data.get('appliance_labels', []))}\n"
     )
-    await message.answer(text, reply_markup=kb.confirm_kb())
+    await message.answer(text, reply_markup=kb.confirm_kb(data.get('portion') or portion))
     await state.set_state(RecipeForm.confirm)
 
 
@@ -566,6 +569,7 @@ async def step_confirm_go(callback: CallbackQuery, state: FSMContext):
     await callback.message.edit_reply_markup()
     status_msg = await callback.message.answer("🔎 Ищу рецепты в интернете...")
     data = await state.get_data()
+    data = {**data, 'portion': data.get('portion') or get_portion(callback.message.chat.id)}
 
     try:
         search_query, results = await search_recipes(data)
@@ -613,6 +617,21 @@ async def reminder_ok(callback: CallbackQuery):
     """«Приготовить» в напоминании — под рецептом появляются обычные кнопки: продукты, избранное, ещё рецепт."""
     await callback.message.edit_reply_markup(reply_markup=kb.recipe_result_kb())
     await callback.answer("Отлично! Ниже — продукты и избранное")
+
+
+@dp.callback_query(F.data == "portion:cycle")
+async def portion_cycle(callback: CallbackQuery, state: FSMContext):
+    """Переключает размер порции (поменьше → обычная → побольше) прямо на экране проверки запроса; запоминается."""
+    chat_id = callback.message.chat.id
+    data = await state.get_data()
+    cur = data.get("portion") or get_portion(chat_id)
+    nxt = PORTION_ORDER[(PORTION_ORDER.index(cur) + 1) % len(PORTION_ORDER)] if cur in PORTION_ORDER else "normal"
+    set_portion(chat_id, nxt)
+    await state.update_data(portion=nxt)
+    text = callback.message.text or ""
+    lines = [(f"Размер порции: {PORTION_LABELS[nxt]}" if ln.startswith("Размер порции:") else ln) for ln in text.split("\n")]
+    await callback.message.edit_text("\n".join(lines), reply_markup=kb.confirm_kb(nxt), parse_mode=None)
+    await callback.answer(f"Размер порции: {PORTION_LABELS[nxt]}")
 
 
 @dp.callback_query(F.data == "reminder:cook")
@@ -948,6 +967,7 @@ async def dm_step_appliance(callback: CallbackQuery, state: FSMContext):
 
 async def dm_show_summary(message: Message, state: FSMContext):
     data = await state.get_data()
+    portion = get_portion(message.chat.id)
     meals = data.get("meals", [])
     meals_text = ", ".join(kb.MEAL_LABELS[m] for m in meals)
     macro_goal = data.get("macro_goal")
@@ -960,9 +980,10 @@ async def dm_show_summary(message: Message, state: FSMContext):
         f"Исключить: {data.get('excluded') or '—'}\n"
         f"Время на каждое блюдо: {data.get('time')}\n"
         f"Порций (на человека): {data.get('servings')}\n"
+        f"Размер порции: {PORTION_LABELS[data.get('portion') or portion]}\n"
         f"Техника: {', '.join(data.get('appliance_labels', []))}\n"
     )
-    await message.answer(text, reply_markup=kb.confirm_kb())
+    await message.answer(text, reply_markup=kb.confirm_kb(data.get('portion') or portion))
     await state.set_state(DayMenuForm.confirm)
 
 
@@ -974,6 +995,7 @@ async def dm_step_confirm_go(callback: CallbackQuery, state: FSMContext):
         "🔎 Собираю меню на день — это займёт немного больше времени, чем один рецепт..."
     )
     data = await state.get_data()
+    data = {**data, 'portion': data.get('portion') or get_portion(callback.message.chat.id)}
     meals = data.get("meals", [])
 
     try:
@@ -1194,6 +1216,7 @@ async def wm_step_appliance(callback: CallbackQuery, state: FSMContext):
 
 async def wm_show_summary(message: Message, state: FSMContext):
     data = await state.get_data()
+    portion = get_portion(message.chat.id)
     meals = data.get("meals", [])
     meals_text = ", ".join(kb.MEAL_LABELS[m] for m in meals)
     macro_goal = data.get("macro_goal")
@@ -1206,9 +1229,10 @@ async def wm_show_summary(message: Message, state: FSMContext):
         f"Исключить: {data.get('excluded') or '—'}\n"
         f"Время на каждое блюдо: {data.get('time')}\n"
         f"Порций: {data.get('servings')}\n"
+        f"Размер порции: {PORTION_LABELS[data.get('portion') or portion]}\n"
         f"Техника: {', '.join(data.get('appliance_labels', []))}\n"
     )
-    await message.answer(text, reply_markup=kb.confirm_kb())
+    await message.answer(text, reply_markup=kb.confirm_kb(data.get('portion') or portion))
     await state.set_state(WeekMenuForm.confirm)
 
 
@@ -1220,6 +1244,7 @@ async def wm_step_confirm_go(callback: CallbackQuery, state: FSMContext):
         "🔎 Считаю продуктовую корзину на весь период..."
     )
     data = await state.get_data()
+    data = {**data, 'portion': data.get('portion') or get_portion(callback.message.chat.id)}
     meals = data.get("meals", [])
     chat_id = callback.message.chat.id
 

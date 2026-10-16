@@ -178,9 +178,11 @@ def meals_kb(selected: set[str] | None = None) -> InlineKeyboardMarkup:
     return b.as_markup()
 
 
-def confirm_kb() -> InlineKeyboardMarkup:
+def confirm_kb(portion: str = "normal") -> InlineKeyboardMarkup:
+    from cuisines import PORTION_LABELS
     b = InlineKeyboardBuilder()
     b.button(text="🔍 Найти рецепт", callback_data="confirm:go")
+    b.button(text=f"🍽 Размер порции: {PORTION_LABELS.get(portion, 'Обычная')} ▸", callback_data="portion:cycle")
     b.button(text="🔄 Начать заново", callback_data="confirm:restart")
     b.adjust(1)
     return b.as_markup()

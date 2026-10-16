@@ -42,7 +42,7 @@ week_menu.WEEK_MENU_FILE = web_db.DATA_DIR / "week_menu.json"
 fav_mod.FAVORITES_FILE = web_db.DATA_DIR / "favorites.json"
 
 from ai import generate_recipe
-from cuisines import CUISINE_LABELS
+from cuisines import CUISINE_LABELS, PORTION_LABELS, PORTION_ORDER
 from keyboards import MEAL_LABELS
 from search import search_recipes, format_results_for_prompt
 from shopping import extract_shopping_terms, extract_dish_title, amounts_from_recipe_text, _fmt_amount, _find_amount
@@ -103,6 +103,7 @@ class Params(BaseModel):
     excluded: str = Field("", max_length=300)
     time: str = Field("Не важно", max_length=20)
     servings: int = Field(2, ge=1, le=6)
+    portion: str = Field("normal", pattern="^(small|normal|large)$")
     appliance: list[str] = []
     meals: list[str] = []
 
@@ -113,7 +114,7 @@ class Params(BaseModel):
         if not keys:
             raise HTTPException(400, "Выбери, в чём готовить")
         return {"cuisine": self.cuisine, "macro_goal": self.macro_goal.strip(), "preferred": self.preferred.strip(),
-                "excluded": self.excluded.strip(), "time": self.time, "servings": self.servings,
+                "excluded": self.excluded.strip(), "time": self.time, "servings": self.servings, "portion": self.portion,
                 "appliance": keys, "appliance_labels": [APPLIANCES[k] for k in keys]}
 
     def meal_keys(self) -> list[str]:
@@ -230,6 +231,7 @@ def meta():
         "cuisines": [{"key": k, "label": v} for k, v in CUISINE_LABELS.items()],
         "appliances": [{"key": k, "label": v} for k, v in APPLIANCES.items()],
         "meals": [{"key": k, "label": v} for k, v in MEAL_LABELS.items()],
+        "portions": [{"key": k, "label": PORTION_LABELS[k]} for k in PORTION_ORDER],
         "week_days": config.WEEK_MENU_DAYS,
         "limit": config.WEB_DAILY_LIMIT,
         "limits": {"recipe": config.WEB_LIMIT_RECIPE, "daymenu": config.WEB_LIMIT_DAYMENU, "week": config.WEB_LIMIT_WEEK},

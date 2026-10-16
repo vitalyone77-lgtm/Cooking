@@ -2,7 +2,7 @@
 Промпты для LLM-анализа рецептов.
 Вынесены отдельно, чтобы их можно было улучшать/тестировать без правки логики бота.
 """
-from cuisines import cuisine_label, cuisine_prompt_rule, MACRO_GOAL_KEY
+from cuisines import cuisine_label, cuisine_prompt_rule, MACRO_GOAL_KEY, portion_instruction
 
 
 # Что реально есть в российских магазинах по месяцам (ориентир для ИИ): свежее сезонное + круглогодичное
@@ -248,7 +248,7 @@ def build_day_menu_user_prompt(meals_info: list[dict], base_data: dict) -> str:
 - Исключить продукты (строго!): {excluded}
 {season_line()}- Время на КАЖДОЕ блюдо: {base_data.get('time', 'не важно')}
 - Количество порций (на человека): {base_data.get('servings', 2)}
-- Доступная техника приготовления: {appliance_labels}
+{portion_instruction(base_data)}- Доступная техника приготовления: {appliance_labels}
 
 Данные по каждому приёму пищи (в этом порядке и выведи блюда):
 
@@ -329,7 +329,8 @@ def build_week_basket_user_prompt(meal_labels: list[str], days_total: int, base_
 - Правила для этого типа питания/кухни: {cuisine_rule}
 - Пожелание пользователя по продуктам: {preferred}
 - Исключить продукты (строго!): {excluded}
-{season_line()}- Количество порций на приём пищи (на человека): {base_data.get('servings', 2)}{snack_note}
+{season_line()}- Количество порций на приём пищи (на человека): {base_data.get('servings', 2)}
+{portion_instruction(base_data)}{snack_note}
 
 Составь список покупок и техническую строку БАЗОВЫЕ_ПРОДУКТЫ строго по формату из системного \
 промпта, рассчитанную на все {days_total} дня и {len(meal_labels)}×{days_total} приёмов пищи \
@@ -403,7 +404,7 @@ def build_user_prompt(data: dict, search_query: str, search_results_text: str) -
 - Исключить продукты (строго!): {excluded}
 {season_line()}{variety_lines}- Время на готовку: {data.get('time', 'не важно')}
 - Количество порций: {data.get('servings', 2)}
-- Доступная техника приготовления: {appliance_labels}
+{portion_instruction(data)}- Доступная техника приготовления: {appliance_labels}
 
 Поисковый запрос, который был использован для поиска рецептов в интернете: "{search_query}"
 

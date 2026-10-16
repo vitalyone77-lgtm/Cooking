@@ -273,7 +273,7 @@ input[type=text]{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid
   function cacheFavs(){call("GET","/api/favorites").then(function(d){ls("favcache",JSON.stringify(d.items));}).catch(function(){});}
 
   // ---- вкладка «Создать» ----
-  var F={mode:"recipe",cuisine:"classic",meals:["breakfast","lunch","dinner"],time:"Не важно",servings:2,appliance:["stove"]};
+  var F={mode:"recipe",cuisine:"classic",meals:["breakfast","lunch","dinner"],time:"Не важно",servings:2,portion:(ls("portion")||"normal"),appliance:["stove"]};
   function chips(list,sel,name,multi){return '<div class="chips" data-name="'+name+'" data-multi="'+(multi?1:0)+'">'+list.map(function(x){var on=multi?sel.indexOf(x.key)>=0:sel===x.key;return '<button class="chip" data-key="'+esc(x.key)+'" aria-pressed="'+on+'">'+esc(x.label)+'</button>';}).join("")+'</div>';}
   function viewNew(){
     var m=META, times=["15 мин","30 мин","45 мин","60 мин","Не важно"].map(function(x){return {key:x,label:x};}), sv=[1,2,3,4,5,6].map(function(x){return {key:String(x),label:String(x)};});
@@ -286,6 +286,7 @@ input[type=text]{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid
     h+='<label class="f" for="exc">Что исключить</label><input type="text" id="exc" maxlength="300" placeholder="орехи, грибы, лук" value="'+esc(F.exc||"")+'">';
     h+='<label class="f">Время на готовку</label>'+chips(times,F.time,"time",false);
     h+='<label class="f">Порций</label>'+chips(sv,String(F.servings),"servings",false);
+    h+='<label class="f">Размер порции</label>'+chips(m.portions,F.portion,"portion",false);
     h+='<label class="f">В чём готовим</label>'+chips(m.appliances,F.appliance,"appliance",true);
     h+='<button class="btn" id="go">🔍 Подобрать</button><div class="install-bottom" id="install-bottom"></div>'+
       '<p class="sub" style="margin-top:18px;font-size:14px">Как это работает: <a href="/pitanie/menu-na-den">меню на день</a> · <a href="/pitanie/plan-pitaniya-na-3-dnya">план на 3 дня</a> · <a href="/pitanie/podbor-po-kbzhu">подбор по КБЖУ</a> · <a href="/pitanie/spisok-pokupok-i-korzina">список покупок</a></p>';
@@ -295,7 +296,7 @@ input[type=text]{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid
   function saveText(){var g=function(i){var e=document.getElementById(i);return e?e.value:"";};if(document.getElementById("pref")){F.pref=g("pref");F.exc=g("exc");F.macro=g("macro");}}
   function submitNew(){
     saveText();
-    var body={cuisine:F.cuisine,macro_goal:F.cuisine==="macro_goal"?(F.macro||""):"",preferred:F.pref||"",excluded:F.exc||"",time:F.time,servings:F.servings,appliance:F.appliance,meals:F.meals};
+    var body={cuisine:F.cuisine,macro_goal:F.cuisine==="macro_goal"?(F.macro||""):"",preferred:F.pref||"",excluded:F.exc||"",time:F.time,servings:F.servings,portion:F.portion,appliance:F.appliance,meals:F.meals};
     if(!body.appliance.length){alert("Выбери, в чём готовить");return;}
     if(F.mode!=="recipe"&&!body.meals.length){alert("Выбери хотя бы один приём пищи");return;}
     var path={recipe:"/api/recipe",day:"/api/daymenu",week:"/api/week"}[F.mode];
@@ -389,7 +390,7 @@ input[type=text]{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid
       if(b.hasAttribute("data-sub")){ls("sub",b.getAttribute("data-sub"));show("menus");return;}
       var box=b.parentNode,name=box.getAttribute("data-name"); if(!name) return;
       saveText(); var k=b.getAttribute("data-key"),multi=box.getAttribute("data-multi")==="1";
-      if(multi){var a=F[name],i=a.indexOf(k);if(i>=0)a.splice(i,1);else a.push(k);} else F[name]=(name==="servings")?parseInt(k,10):k;
+      if(multi){var a=F[name],i=a.indexOf(k);if(i>=0)a.splice(i,1);else a.push(k);} else{F[name]=(name==="servings")?parseInt(k,10):k;if(name==="portion")ls("portion",k);}
       viewNew();return;
     }
     if(t.id==="go"){submitNew();return;}
