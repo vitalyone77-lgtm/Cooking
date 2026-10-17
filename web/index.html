@@ -75,6 +75,13 @@ input[type=text]{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid
 .install-bottom{margin-top:18px}
 #print-area{display:none}
 @media print{body>*:not(#print-area){display:none!important}#print-area{display:block;color:#000;background:#fff;font:14pt/1.5 Georgia,serif;white-space:pre-wrap}}
+
+.timers{display:flex;flex-wrap:wrap;gap:8px;margin:-2px 0 8px 36px}
+.tm{display:inline-flex;align-items:center;gap:8px;min-height:40px;padding:6px 12px;border-radius:999px;border:1.5px solid var(--primary);color:var(--primary);background:var(--surface);font-size:15px;font-weight:600}
+.tm small{font-weight:400;color:var(--muted);font-size:13px}.tm .x{min-width:32px;min-height:32px;font-size:16px;color:var(--muted)}
+.tm.run{background:var(--soft)}.tm.ok{background:var(--primary);color:var(--on-primary);border-color:var(--primary)}.tm.ok small,.tm.ok .x{color:var(--on-primary)}
+.tm.end{background:var(--danger);color:#fff;border-color:var(--danger)}.tm.end small,.tm.end .x{color:#fff}
+.toast{position:fixed;left:12px;right:12px;top:12px;z-index:50;background:var(--primary);color:var(--on-primary);padding:14px 16px;border-radius:14px;font-weight:600;box-shadow:0 6px 24px rgba(0,0,0,.25)}
 </style>
 </head>
 <body>
@@ -181,10 +188,88 @@ input[type=text]{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid
   function accordion(title,sub,badge,body,open){
     return '<div class="card acc'+(open?' open':'')+'"><button class="acc-head" aria-expanded="'+(!!open)+'"><span class="acc-title">'+title+(sub?'<small>'+sub+'</small>':'')+'</span>'+(badge||'')+'<span class="chev" aria-hidden="true">▶</span></button><div class="acc-body">'+body+'</div></div>';
   }
+
+  // ---- таймеры в шагах рецепта: у каждого шага с временем свой таймер; «5–6 мин» = сигнал на 5-й минуте, счёт до 6-й ----
+  var TM=(function(){try{return JSON.parse(ls("timers")||"{}");}catch(e){return {};}})(), AC=null, tick=null;
+  function tmSave(){try{ls("timers",JSON.stringify(TM));}catch(e){}}
+  function parseTimes(line){
+    var res=[],seen={},re=/(\d+(?:[.,]\d+)?)(?:\s*[–—-]\s*(\d+(?:[.,]\d+)?))?\s*(мин[а-яё.]*|час(?:а|ов)?(?![а-яё]))/gi,m;
+    while((m=re.exec(line))&&res.length<2){
+      var k=/^час/i.test(m[3])?60:1,a=parseFloat(m[1].replace(",","."))*k,b=m[2]?parseFloat(m[2].replace(",","."))*k:a;
+      if(!(a>0)||b<a||b>360)continue;
+      var key=a+"-"+b;if(seen[key])continue;seen[key]=1;
+      res.push({min:a,max:b,label:m[2]?(m[1]+"–"+m[2]+" "+(k===60?"ч":"мин")):(m[1]+" "+(k===60?"ч":"мин"))});
+    }
+    return res;
+  }
+  function hash(str){var h=0;for(var i=0;i<str.length;i++){h=(h*31+str.charCodeAt(i))|0;}return (h>>>0).toString(36);}
+  function fmt(sec){sec=Math.max(0,Math.round(sec));var h=Math.floor(sec/3600),m=Math.floor(sec%3600/60),s2=sec%60;return (h?h+":"+(m<10?"0":""):"")+m+":"+(s2<10?"0":"")+s2;}
+  function tmId(step,t){return hash(step)+"-"+t.min+"-"+t.max;}
+  function tmHTML(id,t){
+    var st=TM[id];
+    if(!st)return '<button class="tm" data-tm-start="'+id+'" data-min="'+t.min+'" data-max="'+t.max+'" data-label="'+esc(t.label)+'">⏱ '+esc(t.label)+'</button>';
+    return '<span class="tm" data-tm="'+id+'"><b class="tm-t"></b> <small class="tm-s"></small><button class="x" data-tm-stop="'+id+'" aria-label="Сбросить">✕</button></span>';
+  }
+  function stepTimers(line){
+    var ts=parseTimes(line);if(!ts.length)return "";
+    return '<div class="timers">'+ts.map(function(t){return tmHTML(tmId(line.trim(),t),t);}).join("")+'</div>';
+  }
+  function beep(times){
+    try{
+      if(!AC)AC=new (window.AudioContext||window.webkitAudioContext)();
+      if(AC.state==="suspended")AC.resume();
+      for(var i=0;i<times;i++){var o=AC.createOscillator(),g=AC.createGain();o.frequency.value=880;o.connect(g);g.connect(AC.destination);
+        var t0=AC.currentTime+i*0.45;g.gain.setValueAtTime(0.0001,t0);g.gain.exponentialRampToValueAtTime(0.5,t0+0.02);g.gain.exponentialRampToValueAtTime(0.0001,t0+0.35);o.start(t0);o.stop(t0+0.4);}
+    }catch(e){}
+    try{if(navigator.vibrate&&(!navigator.userActivation||navigator.userActivation.hasBeenActive))navigator.vibrate([300,150,300]);}catch(e){}
+  }
+  function toast(msg){
+    var d=document.createElement("div");d.className="toast";d.textContent=msg;d.onclick=function(){d.remove();};
+    document.body.appendChild(d);setTimeout(function(){if(d.parentNode)d.remove();},12000);
+    try{if(document.hidden&&window.Notification&&Notification.permission==="granted")new Notification("Кухонный помощник",{body:msg});}catch(e){}
+  }
+  function tmTick(){
+    var now=Date.now(),any=false,changed=false;
+    Object.keys(TM).forEach(function(id){
+      var st=TM[id],el=(st.max-st.min>0);var sec=(now-st.start)/1000,minS=st.min*60,maxS=st.max*60;
+      if(now-st.start>3600*1000*8){delete TM[id];changed=true;return;}
+      if(!st.f1&&sec>=minS){st.f1=1;changed=true;
+        if(el){beep(2);toast("⏰ "+st.label+": прошло "+fmt(minS)+" — можно снимать. Максимум до "+fmt(maxS)+".");}
+        else{beep(3);toast("⏰ Время вышло: "+st.label);}}
+      if(el&&!st.f2&&sec>=maxS){st.f2=1;changed=true;beep(3);toast("⏰ Время вышло: "+st.label);}
+      if(sec<maxS)any=true;
+      Array.prototype.forEach.call(document.querySelectorAll('[data-tm="'+id+'"]'),function(node){
+        var t=node.querySelector(".tm-t"),s2=node.querySelector(".tm-s");
+        if(sec>=maxS){node.className="tm end";t.textContent="Время вышло";s2.textContent=st.label;}
+        else if(el&&sec>=minS){node.className="tm ok";t.textContent=fmt(sec);s2.textContent="можно снимать · до "+fmt(maxS);}
+        else{node.className="tm run";t.textContent=fmt(sec);s2.textContent=(el?"сигнал на "+fmt(minS)+", до "+fmt(maxS):"сигнал на "+fmt(minS));}
+      });
+    });
+    if(changed)tmSave();
+    if(!Object.keys(TM).length&&tick){clearInterval(tick);tick=null;}
+  }
+  function tmEnsureTick(){if(!tick){tick=setInterval(tmTick,1000);}tmTick();}
+  function tmStart(btn){
+    var id=btn.getAttribute("data-tm-start");
+    TM[id]={start:Date.now(),min:parseFloat(btn.getAttribute("data-min")),max:parseFloat(btn.getAttribute("data-max")),label:btn.getAttribute("data-label")};
+    tmSave();
+    try{if(!AC)AC=new (window.AudioContext||window.webkitAudioContext)();if(AC.state==="suspended")AC.resume();}catch(e){}   // звук разрешён после нажатия
+    try{if(window.Notification&&Notification.permission==="default")Notification.requestPermission();}catch(e){}
+    var box=btn.parentNode,tmp=document.createElement("div");tmp.innerHTML=tmHTML(id,{min:TM[id].min,max:TM[id].max,label:TM[id].label});
+    box.replaceChild(tmp.firstChild,btn);tmEnsureTick();
+  }
+  function tmStop(btn){
+    var id=btn.getAttribute("data-tm-stop"),st=TM[id];delete TM[id];tmSave();
+    var node=btn.closest("[data-tm]"),tmp=document.createElement("div");
+    if(st){tmp.innerHTML=tmHTML(id,{min:st.min,max:st.max,label:st.label});node.parentNode.replaceChild(tmp.firstChild,node);}
+    else node.remove();
+  }
+  document.addEventListener("visibilitychange",function(){if(!document.hidden&&Object.keys(TM).length)tmEnsureTick();});
+
   function recipeHTML(text){
     var out=[],plain=[];
     function flush(){if(plain.length){out.push('<div class="recipe">'+esc(plain.join("\n"))+'</div>');plain=[];}}
-    String(text).split("\n").forEach(function(l){ if(/^\s*\d+[.)]\s+/.test(l)){flush();out.push('<label class="step"><input type="checkbox"><span>'+esc(l.trim())+'</span></label>');} else plain.push(l);});
+    String(text).split("\n").forEach(function(l){ if(/^\s*\d+[.)]\s+/.test(l)){flush();out.push('<label class="step"><input type="checkbox"><span>'+esc(l.trim())+'</span></label>'+stepTimers(l));} else plain.push(l);});
     flush();return out.join("");
   }
   window.__r={};
@@ -312,6 +397,7 @@ input[type=text]{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid
     LAST_RECIPE=res.text;
         main.innerHTML='<h1>'+esc(res.title)+'</h1><div class="card" style="padding:4px 16px 16px">'+recipeHTML(res.text)+actions(res.title,res.text)+'</div>'+shoppingHTML(res.shopping,"Найти продукты в магазине","recipe")+adSlot("inline")+'<button class="btn ghost" id="again">🍳 Подобрать ещё</button>';
         document.getElementById("again").onclick=function(){show("new");};
+    if(Object.keys(TM).length)tmEnsureTick();
     window.scrollTo(0,0);
   }
 
@@ -373,7 +459,7 @@ input[type=text]{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid
     Array.prototype.forEach.call(document.querySelectorAll(".tab"),function(t){t.setAttribute("aria-selected",t.getAttribute("data-tab")===tab);});
     if(tab==="new"){viewNew();window.scrollTo(0,0);return;}
     main.innerHTML='<div class="skeleton"></div><div class="skeleton"></div><div class="skeleton"></div>';
-    Promise.resolve(VIEWS[tab]()).then(function(h){main.innerHTML=h;window.scrollTo(0,0);}).catch(fail);
+    Promise.resolve(VIEWS[tab]()).then(function(h){main.innerHTML=h;if(Object.keys(TM).length)tmEnsureTick();window.scrollTo(0,0);}).catch(fail);
   }
 
   // ---- единый обработчик кликов ----
@@ -383,6 +469,8 @@ input[type=text]{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid
     if(b=t.closest(".step")){b.classList.toggle("checked",b.querySelector("input").checked);return;}
     if(b=t.closest(".k-wake")){ if(b.checked){navigator.wakeLock.request("screen").then(function(l){wake=l;}).catch(function(){b.checked=false;});} else if(wake){wake.release();wake=null;} return;}
     if(b=t.closest(".tab")){show(b.getAttribute("data-tab"));return;}
+    if(b=t.closest("[data-tm-start]")){tmStart(b);return;}
+    if(b=t.closest("[data-tm-stop]")){tmStop(b);return;}
     if(b=t.closest("[data-store-pick]")){pickStore(b);return;}
     if(b=t.closest("[data-miss-open]")){var pn=b.parentNode.querySelector(".misspanel");pn.style.display=pn.style.display==="none"?"":"none";return;}
     if(b=t.closest("[data-miss-go]")){missingGo(b);return;}

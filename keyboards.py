@@ -194,9 +194,12 @@ def restart_kb() -> InlineKeyboardMarkup:
     return b.as_markup()
 
 
-def recipe_result_kb() -> InlineKeyboardMarkup:
-    """Кнопки под готовым рецептом: добавить в избранное / новый рецепт."""
+def recipe_result_kb(timers: list[tuple[int, int, int]] | None = None) -> InlineKeyboardMarkup:
+    """Кнопки под готовым рецептом: таймеры шагов (если в шагах есть время), продукты, избранное, новый рецепт."""
+    import timers as tm
     b = InlineKeyboardBuilder()
+    for step, mn, mx in (timers or [])[:6]:
+        b.button(text=f"⏱ Шаг {step}: {tm.label(mn, mx)}", callback_data=f"tmr:{mn}:{mx}:{step}")
     b.button(text="🛒 Найти продукты в магазине", callback_data="shop:open:r")
     b.button(text="❌ Нет каких-то продуктов", callback_data="miss:open:r")
     b.button(text="⭐ В избранное", callback_data="fav:save")

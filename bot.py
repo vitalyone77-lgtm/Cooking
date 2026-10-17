@@ -22,6 +22,7 @@ import config
 import keyboards as kb
 import day_menu
 import missing
+import timers as step_timers_mod
 import week_menu
 from cuisines import cuisine_label, MACRO_GOAL_KEY, PORTION_LABELS, PORTION_ORDER
 from states import RecipeForm, FavoritesForm, DayMenuForm, WeekMenuForm
@@ -605,9 +606,59 @@ async def step_confirm_go(callback: CallbackQuery, state: FSMContext):
 
     await status_msg.delete()
     # Рецепт и кнопки («Найти продукты в магазине», «В избранное», «Ещё рецепт») — одним сообщением
-    sent = await callback.message.answer(recipe_text, reply_markup=kb.recipe_result_kb())
+    sent = await callback.message.answer(recipe_text, reply_markup=recipe_kb(recipe_text))
     remember_recipe_terms(callback.message.chat.id, sent.message_id, shopping_terms)
 
+
+
+# ---------- Таймеры шагов рецепта ----------
+# Под рецептом — кнопки «⏱ Шаг 2: 5–6 мин». Нажал → бот напишет, когда пора (для «5–6 мин» — на 5-й минуте «можно снимать»,
+# и ещё раз, когда пройдёт максимум). Таймеры живут в памяти бота: при перезапуске бота сбрасываются.
+
+_timer_sleep = asyncio.sleep           # подменяется в тестах
+_active_timers: dict[int, set] = {}
+MAX_TIMERS_PER_CHAT = 8
+
+
+def recipe_kb(recipe_text: str):
+    return kb.recipe_result_kb(step_timers_mod.step_timers(recipe_text))
+
+
+async def _run_timer(message: Message, step: int, mn: int, mx: int):
+    fm = step_timers_mod.fmt_min
+    try:
+        await _timer_sleep(mn * 60)
+        if mx > mn:
+            await message.answer(f"⏰ Шаг {step}: прошло {fm(mn)} — можно снимать (в рецепте до {fm(mx)}).", parse_mode=None)
+            await _timer_sleep((mx - mn) * 60)
+            await message.answer(f"⏰ Шаг {step}: время вышло ({fm(mx)}).", parse_mode=None)
+        else:
+            await message.answer(f"⏰ Шаг {step}: время вышло ({fm(mn)})!", parse_mode=None)
+    except asyncio.CancelledError:
+        raise
+    except Exception:  # noqa: BLE001 — не удалось написать (бот заблокирован и т.п.)
+        logger.warning("Не удалось отправить сигнал таймера", exc_info=True)
+
+
+@dp.callback_query(F.data.startswith("tmr:"))
+async def timer_start(callback: CallbackQuery):
+    try:
+        _, mn, mx, step = callback.data.split(":")
+        mn, mx, step = int(mn), int(mx), int(step)
+    except ValueError:
+        await callback.answer("Не удалось запустить таймер", show_alert=True)
+        return
+    chat_id = callback.message.chat.id
+    active = _active_timers.setdefault(chat_id, set())
+    if len(active) >= MAX_TIMERS_PER_CHAT:
+        await callback.answer("Уже запущено много таймеров — дождись сигнала.", show_alert=True)
+        return
+    fm = step_timers_mod.fmt_min
+    task = asyncio.create_task(_run_timer(callback.message, step, mn, mx))
+    active.add(task)
+    task.add_done_callback(active.discard)
+    note = f"сигнал через {fm(mn)}" + (f", потом ещё раз через {fm(mx - mn)} (максимум {fm(mx)})" if mx > mn else "")
+    await callback.answer(f"⏱ Таймер запущен: {note}", show_alert=True)
 
 
 # ---------- Напоминание: кнопки в рассылке ----------
@@ -647,7 +698,7 @@ async def reminder_cook(callback: CallbackQuery, state: FSMContext):
     await callback.message.edit_reply_markup()
     text = saved["text"]
     set_last_recipe(chat_id, extract_dish_title(text), text, (get_last_request(chat_id) or {}).get("cuisine"))
-    sent = await callback.message.answer(text, reply_markup=kb.recipe_result_kb())
+    sent = await callback.message.answer(text, reply_markup=recipe_kb(text))
     remember_recipe_terms(chat_id, sent.message_id, saved.get("terms") or [])
 
 
@@ -764,7 +815,7 @@ async def miss_go(callback: CallbackQuery):
             text, new_terms = await missing.adapt_recipe(anchor.text, names)
             await status.delete()
             set_last_recipe(chat_id, extract_dish_title(text), text, (get_last_request(chat_id) or {}).get("cuisine"))
-            sent = await msg.answer(text, reply_markup=kb.recipe_result_kb())
+            sent = await msg.answer(text, reply_markup=recipe_kb(text))
             remember_recipe_terms(chat_id, sent.message_id, new_terms)
         elif ctx == "d":
             await missing.rebuild_day(chat_id, names)
