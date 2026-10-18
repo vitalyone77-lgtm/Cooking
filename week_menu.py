@@ -346,6 +346,7 @@ def build_status_view(chat_id: int, open_day: int | None = None) -> tuple[str, I
             else:
                 b.button(text="   🔒 Откроется после предыдущего дня", callback_data="weekmenu:noop")
     b.button(text="🛒 Корзина и магазины", callback_data="weekmenu:basket")
+    b.button(text="📄 Скачать PDF (читать без интернета)", callback_data="pdf:w")
     if state["current_day"] > days_total and state["progress_index"] >= days_total * n:
         b.button(text="🎉 Собрать новый план", callback_data="weekmenu:start")
     b.adjust(1)

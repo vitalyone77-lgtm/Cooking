@@ -16,12 +16,13 @@ from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import CommandStart, Command, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.types import Message, CallbackQuery, BotCommand, ErrorEvent
+from aiogram.types import Message, CallbackQuery, BotCommand, ErrorEvent, BufferedInputFile
 
 import config
 import keyboards as kb
 import day_menu
 import missing
+import web_pdf
 import timers as step_timers_mod
 import week_menu
 from cuisines import cuisine_label, MACRO_GOAL_KEY, PORTION_LABELS, PORTION_ORDER
@@ -609,6 +610,60 @@ async def step_confirm_go(callback: CallbackQuery, state: FSMContext):
     sent = await callback.message.answer(recipe_text, reply_markup=recipe_kb(recipe_text))
     remember_recipe_terms(callback.message.chat.id, sent.message_id, shopping_terms)
 
+
+
+# ---------- PDF: читать без интернета ----------
+# PDF приходит в чат файлом: Telegram скачивает его на телефон/компьютер, и рецепт, меню или план открываются без сети
+# (сами кнопки бота без интернета не работают — вся история и файлы остаются).
+
+def _pdf_items(chat_id: int, ctx: str, message: Message) -> tuple[list[dict], str]:
+    if ctx == "r":
+        src = _recipe_source(message) or message
+        text = src.text or ""
+        title = extract_dish_title(text) or "Рецепт"
+        return [{"title": title, "text": text}], title
+    if ctx == "d":
+        entry = day_menu._load_menu(chat_id)
+        if not entry:
+            return [], ""
+        items = [{"title": f"{kb.MEAL_LABELS.get(k, k)}: {entry['meals'][k].get('title', '')}", "text": entry["meals"][k].get("text", "")}
+                 for k in entry["order"] if entry["meals"].get(k, {}).get("ok")]
+        terms = entry.get("shopping_terms") or []
+        if terms:
+            items.append({"title": "Список покупок", "text": "\n".join(f"- {t}" for t in terms)})
+        return items, "Меню на день"
+    state = week_menu._load(chat_id)
+    if not state:
+        return [], ""
+    items = []
+    if state.get("basket_text"):
+        items.append({"title": "Корзина и хранение продуктов", "text": state["basket_text"]})
+    for d in sorted(state.get("days", {}), key=int):
+        day = state["days"][d]
+        for k in day.get("order", []):
+            ml = day["meals"].get(k) or {}
+            items.append({"title": f"День {d} · {kb.MEAL_LABELS.get(k, k)}: {ml.get('title', '')}", "text": ml.get("text", "")})
+    return items, "План питания"
+
+
+@dp.callback_query(F.data.startswith("pdf:"))
+async def send_pdf(callback: CallbackQuery):
+    ctx = callback.data.split(":", 1)[1]
+    chat_id = callback.message.chat.id
+    items, title = _pdf_items(chat_id, ctx, callback.message) if ctx in ("r", "d", "w") else ([], "")
+    items = [i for i in items if i.get("text", "").strip()]
+    if not items:
+        await callback.answer("Нечего скачивать — открой рецепт или меню заново.", show_alert=True)
+        return
+    await callback.answer("Готовлю PDF…")
+    try:
+        data = await asyncio.to_thread(web_pdf.build_pdf, items, config.WEB_APP_URL, title)
+    except web_pdf.PdfUnavailable as e:
+        await callback.message.answer(f"PDF сейчас недоступен: {e}", parse_mode=None)
+        return
+    name = "".join(ch for ch in title if ch.isalnum() or ch in " -_")[:60].strip() or "recipe"
+    await callback.message.answer_document(BufferedInputFile(data, filename=f"{name}.pdf"),
+                                           caption="📄 Сохрани файл — откроется без интернета.", parse_mode=None)
 
 
 # ---------- Таймеры шагов рецепта ----------

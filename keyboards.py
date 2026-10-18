@@ -203,6 +203,7 @@ def recipe_result_kb(timers: list[tuple[int, int, int]] | None = None) -> Inline
     b.button(text="🛒 Найти продукты в магазине", callback_data="shop:open:r")
     b.button(text="❌ Нет каких-то продуктов", callback_data="miss:open:r")
     b.button(text="⭐ В избранное", callback_data="fav:save")
+    b.button(text="📄 Скачать PDF (читать без интернета)", callback_data="pdf:r")
     b.button(text="🍳 Подобрать ещё рецепт", callback_data="confirm:restart")
     b.adjust(1)
     return b.as_markup()

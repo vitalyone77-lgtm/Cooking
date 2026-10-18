@@ -308,6 +308,7 @@ def build_summary_view(chat_id: int) -> tuple[str, InlineKeyboardMarkup] | None:
         b.button(text=f"{emoji_label}: {short_title}", callback_data=f"daymenu:show:{meal_key}")
     b.button(text="🛒 Найти продукты в магазине", callback_data="shop:open:d")
     b.button(text="❌ Нет каких-то продуктов", callback_data="miss:open:d")
+    b.button(text="📄 Скачать PDF (читать без интернета)", callback_data="pdf:d")
     b.button(text="🔄 Собрать меню заново", callback_data="daymenu:start")
     b.adjust(1)
     return text, b.as_markup()

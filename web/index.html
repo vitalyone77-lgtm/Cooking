@@ -154,11 +154,23 @@ input[type=text]{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid
     if(dev) return Promise.resolve();
     return fetch("/api/device",{method:"POST"}).then(function(r){if(!r.ok)throw new Error("Не удалось подключиться");return r.json();}).then(function(j){dev=j.device;ls("dev",dev);});
   }
+  // Без интернета: последние загруженные меню на день, план и избранное хранятся в браузере и открываются как есть.
+  var OFFLINE=false, OC=/^\/api\/(overview|day|week|favorites)$/;
+  function ocSet(path,j){try{ls("oc:"+path,JSON.stringify(j));}catch(e){}}
+  function ocGet(path){try{var c=ls("oc:"+path);return c?JSON.parse(c):null;}catch(e){return null;}}
+  function ocClear(){try{Object.keys(localStorage).forEach(function(k){if(k.indexOf("oc:")===0)localStorage.removeItem(k);});}catch(e){}}
   function call(method,path,body,retry){
+    var cacheable=method==="GET"&&OC.test(path);
+    return call0(method,path,body,retry).then(function(j){if(cacheable)ocSet(path,j);return j;},function(err){
+      if(cacheable&&err instanceof TypeError){var c=ocGet(path);if(c){OFFLINE=true;return c;}}
+      throw err;
+    });
+  }
+  function call0(method,path,body,retry){
     var o={method:method,headers:{"X-Device":dev}};
     if(body){o.headers["Content-Type"]="application/json";o.body=JSON.stringify(body);}
     return fetch(path,o).then(function(r){
-      if(r.status===401&&!retry) return ensureDevice(true).then(function(){return call(method,path,body,true);});
+      if(r.status===401&&!retry) return ensureDevice(true).then(function(){ocClear();return call0(method,path,body,true);});
       if(!r.ok) return r.json().catch(function(){return {};}).then(function(j){var e=new Error(typeof j.detail==="string"&&j.detail!=="device"?j.detail:("Ошибка "+r.status));e.status=r.status;throw e;});
       return r.json();
     });
@@ -373,6 +385,8 @@ input[type=text]{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid
     h+='<label class="f">Порций</label>'+chips(sv,String(F.servings),"servings",false);
     h+='<label class="f">Размер порции</label>'+chips(m.portions,F.portion,"portion",false);
     h+='<label class="f">В чём готовим</label>'+chips(m.appliances,F.appliance,"appliance",true);
+    var lr=null;try{lr=JSON.parse(ls("lastrecipe")||"null");}catch(e){}
+    if(lr&&lr.title)h+='<button class="btn ghost" data-last-recipe="1">📖 Последний рецепт: '+esc(lr.title)+'</button>';
     h+='<button class="btn" id="go">🔍 Подобрать</button><div class="install-bottom" id="install-bottom"></div>'+
       '<p class="sub" style="margin-top:18px;font-size:14px">Как это работает: <a href="/pitanie/menu-na-den">меню на день</a> · <a href="/pitanie/plan-pitaniya-na-3-dnya">план на 3 дня</a> · <a href="/pitanie/podbor-po-kbzhu">подбор по КБЖУ</a> · <a href="/pitanie/spisok-pokupok-i-korzina">список покупок</a></p>';
     main.innerHTML=h;
@@ -395,6 +409,7 @@ input[type=text]{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid
   var LAST_RECIPE="";
   function showRecipe(res){
     LAST_RECIPE=res.text;
+    try{ls("lastrecipe",JSON.stringify(res));}catch(e){}
         main.innerHTML='<h1>'+esc(res.title)+'</h1><div class="card" style="padding:4px 16px 16px">'+recipeHTML(res.text)+actions(res.title,res.text)+'</div>'+shoppingHTML(res.shopping,"Найти продукты в магазине","recipe")+adSlot("inline")+'<button class="btn ghost" id="again">🍳 Подобрать ещё</button>';
         document.getElementById("again").onclick=function(){show("new");};
     if(Object.keys(TM).length)tmEnsureTick();
@@ -454,12 +469,15 @@ input[type=text]{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid
   }
 
   var VIEWS={menus:viewMenus,favs:viewFavs};
+  function offlineBanner(){return '<div class="card" style="padding:12px 16px;margin:0 0 12px;border-left:4px solid var(--primary)"><strong>📴 Нет интернета.</strong> Показываю сохранённое с прошлого раза: меню, план, избранное, рецепты и таймеры работают. Новые подборы — когда появится сеть.</div>';}
+  window.addEventListener("online",function(){if(OFFLINE&&(cur==="menus"||cur==="favs"))show(cur);});
   function show(tab){
     cur=tab;ls("tab",tab);
     Array.prototype.forEach.call(document.querySelectorAll(".tab"),function(t){t.setAttribute("aria-selected",t.getAttribute("data-tab")===tab);});
     if(tab==="new"){viewNew();window.scrollTo(0,0);return;}
     main.innerHTML='<div class="skeleton"></div><div class="skeleton"></div><div class="skeleton"></div>';
-    Promise.resolve(VIEWS[tab]()).then(function(h){main.innerHTML=h;if(Object.keys(TM).length)tmEnsureTick();window.scrollTo(0,0);}).catch(fail);
+    OFFLINE=false;
+    Promise.resolve(VIEWS[tab]()).then(function(h){if(OFFLINE)h=offlineBanner()+h;main.innerHTML=h;if(Object.keys(TM).length)tmEnsureTick();window.scrollTo(0,0);}).catch(fail);
   }
 
   // ---- единый обработчик кликов ----
@@ -469,6 +487,7 @@ input[type=text]{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid
     if(b=t.closest(".step")){b.classList.toggle("checked",b.querySelector("input").checked);return;}
     if(b=t.closest(".k-wake")){ if(b.checked){navigator.wakeLock.request("screen").then(function(l){wake=l;}).catch(function(){b.checked=false;});} else if(wake){wake.release();wake=null;} return;}
     if(b=t.closest(".tab")){show(b.getAttribute("data-tab"));return;}
+    if(b=t.closest("[data-last-recipe]")){try{showRecipe(JSON.parse(ls("lastrecipe")));}catch(e){}return;}
     if(b=t.closest("[data-tm-start]")){tmStart(b);return;}
     if(b=t.closest("[data-tm-stop]")){tmStop(b);return;}
     if(b=t.closest("[data-store-pick]")){pickStore(b);return;}
