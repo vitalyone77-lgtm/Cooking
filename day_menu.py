@@ -18,6 +18,7 @@
 import asyncio
 import json
 import logging
+import re
 import threading
 from pathlib import Path
 
@@ -175,6 +176,35 @@ async def prepare_meals_info(selected_meals: list[str], base_data: dict) -> list
     ]
 
 
+_MARKER_RE = re.compile(r"^\s*[*_#]*\s*ПРИЁМ[_ ]ПИЩИ\s*:\s*(.+?)\s*[*_]*\s*$", re.IGNORECASE | re.MULTILINE)
+
+
+def _norm_label(text: str) -> str:
+    return re.sub(r"[^а-яёa-z0-9]+", " ", text.lower()).strip()
+
+
+def _order_blocks_by_marker(blocks: list[str], selected_meals: list[str]) -> list[str]:
+    """
+    ИИ иногда ставит блюда не в том порядке, в котором перечислены приёмы пищи (перекус на месте ужина). Каждый блок
+    начинается строкой «ПРИЁМ_ПИЩИ: <название>» — по ней расставляем блоки по своим местам и убираем строку из текста.
+    Если метки не нашлись или не сходятся с выбранными приёмами пищи — остаётся порядок по позициям.
+    """
+    labels = [_norm_label(meal_label(k)) for k in selected_meals]
+    found: list[str | None] = []
+    cleaned: list[str] = []
+    for b in blocks:
+        m = _MARKER_RE.search(b)
+        found.append(_norm_label(m.group(1)) if m else None)
+        cleaned.append(_MARKER_RE.sub("", b, count=1).strip() if m else b)
+    if all(f is not None for f in found) and sorted(found) == sorted(labels):
+        by_label = dict(zip(found, cleaned))
+        if len(by_label) == len(labels):
+            if found != labels:
+                logger.warning("Блюда пришли в другом порядке (%s вместо %s) — переставил по меткам", found, labels)
+            return [by_label[lb] for lb in labels]
+    return cleaned
+
+
 def parse_meal_blocks(blocks: list[str], selected_meals: list[str]) -> list[dict]:
     """
     Превращает N текстовых блоков (уже разбитых по DAY_MENU_BLOCK_DELIMITER) в список
@@ -182,6 +212,7 @@ def parse_meal_blocks(blocks: list[str], selected_meals: list[str]) -> list[dict
     код решает, что делать (откат/повтор).
     """
     results = []
+    blocks = _order_blocks_by_marker(blocks, selected_meals)
     for meal_key, block in zip(selected_meals, blocks):
         label_text = meal_label(meal_key)
         recipe_text, shopping_terms = extract_shopping_terms(block)

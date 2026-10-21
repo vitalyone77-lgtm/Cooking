@@ -921,7 +921,7 @@ async def dm_step_meals(callback: CallbackQuery, state: FSMContext):
         if not selected:
             await callback.answer("Выбери хотя бы один приём пищи!", show_alert=True)
             return
-        await state.update_data(meals=list(selected))
+        await state.update_data(meals=kb.sort_meals(selected))
         await callback.message.edit_reply_markup()
         await callback.message.answer("Теперь выбери тип питания/кухни:", reply_markup=kb.cuisine_kb(with_extras=False))
         await state.set_state(DayMenuForm.cuisine)
@@ -932,7 +932,7 @@ async def dm_step_meals(callback: CallbackQuery, state: FSMContext):
         selected.remove(value)
     else:
         selected.add(value)
-    await state.update_data(meals=list(selected))
+    await state.update_data(meals=kb.sort_meals(selected))
     await callback.message.edit_reply_markup(reply_markup=kb.meals_kb(selected))
     await callback.answer()
 
@@ -1171,7 +1171,7 @@ async def wm_step_meals(callback: CallbackQuery, state: FSMContext):
         if not selected:
             await callback.answer("Выбери хотя бы один приём пищи!", show_alert=True)
             return
-        await state.update_data(meals=list(selected))
+        await state.update_data(meals=kb.sort_meals(selected))
         await callback.message.edit_reply_markup()
         await callback.message.answer("Теперь выбери тип питания/кухни:", reply_markup=kb.cuisine_kb(with_extras=False))
         await state.set_state(WeekMenuForm.cuisine)
@@ -1182,7 +1182,7 @@ async def wm_step_meals(callback: CallbackQuery, state: FSMContext):
         selected.remove(value)
     else:
         selected.add(value)
-    await state.update_data(meals=list(selected))
+    await state.update_data(meals=kb.sort_meals(selected))
     await callback.message.edit_reply_markup(reply_markup=kb.meals_kb(selected))
     await callback.answer()
 

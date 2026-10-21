@@ -43,7 +43,7 @@ fav_mod.FAVORITES_FILE = web_db.DATA_DIR / "favorites.json"
 
 from ai import generate_recipe
 from cuisines import CUISINE_LABELS, PORTION_LABELS, PORTION_ORDER
-from keyboards import MEAL_LABELS
+from keyboards import MEAL_LABELS, sort_meals
 from search import search_recipes, format_results_for_prompt
 from shopping import extract_shopping_terms, extract_dish_title, amounts_from_recipe_text, _fmt_amount, _find_amount
 from storage import get_all_users
@@ -118,7 +118,7 @@ class Params(BaseModel):
                 "appliance": keys, "appliance_labels": [APPLIANCES[k] for k in keys]}
 
     def meal_keys(self) -> list[str]:
-        keys = [m for m in self.meals if m in MEAL_LABELS]
+        keys = sort_meals(self.meals)
         if not keys:
             raise HTTPException(400, "Выбери хотя бы один приём пищи")
         return keys

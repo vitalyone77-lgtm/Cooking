@@ -140,6 +140,12 @@ MEAL_LABELS = {
 }
 SNACK_MEALS = ("snack", "snack2")
 
+
+def sort_meals(keys) -> list[str]:
+    """Приёмы пищи в порядке дня (завтрак → … → ужин), без повторов и неизвестных ключей."""
+    order = list(MEAL_LABELS)
+    return sorted({k for k in keys if k in MEAL_LABELS}, key=order.index)
+
 # Ориентировочная доля от общей дневной цели по КБЖУ (нормализуется под фактически
 # выбранный набор приёмов пищи в day_menu.py).
 MEAL_KCAL_SHARE = {
