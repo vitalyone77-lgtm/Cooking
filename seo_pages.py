@@ -206,6 +206,10 @@ def _jsonld(obj: dict) -> str:
     return '<script type="application/ld+json">' + json.dumps(obj, ensure_ascii=False).replace("</", "<\\/") + "</script>"
 
 
+# Яндекс Метрика (счётчик общий с ymayaka.ru; вебвизор выключен)
+_METRIKA = '<!-- Yandex.Metrika counter -->\n<script type="text/javascript">\n    (function(m,e,t,r,i,k,a){\n        m[i]=m[i]||function(){(m[i].a=m[i].a||[]).push(arguments)};\n        m[i].l=1*new Date();\n        for (var j = 0; j < document.scripts.length; j++) {if (document.scripts[j].src === r) { return; }}\n        k=e.createElement(t),a=e.getElementsByTagName(t)[0],k.async=1,k.src=r,a.parentNode.insertBefore(k,a)\n    })(window, document,\'script\',\'https://mc.yandex.ru/metrika/tag.js?id=113752594\', \'ym\');\n\n    ym(113752594, \'init\', {ssr:true, webvisor:false, clickmap:true, ecommerce:"dataLayer", referrer: document.referrer, url: location.href, accurateTrackBounce:true, trackLinks:true});\n</script>\n<noscript><div><img src="https://mc.yandex.ru/watch/113752594" style="position:absolute; left:-9999px;" alt="" /></div></noscript>\n<!-- /Yandex.Metrika counter -->\n'
+
+
 def _layout(site: str, path: str, title: str, description: str, body: str, ld: list[dict]) -> str:
     url = f"{site}{path}"
     return (
@@ -225,7 +229,7 @@ def _layout(site: str, path: str, title: str, description: str, body: str, ld: l
         '<meta name="twitter:card" content="summary_large_image">'
         '<link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png">'
         '<meta name="theme-color" content="#2F6B4F">'
-        f"<style>{_CSS}</style>" + "".join(_jsonld(x) for x in ld) +
+        f"<style>{_CSS}</style>" + "".join(_jsonld(x) for x in ld) + _METRIKA +
         f'</head><body><main class="wrap">{body}'
         f'<footer>© {SITE_NAME} · <a href="/">Открыть помощника</a> · <a href="/pitanie">Все статьи</a></footer>'
         "</main></body></html>"
