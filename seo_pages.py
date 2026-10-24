@@ -293,7 +293,7 @@ def _layout(site: str, path: str, title: str, description: str, body: str, ld: l
         '<meta name="theme-color" content="#2F6B4F">'
         f"<style>{_CSS}</style>" + "".join(_jsonld(x) for x in ld) + _METRIKA +
         f'</head><body><main class="wrap">{body}'
-        f'<footer>© {SITE_NAME} · <a href="/">Открыть помощника</a> · <a href="/pitanie">Все статьи</a></footer>'
+        f'<footer>© {SITE_NAME} · <a href="/">Открыть помощника</a> · <a href="/pitanie">Все статьи</a> · Сайт разработан <a href="https://dev.pump-um.ru/" target="_blank" rel="noopener">dev.pump-um.ru</a></footer>'
         "</main></body></html>"
     )
 
