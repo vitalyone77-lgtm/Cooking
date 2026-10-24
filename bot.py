@@ -43,7 +43,7 @@ from last_recipe import set_last_recipe, get_last_recipe
 from stores import prefs as store_prefs
 from stores.links import DEFAULT_STORES
 from stores.basket import build_priced_basket
-from tg_safety import SafeSendMiddleware
+from tg_safety import SafeSendMiddleware, OneHeavyAtATime
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -58,6 +58,7 @@ APPLIANCE_LABELS = {
 bot = Bot(token=config.BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.MARKDOWN))
 bot.session.middleware(SafeSendMiddleware())   # битая разметка ИИ, длинные тексты, «not modified»
 dp = Dispatcher(storage=MemoryStorage())
+dp.callback_query.outer_middleware(OneHeavyAtATime())   # двойной тап по «Подобрать», корзине и т. п. не запускает вторую генерацию
 
 
 @dp.errors()

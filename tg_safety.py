@@ -59,3 +59,35 @@ class SafeSendMiddleware(BaseRequestMiddleware):
                 logger.info("Разметка сломана (%s) — отправляю без неё", e)
                 return await make_request(bot, method.model_copy(update={"parse_mode": None, "entities": None}))
             raise
+
+
+# ---------- защита от двойного нажатия ----------
+
+from aiogram import BaseMiddleware
+from aiogram.types import CallbackQuery
+
+# Кнопки, за которыми долгая и платная работа (поиск, ИИ, ВкусВилл, PDF). Пока одна такая работа
+# в чате идёт, повторное нажатие (двойной тап, нетерпеливое «ещё раз») не запускает вторую копию.
+HEAVY_PREFIXES = ("confirm:go", "miss:go:", "shop:cart:", "weekmenu:cook_next", "weekmenu:slot:", "pdf:")
+
+
+class OneHeavyAtATime(BaseMiddleware):
+    def __init__(self):
+        self._busy: set[int] = set()
+
+    async def __call__(self, handler, event: CallbackQuery, data):
+        cb = event.data or ""
+        if not cb.startswith(HEAVY_PREFIXES) or not event.message:
+            return await handler(event, data)
+        chat_id = event.message.chat.id
+        if chat_id in self._busy:
+            try:
+                await event.answer("⏳ Уже готовлю — подожди немного, пришлю результат.")
+            except Exception:  # noqa: BLE001 — старый callback, Telegram его уже не принимает
+                pass
+            return None
+        self._busy.add(chat_id)
+        try:
+            return await handler(event, data)
+        finally:
+            self._busy.discard(chat_id)

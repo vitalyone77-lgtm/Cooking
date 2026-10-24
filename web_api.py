@@ -148,6 +148,9 @@ LIMITS = {
 
 def _spend(dev_id: int, kind: str):
     """Лимиты: 3 блюда в сутки, 1 меню на день в сутки, 1 план на 3 дня за 3 календарных дня (МСК)."""
+    # повторный запрос, пока первый ещё готовится, отклоняем ДО списания — иначе дубль съест попытку
+    if any(j["dev"] == dev_id and j["status"] == "running" for j in JOBS.values()):
+        raise HTTPException(429, "Предыдущий запрос ещё выполняется — подожди минутку.")
     if kind in LIMITS:
         n, days, label = LIMITS[kind]
         if web_db.count_since(dev_id, kind, _msk_midnight(days - 1)) >= n:
@@ -297,6 +300,9 @@ async def api_week_cart(x_device: str | None = Header(default=None)):
     info = week_menu.get_basket_info(cid)
     if not info:
         raise HTTPException(404, "Плана нет")
+    if web_db.count_today(dev_id, "cart") >= 30:
+        raise HTTPException(429, "Слишком много запросов корзины — попробуй завтра.")
+    web_db.log_event(dev_id, "cart")
     priced = await build_priced_basket(info["inventory_initial"])
     if not priced:
         return {"text": "", "link": ""}
