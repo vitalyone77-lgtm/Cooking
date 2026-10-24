@@ -1,7 +1,10 @@
 """
-Веб-поиск рецептов. Основной источник — Tavily (платный API, без скрейпинга и без
-рейтлимитов). Если ключ Tavily не задан или запрос не удался — резервный вариант:
-DuckDuckGo (бесплатно, но на некоторых серверах упирается в рейтлимит "202 Ratelimit").
+Веб-поиск рецептов, от бесплатного к платному:
+1) Tavily — бесплатно 1000 запросов в месяц (без привязанной карты дальше просто отвечает ошибкой);
+2) DuckDuckGo — бесплатно, но с сервера иногда упирается в рейтлимит;
+3) DeepSeek Search — платно ($0.75 за 1000 успешных запросов, пустой ответ не тарифицируется),
+   только если первые два ничего не дали. Выключается DEEPSEEK_SEARCH_ENABLED=false.
+Если не нашёл никто — ИИ пишет рецепт по своим знаниям, подбор всё равно работает.
 Собираем сниппеты нескольких результатов — их потом анализирует LLM.
 """
 import asyncio
@@ -11,12 +14,13 @@ import re
 import httpx
 from duckduckgo_search import DDGS
 
-from config import SEARCH_RESULTS_COUNT, TAVILY_API_KEY
+from config import SEARCH_RESULTS_COUNT, TAVILY_API_KEY, DEEPSEEK_API_KEY, DEEPSEEK_SEARCH_ENABLED
 from cuisines import cuisine_search_hint
 
 logger = logging.getLogger(__name__)
 
 TAVILY_URL = "https://api.tavily.com/search"
+DEEPSEEK_SEARCH_URL = "https://api.deepseek.com/v1/tools/search"
 
 # Убираем вводные слова вроде "хочу", "хочу приготовить" перед построением поискового запроса
 _LEAD_IN_RE = re.compile(
@@ -74,6 +78,27 @@ async def _search_tavily(query: str, count: int) -> list[dict]:
     ]
 
 
+async def _search_deepseek(query: str, count: int) -> list[dict]:
+    if not (DEEPSEEK_SEARCH_ENABLED and DEEPSEEK_API_KEY):
+        return []
+    try:
+        async with httpx.AsyncClient(timeout=20) as client:
+            resp = await client.post(
+                DEEPSEEK_SEARCH_URL,
+                headers={"Authorization": f"Bearer {DEEPSEEK_API_KEY}"},
+                json={"query": (query + " lang:ru")[:128], "count": count},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+    except Exception as e:
+        logger.warning(f"Ошибка поиска DeepSeek: {e}")
+        return []
+    return [
+        {"title": r.get("title", ""), "body": r.get("summary") or r.get("snippet", ""), "href": r.get("url", "")}
+        for r in data.get("results", [])
+    ]
+
+
 def _search_ddg_sync(query: str, count: int) -> list[dict]:
     results = []
     try:
@@ -92,13 +117,15 @@ def _search_ddg_sync(query: str, count: int) -> list[dict]:
 async def search_recipes(data: dict) -> tuple[str, list[dict]]:
     """
     Возвращает (поисковый запрос, список найденных сниппетов).
-    Сначала пробует Tavily, при пустом результате — DuckDuckGo как резерв.
+    Tavily (бесплатно) → DuckDuckGo (бесплатно) → DeepSeek Search (платно, только если пусто).
     """
     query = _build_query(data)
 
     results = await _search_tavily(query, SEARCH_RESULTS_COUNT)
     if not results:
         results = await asyncio.to_thread(_search_ddg_sync, query, SEARCH_RESULTS_COUNT)
+    if not results:
+        results = await _search_deepseek(query, SEARCH_RESULTS_COUNT)
 
     return query, results
 

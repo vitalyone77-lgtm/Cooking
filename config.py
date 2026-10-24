@@ -40,6 +40,8 @@ WEEK_MENU_DAYS = 3
 # рейтлимитов, в отличие от DuckDuckGo (который используется как резерв, если ключ
 # не задан или Tavily недоступен).
 TAVILY_API_KEY = os.getenv("TAVILY_API_KEY", "")
+# Платный резервный поиск DeepSeek (тот же ключ DEEPSEEK_API_KEY) — только когда Tavily и DuckDuckGo пусты
+DEEPSEEK_SEARCH_ENABLED = os.getenv("DEEPSEEK_SEARCH_ENABLED", "true").lower() == "true"
 
 # Напоминание "что приготовить завтра"
 REMINDER_ENABLED = os.getenv("REMINDER_ENABLED", "true").lower() == "true"
