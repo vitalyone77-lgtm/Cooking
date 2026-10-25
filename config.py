@@ -91,5 +91,9 @@ WEB_LIMIT_RECIPE = int(os.getenv("WEB_LIMIT_RECIPE", "3"))     # блюд в с�
 WEB_LIMIT_DAYMENU = int(os.getenv("WEB_LIMIT_DAYMENU", "1"))   # меню на день в сутки
 WEB_LIMIT_MISSING = int(os.getenv("WEB_LIMIT_MISSING", "5"))   # замен «нет таких-то продуктов» в сутки
 WEB_LIMIT_WEEK = int(os.getenv("WEB_LIMIT_WEEK", "1"))         # планов на 3 дня за 3 календарных дня
+# Общий потолок генераций ИИ в сутки (МСК) на весь проект — бот + сайт + напоминания. 0 — без потолка.
+DAILY_GEN_CAP = int(os.getenv("DAILY_GEN_CAP", "500"))
+# Напоминания шлём только тем, кто заходил в бота за последние N дней
+REMINDER_ACTIVE_DAYS = int(os.getenv("REMINDER_ACTIVE_DAYS", "14"))
 WEB_DAILY_LIMIT = int(os.getenv("WEB_DAILY_LIMIT", "12"))   # генераций в сутки на одно устройство
 WEB_DATA_DIR = os.getenv("WEB_DATA_DIR", "web_data")        # база и данные веба (отдельно от бота)

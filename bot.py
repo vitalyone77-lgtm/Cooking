@@ -44,6 +44,7 @@ from stores import prefs as store_prefs
 from stores.links import DEFAULT_STORES
 from stores.basket import build_priced_basket
 from tg_safety import SafeSendMiddleware, OneHeavyAtATime
+import usage
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -569,6 +570,11 @@ async def show_summary(message: Message, state: FSMContext):
 
 @dp.callback_query(RecipeForm.confirm, F.data == "confirm:go")
 async def step_confirm_go(callback: CallbackQuery, state: FSMContext):
+    spent, why = usage.bot_try_spend(callback.message.chat.id, "recipe")
+    if not spent:
+        await callback.answer()
+        await callback.message.answer(why, parse_mode=None)
+        return
     await callback.answer()  # отвечаем Telegram сразу, не дожидаясь долгого поиска+ИИ
     await callback.message.edit_reply_markup()
     status_msg = await callback.message.answer("🔎 Ищу рецепты в интернете...")
@@ -599,6 +605,7 @@ async def step_confirm_go(callback: CallbackQuery, state: FSMContext):
 
         set_last_recipe(callback.message.chat.id, dish_title, recipe_text, data.get("cuisine"))
     except Exception as e:
+        usage.unlog(spent)
         logger.exception("Ошибка при подборе рецепта")
         await status_msg.edit_text(
             f"😔 Что-то пошло не так при подборе рецепта.\nТехническая причина: {e}\n\n"
@@ -612,6 +619,26 @@ async def step_confirm_go(callback: CallbackQuery, state: FSMContext):
     sent = await callback.message.answer(recipe_text, reply_markup=recipe_kb(recipe_text))
     remember_recipe_terms(callback.message.chat.id, sent.message_id, shopping_terms)
 
+
+
+
+@dp.message.outer_middleware()
+async def _seen_message(handler, event, data):
+    try:
+        usage.touch(event.chat.id)
+    except Exception:  # noqa: BLE001 — учёт не должен мешать ответу
+        logger.exception("usage.touch")
+    return await handler(event, data)
+
+
+@dp.callback_query.outer_middleware()
+async def _seen_callback(handler, event, data):
+    try:
+        if event.message:
+            usage.touch(event.message.chat.id)
+    except Exception:  # noqa: BLE001
+        logger.exception("usage.touch")
+    return await handler(event, data)
 
 
 # ---------- PDF: читать без интернета ----------
@@ -863,6 +890,11 @@ async def miss_go(callback: CallbackQuery):
     if not names:
         await callback.answer("Отметь хотя бы один продукт.", show_alert=True)
         return
+    spent, why = usage.bot_try_spend(callback.message.chat.id, "missing")
+    if not spent:
+        await callback.answer()
+        await callback.message.answer(why, parse_mode=None)
+        return
     await callback.answer()
     await msg.edit_reply_markup()
     _missing_pick.pop((chat_id, msg.message_id), None)
@@ -896,6 +928,7 @@ async def miss_go(callback: CallbackQuery):
         else:
             await status.edit_text("Для этого списка замена пока недоступна.", parse_mode=None)
     except Exception as e:  # noqa: BLE001
+        usage.unlog(spent)
         logger.exception("Ошибка замены недостающих продуктов")
         await status.edit_text(f"😔 Не получилось подобрать замену: {e}\nПопробуй ещё раз.", parse_mode=None)
 
@@ -1097,6 +1130,11 @@ async def dm_show_summary(message: Message, state: FSMContext):
 
 @dp.callback_query(DayMenuForm.confirm, F.data == "confirm:go")
 async def dm_step_confirm_go(callback: CallbackQuery, state: FSMContext):
+    spent, why = usage.bot_try_spend(callback.message.chat.id, "daymenu")
+    if not spent:
+        await callback.answer()
+        await callback.message.answer(why, parse_mode=None)
+        return
     await callback.answer()
     await callback.message.edit_reply_markup()
     status_msg = await callback.message.answer(
@@ -1109,6 +1147,7 @@ async def dm_step_confirm_go(callback: CallbackQuery, state: FSMContext):
     try:
         summary = await day_menu.generate_day_menu(callback.message.chat.id, meals, data)
     except Exception as e:
+        usage.unlog(spent)
         logger.exception("Ошибка при сборке меню на день")
         await status_msg.edit_text(
             f"😔 Что-то пошло не так при сборке меню на день.\nТехническая причина: {e}\n\n"
@@ -1346,6 +1385,11 @@ async def wm_show_summary(message: Message, state: FSMContext):
 
 @dp.callback_query(WeekMenuForm.confirm, F.data == "confirm:go")
 async def wm_step_confirm_go(callback: CallbackQuery, state: FSMContext):
+    spent, why = usage.bot_try_spend(callback.message.chat.id, "week")
+    if not spent:
+        await callback.answer()
+        await callback.message.answer(why, parse_mode=None)
+        return
     await callback.answer()
     await callback.message.edit_reply_markup()
     status_msg = await callback.message.answer(
@@ -1361,6 +1405,7 @@ async def wm_step_confirm_go(callback: CallbackQuery, state: FSMContext):
             chat_id, meals, config.WEEK_MENU_DAYS, data
         )
     except Exception as e:
+        usage.unlog(spent)
         logger.exception("Ошибка при сборке продуктовой корзины плана питания")
         await status_msg.edit_text(
             f"😔 Не получилось составить план питания.\nТехническая причина: {e}\n\n"
@@ -1444,6 +1489,10 @@ async def weekmenu_cook_next(callback: CallbackQuery):
     if index is None:
         await callback.answer("План уже завершён или не найден.", show_alert=True)
         return
+    if usage.cap_reached():
+        await callback.answer()
+        await callback.message.answer(usage.CAP_TEXT, parse_mode=None)
+        return
     await callback.answer()
     await callback.message.edit_text("🔎 Готовлю блюда на сегодня — это займёт чуть больше времени...")
 
@@ -1455,6 +1504,8 @@ async def weekmenu_cook_next(callback: CallbackQuery):
             f"😔 Не получилось приготовить день.\nТехническая причина: {e}\n\nПопробуй ещё раз.",
         )
         return
+    if slot.get("just_generated"):
+        usage.log("bot", chat_id, "weekday")
 
     text, markup = week_menu.build_slot_view(chat_id, slot)
     await callback.message.edit_text(text, reply_markup=markup)
@@ -1469,6 +1520,8 @@ async def weekmenu_slot(callback: CallbackQuery):
     except Exception as e:
         await callback.answer(f"Не получилось открыть: {e}", show_alert=True)
         return
+    if slot.get("just_generated"):
+        usage.log("bot", callback.message.chat.id, "weekday")
     text, markup = week_menu.build_slot_view(callback.message.chat.id, slot)
     await callback.message.edit_text(text, reply_markup=markup)
     await _maybe_send_day_shopping(callback, slot)

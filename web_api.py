@@ -42,6 +42,7 @@ week_menu.WEEK_MENU_FILE = web_db.DATA_DIR / "week_menu.json"
 fav_mod.FAVORITES_FILE = web_db.DATA_DIR / "favorites.json"
 
 from ai import generate_recipe
+import usage
 from cuisines import CUISINE_LABELS, PORTION_LABELS, PORTION_ORDER
 from keyboards import MEAL_LABELS, sort_meals
 from search import search_recipes, format_results_for_prompt
@@ -151,18 +152,22 @@ def _spend(dev_id: int, kind: str):
     # повторный запрос, пока первый ещё готовится, отклоняем ДО списания — иначе дубль съест попытку
     if any(j["dev"] == dev_id and j["status"] == "running" for j in JOBS.values()):
         raise HTTPException(429, "Предыдущий запрос ещё выполняется — подожди минутку.")
+    if usage.cap_reached():
+        raise HTTPException(429, usage.CAP_TEXT)
     if kind in LIMITS:
         n, days, label = LIMITS[kind]
         if web_db.count_since(dev_id, kind, _msk_midnight(days - 1)) >= n:
             raise HTTPException(429, "На сегодня лимитов больше нет 🙂 Приходи завтра." if days == 1 else "Лимит на этот план исчерпан — новый можно будет составить через пару дней 🙂")
     web_db.log_event(dev_id, "gen")
     web_db.log_event(dev_id, kind)
+    usage.log("web", dev_id, kind)
 
 
 def _refund(dev_id: int, kind: str):
     """Подбор не получился (сбой ИИ) — возвращаем попытку."""
     web_db.drop_last_event(dev_id, kind)
     web_db.drop_last_event(dev_id, "gen")
+    usage.unlog_last("web", dev_id, kind)
 
 
 def _start_job(dev_id: int, coro_fn, kind: str | None = None) -> dict:

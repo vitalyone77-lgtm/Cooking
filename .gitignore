@@ -18,3 +18,5 @@ store_prefs.json
 cooking_web_update/
 cooking_web_update.zip
 Claude outputs/
+# общий счётчик генераций бота и сайта (создаётся на сервере)
+usage.db

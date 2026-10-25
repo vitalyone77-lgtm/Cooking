@@ -14,6 +14,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 import config
+import usage
 from ai import generate_recipe
 from search import search_recipes, format_results_for_prompt
 from shopping import extract_shopping_terms, extract_dish_title
@@ -81,6 +82,8 @@ async def _remind_one(bot: Bot, chat_id: int, data: dict) -> None:
 
 async def send_daily_reminders(bot: Bot, dp: Dispatcher):
     users = {cid: d for cid, d in get_all_users().items() if d.get("cuisine") and not d.get("reminders_off")}
+    # только тем, кто заходил в бота недавно: разовые посетители не должны стоить денег каждый день
+    users = {cid: d for cid, d in users.items() if usage.is_active(int(cid), config.REMINDER_ACTIVE_DAYS)}
     if not users:
         logger.info("Напоминания: некому отправлять")
         return
@@ -88,6 +91,9 @@ async def send_daily_reminders(bot: Bot, dp: Dispatcher):
 
     async def guarded(chat_id: int, data: dict):
         async with sem:
+            if usage.cap_reached():          # дневной запас генераций исчерпан — напоминания подождут
+                return
+            usage.log("reminder", chat_id, "reminder")
             try:
                 await asyncio.wait_for(_remind_one(bot, chat_id, data), timeout=_PER_USER_TIMEOUT)
             except TelegramForbiddenError:
