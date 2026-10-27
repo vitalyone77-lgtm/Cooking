@@ -4,11 +4,11 @@ labels и правила в keyboards.py, bot.py, prompts.py, search.py и remin
 """
 
 CUISINE_LABELS: dict[str, str] = {
-    "ayurveda": "Аюрведическая",
+    "ayurveda": "Аюрведа",
     "classic": "Классическая",
     "balanced": "Сбалансированное питание",
-    "mass_gain": "Питание для набора массы",
-    "athlete_endurance": "Питание для атлетов циклических дисциплин",
+    "mass_gain": "Спорт: сила (набор массы)",
+    "athlete_endurance": "Спорт: кардио (выносливость)",
 }
 
 SNACK_KEY = "snack"

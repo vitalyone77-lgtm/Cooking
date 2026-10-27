@@ -9,11 +9,11 @@ import asyncio
 import logging
 from collections import OrderedDict
 
-from aiogram import Bot, Dispatcher, F
+from aiogram import Bot, Dispatcher, F, Router
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.exceptions import TelegramBadRequest
-from aiogram.filters import CommandStart, Command, StateFilter
+from aiogram.filters import CommandStart, Command, CommandObject, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import Message, CallbackQuery, BotCommand, ErrorEvent, BufferedInputFile
@@ -43,8 +43,13 @@ from last_recipe import set_last_recipe, get_last_recipe
 from stores import prefs as store_prefs
 from stores.links import DEFAULT_STORES
 from stores.basket import build_priced_basket
-from tg_safety import SafeSendMiddleware, OneHeavyAtATime
+from tg_safety import SafeSendMiddleware, OneHeavyAtATime, FloodGuard
 import usage
+import bot_profile
+import bot_cook
+import bot_shop
+import accounts
+import profile_ctx
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -59,6 +64,9 @@ APPLIANCE_LABELS = {
 bot = Bot(token=config.BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.MARKDOWN))
 bot.session.middleware(SafeSendMiddleware())   # битая разметка ИИ, длинные тексты, «not modified»
 dp = Dispatcher(storage=MemoryStorage())
+_flood = FloodGuard()
+dp.message.outer_middleware(_flood)          # десятки нажатий в секунду от одного человека — игнорируем
+dp.callback_query.outer_middleware(_flood)
 dp.callback_query.outer_middleware(OneHeavyAtATime())   # двойной тап по «Подобрать», корзине и т. п. не запускает вторую генерацию
 
 
@@ -93,12 +101,16 @@ HELP_TEXT = (
     f"{config.WEEK_MENU_DAYS} дня, открыть избранное.\n"
     "🗂 *Готовые меню* — открыть уже собранное меню на день и план на несколько дней.\n"
     "❓ *Справка* — этот текст.\n\n"
-    "Под рецептом, меню и планом есть кнопка «🛒 Найти продукты в магазине»: выбираешь магазин "
-    "(Пятёрочка, ВкусВилл, Перекрёсток, Лавка, Купер) — и получаешь короткий список со ссылками на поиск.\n\n"
-    "*Команды:* /menu — меню, /ready — готовые меню,"
-    "/app — веб-версия для телефона, /remind — вкл/выкл ежедневные напоминания, /help — справка.\n\n"
-    "Каждый день в 14:00 я напоминаю о новом блюде. Если что-то зависло — /start.\n\n"
-    "Бот разработан: https://dev.pump-um.ru/"
+    "Под рецептом:\n"
+    "👨‍🍳 *Готовить по шагам* — один шаг на экране, таймер прямо в шаге, галочки «готово».\n"
+    "🛒 *Список покупок* — отмечай ✅ купил, ❌ нет в магазине (подберу замену), 🏠 есть дома; "
+    "оттуда же ссылки на Пятёрочку, ВкусВилл, Перекрёсток, Лавку, Купер.\n\n"
+    "👤 *Профиль* (в меню) — аллергии и продукты, которые ты не ешь (их не будет ни в одном рецепте), "
+    "«полка» с тем, что уже есть дома, и вход на сайт.\n\n"
+    "*Команды:* /menu — меню, /ready — готовые меню, /profile — профиль, "
+    "/app — веб-версия для телефона, /remind — вкл/выкл напоминания, /help — справка.\n\n"
+    "Если ты пропадёшь на несколько дней, я разок-другой напомню о себе идеей блюда — не чаще. "
+    "Если что-то зависло — /start."
 )
 
 
@@ -268,8 +280,10 @@ async def show_ready_menus(message: Message, state: FSMContext):
 # ---------- Старт ----------
 
 @dp.message(CommandStart())
-async def cmd_start(message: Message, state: FSMContext):
+async def cmd_start(message: Message, state: FSMContext, command: CommandObject):
     await state.clear()
+    if await bot_profile.handle_start_args(message, command.args):
+        return
     # Reply-клавиатура и инлайн-клавиатура — разные типы reply_markup, за один вызов
     # можно прикрепить только один, поэтому нижнее меню отправляем отдельным сообщением.
     await message.answer(
@@ -302,8 +316,8 @@ async def cmd_remind(message: Message):
     enabled = not reminders_enabled(message.chat.id)
     set_reminders_enabled(message.chat.id, enabled)
     if enabled:
-        await message.answer(f"🔔 Напоминания включены: каждый день в {config.REMINDER_HOUR:02d}:"
-                             f"{config.REMINDER_MINUTE:02d} пришлю идею блюда по твоим прошлым параметрам.\n"
+        await message.answer("🔔 Напоминания включены: если ты не заходишь несколько дней, пришлю идею блюда "
+                             "по твоим прошлым параметрам — не больше двух раз подряд.\n"
                              "Выключить — снова /remind", parse_mode=None)
     else:
         await message.answer("🔕 Напоминания выключены. Включить снова — /remind", parse_mode=None)
@@ -571,9 +585,7 @@ async def show_summary(message: Message, state: FSMContext):
 @dp.callback_query(RecipeForm.confirm, F.data == "confirm:go")
 async def step_confirm_go(callback: CallbackQuery, state: FSMContext):
     spent, why = usage.bot_try_spend(callback.message.chat.id, "recipe")
-    if not spent:
-        await callback.answer()
-        await callback.message.answer(why, parse_mode=None)
+    if not await bot_profile.spend_gate(callback, spent, why):
         return
     await callback.answer()  # отвечаем Telegram сразу, не дожидаясь долгого поиска+ИИ
     await callback.message.edit_reply_markup()
@@ -626,6 +638,7 @@ async def step_confirm_go(callback: CallbackQuery, state: FSMContext):
 async def _seen_message(handler, event, data):
     try:
         usage.touch(event.chat.id)
+        profile_ctx.set_for(event.chat.id)     # аллергии и «не использовать» — во все генерации этого обновления
     except Exception:  # noqa: BLE001 — учёт не должен мешать ответу
         logger.exception("usage.touch")
     return await handler(event, data)
@@ -636,6 +649,7 @@ async def _seen_callback(handler, event, data):
     try:
         if event.message:
             usage.touch(event.message.chat.id)
+            profile_ctx.set_for(event.message.chat.id)
     except Exception:  # noqa: BLE001
         logger.exception("usage.touch")
     return await handler(event, data)
@@ -890,14 +904,20 @@ async def miss_go(callback: CallbackQuery):
     if not names:
         await callback.answer("Отметь хотя бы один продукт.", show_alert=True)
         return
-    spent, why = usage.bot_try_spend(callback.message.chat.id, "missing")
-    if not spent:
-        await callback.answer()
-        await callback.message.answer(why, parse_mode=None)
+    await run_missing(callback, anchor, ctx, names, picker=msg)
+
+
+async def run_missing(callback: CallbackQuery, anchor: Message, ctx: str, names: list[str], picker: Message | None = None):
+    """Заменить недостающие продукты (ИИ): anchor — сообщение с рецептом / меню / корзиной плана."""
+    msg = picker or anchor
+    chat_id = msg.chat.id
+    spent, why = usage.bot_try_spend(chat_id, "missing")
+    if not await bot_profile.spend_gate(callback, spent, why):
         return
     await callback.answer()
-    await msg.edit_reply_markup()
-    _missing_pick.pop((chat_id, msg.message_id), None)
+    if picker:
+        _missing_pick.pop((chat_id, picker.message_id), None)
+        await picker.edit_reply_markup()
     status = await msg.answer("🔄 Подбираю замену: " + ", ".join(names) + " …", parse_mode=None)
     try:
         if ctx == "r":
@@ -1131,9 +1151,7 @@ async def dm_show_summary(message: Message, state: FSMContext):
 @dp.callback_query(DayMenuForm.confirm, F.data == "confirm:go")
 async def dm_step_confirm_go(callback: CallbackQuery, state: FSMContext):
     spent, why = usage.bot_try_spend(callback.message.chat.id, "daymenu")
-    if not spent:
-        await callback.answer()
-        await callback.message.answer(why, parse_mode=None)
+    if not await bot_profile.spend_gate(callback, spent, why):
         return
     await callback.answer()
     await callback.message.edit_reply_markup()
@@ -1386,9 +1404,7 @@ async def wm_show_summary(message: Message, state: FSMContext):
 @dp.callback_query(WeekMenuForm.confirm, F.data == "confirm:go")
 async def wm_step_confirm_go(callback: CallbackQuery, state: FSMContext):
     spent, why = usage.bot_try_spend(callback.message.chat.id, "week")
-    if not spent:
-        await callback.answer()
-        await callback.message.answer(why, parse_mode=None)
+    if not await bot_profile.spend_gate(callback, spent, why):
         return
     await callback.answer()
     await callback.message.edit_reply_markup()
@@ -1649,7 +1665,29 @@ async def favorite_save(callback: CallbackQuery):
 # Должен быть зарегистрирован ПОСЛЕДНИМ. Если человек пишет что-то вне анкеты, возвращаем ему
 # нижнее меню (оно могло пропасть) и главное меню — вместо тишины.
 
-@dp.message(StateFilter(None), F.text)
+def _orig_kb(message: Message, ctx: str):
+    """Кнопки, которые были до раскрытия списка покупок («⬅️ Свернуть»)."""
+    if ctx.startswith("f"):
+        return kb.favorite_view_kb(ctx[1:])
+    if ctx == "d":
+        view = day_menu.build_summary_view(message.chat.id)
+        return view[1] if view else None
+    if ctx == "r":
+        return recipe_kb(message.text or "")
+    return kb.shopping_btn_kb(ctx)
+
+
+bot_shop.hooks.update(terms=resolve_shopping_terms, amounts=resolve_shopping_amounts, orig_kb=_orig_kb,
+                      run_missing=run_missing)
+
+fallback_router = Router(name="fallback")
+dp.include_router(bot_profile.router)
+dp.include_router(bot_cook.router)
+dp.include_router(bot_shop.router)
+dp.include_router(fallback_router)
+
+
+@fallback_router.message(StateFilter(None), F.text)
 async def fallback_text(message: Message, state: FSMContext):
     await message.answer("Не совсем понял 🙂 Вот меню:", reply_markup=kb.main_reply_kb())
     await show_main_menu(message, state)
@@ -1663,11 +1701,16 @@ async def main():
 
     if config.REMINDER_ENABLED:
         setup_scheduler(bot, dp)
+    accounts.sess_prune()
+    n = bot_cook.resume_timers(bot)
+    if n:
+        logger.info("Возобновлено таймеров готовки: %d", n)
 
     await bot.set_my_commands([
         BotCommand(command="menu", description="Показать меню"),
         BotCommand(command="ready", description="Готовые меню"),
         BotCommand(command="app", description="Веб-версия для телефона"),
+        BotCommand(command="profile", description="Профиль: аллергии, полка, подписка"),
         BotCommand(command="remind", description="Вкл/выкл напоминания"),
         BotCommand(command="help", description="Справка"),
     ])

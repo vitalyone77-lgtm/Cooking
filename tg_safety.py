@@ -68,7 +68,8 @@ from aiogram.types import CallbackQuery
 
 # Кнопки, за которыми долгая и платная работа (поиск, ИИ, ВкусВилл, PDF). Пока одна такая работа
 # в чате идёт, повторное нажатие (двойной тап, нетерпеливое «ещё раз») не запускает вторую копию.
-HEAVY_PREFIXES = ("confirm:go", "miss:go:", "shop:cart:", "weekmenu:cook_next", "weekmenu:slot:", "pdf:")
+HEAVY_PREFIXES = ("confirm:go", "miss:go:", "shop:cart:", "weekmenu:cook_next", "weekmenu:slot:", "pdf:", "sl:rp",
+                  "pf:buy:")
 
 
 class OneHeavyAtATime(BaseMiddleware):
@@ -91,3 +92,38 @@ class OneHeavyAtATime(BaseMiddleware):
             return await handler(event, data)
         finally:
             self._busy.discard(chat_id)
+
+
+# ---------- защита от флуда ----------
+
+import time
+from collections import deque
+
+FLOOD_MAX = 25        # не больше 25 нажатий/сообщений
+FLOOD_WINDOW = 10     # за 10 секунд от одного человека — дальше молча игнорируем (бот, скрипт, зажатая кнопка)
+
+
+class FloodGuard(BaseMiddleware):
+    def __init__(self, max_events: int = FLOOD_MAX, window: float = FLOOD_WINDOW):
+        self.max, self.window = max_events, window
+        self._log: dict[int, deque] = {}
+
+    async def __call__(self, handler, event, data):
+        user = getattr(event, "from_user", None)
+        if not user:
+            return await handler(event, data)
+        now = time.monotonic()
+        q = self._log.setdefault(user.id, deque())
+        while q and now - q[0] > self.window:
+            q.popleft()
+        if len(q) >= self.max:
+            if isinstance(event, CallbackQuery):
+                try:
+                    await event.answer()
+                except Exception:  # noqa: BLE001
+                    pass
+            return None
+        q.append(now)
+        if len(self._log) > 20000:
+            self._log = {k: v for k, v in self._log.items() if v and now - v[-1] <= self.window}
+        return await handler(event, data)

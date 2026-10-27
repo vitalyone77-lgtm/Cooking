@@ -81,6 +81,13 @@ input[type=text]{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid
 .tm small{font-weight:400;color:var(--muted);font-size:13px}.tm .x{min-width:32px;min-height:32px;font-size:16px;color:var(--muted)}
 .tm.run{background:var(--soft)}.tm.ok{background:var(--primary);color:var(--on-primary);border-color:var(--primary)}.tm.ok small,.tm.ok .x{color:var(--on-primary)}
 .tm.end{background:var(--danger);color:#fff;border-color:var(--danger)}.tm.end small,.tm.end .x{color:#fff}
+.favstrip{display:flex;align-items:center;gap:8px;width:100%;min-height:44px;padding:8px 14px;margin:0 0 12px;border-radius:12px;background:var(--soft);color:var(--primary);font-weight:600;font-size:15px;text-align:left}
+.favstrip .n{margin-left:auto;font-weight:400;color:var(--muted)}
+.chip.mini{min-height:36px;padding:0 12px;font-size:14px}
+.home{margin-top:10px;padding:10px 12px;border-radius:12px;background:var(--soft);font-size:15px}
+.pcard{padding:14px 16px}.pcard h2{font-size:18px;margin:0 0 6px}
+.shelf .chip{display:inline-flex;align-items:center;gap:6px}
+textarea{width:100%;min-height:64px;padding:10px 14px;border:1.5px solid var(--line);border-radius:12px;background:var(--surface);color:var(--text);font:inherit}
 .toast{position:fixed;left:12px;right:12px;top:12px;z-index:50;background:var(--primary);color:var(--on-primary);padding:14px 16px;border-radius:14px;font-weight:600;box-shadow:0 6px 24px rgba(0,0,0,.25)}
 </style>
 <!-- Yandex.Metrika counter -->
@@ -102,13 +109,13 @@ input[type=text]{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid
 <nav class="tabs" role="tablist" aria-label="Разделы">
   <button class="tab" role="tab" data-tab="new"><span class="ic">🍳</span>Создать</button>
   <button class="tab" role="tab" data-tab="menus"><span class="ic">🗂</span>Готовые меню</button>
-  <button class="tab" role="tab" data-tab="favs"><span class="ic">⭐</span>Избранное</button>
+  <button class="tab" role="tab" data-tab="profile"><span class="ic">👤</span>Профиль</button>
 </nav>
 <div id="print-area"></div>
 <p class="devnote" style="text-align:center;font-size:13px;color:var(--muted);margin:24px 16px 32px">Сайт разработан <a href="https://dev.pump-um.ru/" target="_blank" rel="noopener" style="color:inherit">dev.pump-um.ru</a></p>
 <script>
 (function(){
-  var main=document.getElementById("main"), META=null, dev="", cur="new", wake=null;
+  var main=document.getElementById("main"), META=null, ME={}, dev="", cur="new", wake=null;
   function ls(k,v){try{if(v===undefined)return localStorage.getItem(k);localStorage.setItem(k,v);}catch(e){return null;}}
   function esc(s){return String(s).replace(/[&<>"]/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"}[c];});}
   function sleep(ms){return new Promise(function(r){setTimeout(r,ms);});}
@@ -192,6 +199,7 @@ input[type=text]{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid
   function runJob(start,label){
     main.innerHTML='<div class="card progress"><div class="spin"></div><div>'+esc(label)+'</div><div class="sub">Обычно 20–60 секунд. Не закрывай страницу.</div></div>';
     return start.then(function(j){
+      if(j.notice)toast(j.notice);
       function poll(n){return sleep(2000).then(function(){return call("GET","/api/job/"+j.job);}).then(function(s){
         if(s.status==="done")return s.result; if(s.status==="error")throw new Error(s.error||"Не получилось"); if(n>150)throw new Error("Слишком долго, попробуй ещё раз"); return poll(n+1);});}
       return poll(0);
@@ -371,9 +379,16 @@ input[type=text]{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid
       if(ctx==="recipe")showRecipe(res);else{show("menus");}
     }).catch(function(e){fail(e,cur);});
   }
+  // продукты с «полки» (купленные раньше масло, специи, крупы) — отдельным списком, без ссылок на магазины
+  function homeBox(items){
+    var home=items.filter(function(i){return i.home;});
+    return home.length?'<div class="home">🏠 Скорее всего есть дома: '+home.map(function(i){return esc(i.name);}).join(", ")+'</div>':"";
+  }
+  function homeBtn(name){return ME.memory?' <button class="chip mini" data-home="'+esc(name)+'">🏠 есть дома</button>':'';}
   function shoppingHTML(items,title,ctx){
     if(!items||!items.length) return "";
-    var h='<div class="storebox">'+storeChips(items)+'<div data-cart data-items="'+esc(JSON.stringify(items.map(function(i){return {name:i.name,amount:i.amount||""};})))+'" style="display:none"></div><div class="storeitems" style="display:none">';items.forEach(function(it){h+='<div class="item"><strong>'+esc(it.name)+'</strong>'+(it.amount?' — '+esc(it.amount):'')+'<div class="links">'+it.links.map(storeLink).join("")+'</div></div>';});h+='</div></div>';
+    var buy=items.filter(function(i){return !i.home;});
+    var h=homeBox(items)+'<div class="storebox">'+storeChips(buy.length?buy:items)+'<div data-cart data-items="'+esc(JSON.stringify(buy.map(function(i){return {name:i.name,amount:i.amount||""};})))+'" style="display:none"></div><div class="storeitems" style="display:none">';buy.forEach(function(it){h+='<div class="item"><strong>'+esc(it.name)+'</strong>'+(it.amount?' — '+esc(it.amount):'')+homeBtn(it.name)+'<div class="links">'+it.links.map(storeLink).join("")+'</div></div>';});h+='</div></div>';
     if(ctx)h+=missingBox(items,ctx);
     return accordion("🛒 "+(title||"Найти продукты в магазине"),"выбери магазин — ссылки на поиск","",h,false);
   }
@@ -388,13 +403,15 @@ input[type=text]{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid
   function chips(list,sel,name,multi){return '<div class="chips" data-name="'+name+'" data-multi="'+(multi?1:0)+'">'+list.map(function(x){var on=multi?sel.indexOf(x.key)>=0:sel===x.key;return '<button class="chip" data-key="'+esc(x.key)+'" aria-pressed="'+on+'">'+esc(x.label)+'</button>';}).join("")+'</div>';}
   function viewNew(){
     var m=META, times=["15 мин","30 мин","45 мин","60 мин","Не важно"].map(function(x){return {key:x,label:x};}), sv=[1,2,3,4,5,6].map(function(x){return {key:String(x),label:String(x)};});
-    var h='<h1>Что приготовим?</h1><p class="sub">Ответь на несколько вопросов — подберу рецепт, посчитаю калории и покажу, где купить продукты.</p><div id="install-top"></div>'+adSlot("top");
+    var h=favStrip()+'<h1>Что приготовим?</h1><p class="sub">Ответь на несколько вопросов — подберу рецепт, посчитаю калории и покажу, где купить продукты.</p><div id="install-top"></div>'+adSlot("top");
     h+='<div class="seg" data-name="mode">'+[["recipe","Рецепт"],["day","Меню на день"],["week","План на "+m.week_days+" дня"]].map(function(x){return '<button class="chip" data-key="'+x[0]+'" aria-pressed="'+(F.mode===x[0])+'">'+x[1]+'</button>';}).join("")+'</div>';
     h+='<label class="f">Тип питания</label>'+chips(m.cuisines,F.cuisine,"cuisine",false);
     if(F.cuisine==="macro_goal") h+='<label class="f" for="macro">Цель по КБЖУ</label><input type="text" id="macro" maxlength="200" placeholder="500 ккал, белки 40 г" value="'+esc(F.macro||"")+'">';
     if(F.mode!=="recipe") h+='<label class="f">Приёмы пищи</label>'+chips(m.meals,F.meals,"meals",true);
     h+='<label class="f" for="pref">Что использовать или какое блюдо хочется</label><input type="text" id="pref" maxlength="300" placeholder="курица, рис или «хочу плов»" value="'+esc(F.pref||"")+'">';
     h+='<label class="f" for="exc">Что исключить</label><input type="text" id="exc" maxlength="300" placeholder="орехи, грибы, лук" value="'+esc(F.exc||"")+'">';
+    var pf=ME.profile||{};
+    if(ME.memory&&(pf.allergies||pf.never))h+='<p class="sub" style="margin:6px 0 0">👤 Из профиля всегда исключаю: '+esc([pf.allergies,pf.never].filter(Boolean).join(", "))+'</p>';
     h+='<label class="f">Время на готовку</label>'+chips(times,F.time,"time",false);
     h+='<label class="f">Порций</label>'+chips(sv,String(F.servings),"servings",false);
     h+='<label class="f">Размер порции</label>'+chips(m.portions,F.portion,"portion",false);
@@ -433,9 +450,10 @@ input[type=text]{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid
   // ---- вкладка «Готовые меню» ----
   function viewMenus(){
     return call("GET","/api/overview").then(function(o){
-      if(!o.has_day&&!o.has_week) return '<h1>Готовые меню</h1><div class="card empty">Пока пусто. Собери меню на день или план на несколько дней во вкладке «Создать».</div>';
+      if(typeof o.favorites==="number")ME.favorites=o.favorites;
+      if(!o.has_day&&!o.has_week) return favStrip()+'<h1>Готовые меню</h1><div class="card empty">Пока пусто. Собери меню на день или план на несколько дней во вкладке «Создать».</div>';
       var sub=ls("sub"); if(sub!=="day"&&sub!=="week") sub=o.has_week?"week":"day"; if(sub==="day"&&!o.has_day)sub="week"; if(sub==="week"&&!o.has_week)sub="day";
-      var head='<h1>Готовые меню</h1><div class="seg">'+(o.has_day?'<button class="chip" data-sub="day" aria-pressed="'+(sub==="day")+'">На день</button>':'')+(o.has_week?'<button class="chip" data-sub="week" aria-pressed="'+(sub==="week")+'">План на несколько дней</button>':'')+'</div>';
+      var head=favStrip()+'<h1>Готовые меню</h1><div class="seg">'+(o.has_day?'<button class="chip" data-sub="day" aria-pressed="'+(sub==="day")+'">На день</button>':'')+(o.has_week?'<button class="chip" data-sub="week" aria-pressed="'+(sub==="week")+'">План на несколько дней</button>':'')+'</div>';
       return (sub==="day"?viewDay():viewWeek()).then(function(h){return head+h;});
     });
   }
@@ -464,25 +482,82 @@ input[type=text]{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid
       if(day.extra_shopping&&day.extra_shopping.length) body+=shoppingHTML(day.extra_shopping,"Докупить к этому дню");
       h+=accordion("День "+day.day,"",badge,body,day.is_next||(day.generated&&!all));
     });
-    var b=w.basket,inner="";
-    if(b.items.length){inner='<div class="storebox">'+storeChips(b.items)+'<div data-cart data-items="'+esc(JSON.stringify(b.items.map(function(i){return {name:i.name,amount:i.amount||""};})))+'" style="display:none"></div><div class="storeitems" style="display:none">';
-      b.items.forEach(function(it){inner+='<div class="item"><strong>'+esc(it.name)+'</strong> — '+esc(it.amount)+'<div class="links">'+it.links.map(storeLink).join("")+'</div></div>';});
+    var b=w.basket,inner="",bb=b.items.filter(function(i){return !i.home;});
+    if(b.items.length){inner=homeBox(b.items)+'<div class="storebox">'+storeChips(bb.length?bb:b.items)+'<div data-cart data-items="'+esc(JSON.stringify(bb.map(function(i){return {name:i.name,amount:i.amount||""};})))+'" style="display:none"></div><div class="storeitems" style="display:none">';
+      bb.forEach(function(it){inner+='<div class="item"><strong>'+esc(it.name)+'</strong> — '+esc(it.amount)+homeBtn(it.name)+'<div class="links">'+it.links.map(storeLink).join("")+'</div></div>';});
       inner+='</div>'+missingBox(b.items,"week")+'</div>';}
     var ti=adv.indexOf("💡"),tips=ti>=0?adv.slice(ti).replace(/\*/g,""):"";
     return h+accordion("🛒 Корзина на весь план","продукты и магазины","",inner,false)+
       (tips?accordion("💡 Хранение и разморозка","как не испортить продукты","",'<div class="recipe">'+esc(tips)+'</div>',false):"")+adSlot("inline");});}
 
-  // ---- вкладка «Избранное» ----
+  // ---- избранное: тонкая полоска наверху «Создать» и «Готовые меню» → отдельный экран ----
+  function favStrip(){
+    var n=ME.favorites;
+    return '<button class="favstrip" data-open-favs="1">❤️ Любимые рецепты<span class="n">'+(n?n+" ›":"›")+'</span></button>';
+  }
+  function favNote(){
+    if(ME.linked) return '<div class="card" style="padding:12px 16px;margin:0 0 12px;border-left:4px solid var(--primary)">✅ Избранное сохранено в профиле — оно то же, что в Telegram-боте, и не пропадёт при смене телефона.</div>';
+    return '<div class="card" style="padding:12px 16px;margin:0 0 12px;border-left:4px solid var(--danger)"><strong>⚠ Избранное хранится только на этом устройстве.</strong><br>Оно пропадёт, если очистить данные сайта, открыть сайт в другом браузере или сменить телефон. Чтобы не потерять — <button class="chip mini" data-tab-go="profile">войди через Telegram</button></div>';
+  }
   function viewFavs(){
     return call("GET","/api/favorites").then(function(d){ls("favcache",JSON.stringify(d.items));return d.items;},function(){try{return JSON.parse(ls("favcache")||"[]");}catch(e){return [];}}).then(function(items){
-      if(!items.length) return '<h1>Избранное</h1><div class="card" style="padding:12px 16px;margin:0 0 12px;border-left:4px solid var(--danger)"><strong>⚠ Избранное хранится только на этом устройстве.</strong><br>Оно пропадёт, если: очистить данные сайта или cookie в браузере; удалить ярлык/приложение с телефона; открыть сайт в другом браузере, на другом телефоне или в режиме инкогнито; сменить телефон. Чтобы не потерять — скачай всё одним PDF.</div><div class="card empty">Пока пусто. Нажми «⭐ Сохранить» под понравившимся рецептом — он останется на этом устройстве, регистрация не нужна.</div>';
-      var h='<h1>Избранное</h1><div class="card" style="padding:12px 16px;margin:0 0 12px;border-left:4px solid var(--danger)"><strong>⚠ Избранное хранится только на этом устройстве.</strong><br>Оно пропадёт, если: очистить данные сайта или cookie в браузере; удалить ярлык/приложение с телефона; открыть сайт в другом браузере, на другом телефоне или в режиме инкогнито; сменить телефон. Чтобы не потерять — скачай всё одним PDF.</div>';
+      ME.favorites=items.length;
+      if(!items.length) return '<h1>❤️ Любимые рецепты</h1>'+favNote()+'<div class="card empty">Пока пусто. Нажми «⭐ Сохранить» под понравившимся рецептом.</div>';
+      var h='<h1>❤️ Любимые рецепты</h1>'+favNote();
       h+=bulkButton("📄 Всё избранное — одним PDF",items.map(function(f){return {title:f.title,text:f.text};}),"Избранные рецепты")+'<div style="height:12px"></div>';
       items.forEach(function(f){h+=accordion(esc(f.title),"","",recipeHTML(f.text)+actions(f.title,f.text,true)+'<button class="btn ghost" data-del="'+esc(f.id)+'">🗑 Удалить</button>',false);});
       return h;});
   }
 
-  var VIEWS={menus:viewMenus,favs:viewFavs};
+  // ---- вкладка «Профиль»: вход через Telegram, аллергии, «не использовать», полка, подписка ----
+  function loadMe(){return call("GET","/api/me").then(function(m){ME=m;return m;}).catch(function(){return ME;});}
+  function botLink(start){return "https://t.me/"+esc((META&&META.bot)||ME.bot||"Cookingvkusno_bot")+(start?"?start="+start:"");}
+  function viewProfile(){
+    return loadMe().then(function(m){
+      var h='<h1>👤 Профиль</h1>';
+      if(!m.linked){
+        return linkCode().then(function(L){
+        h+='<div class="card pcard"><h2>Войди через Telegram</h2><p class="sub" style="margin:0">Профиль, любимые рецепты и подписка станут общими с ботом и не пропадут при смене телефона. Пароль не нужен — подтверждаешь одной кнопкой в Telegram.</p>'+
+          '<a class="btn" data-link-go="1" href="'+esc(L.url)+'" target="_blank" rel="noopener">✈️ Войти через Telegram</a><div id="link-wait"></div></div>';
+        if(m.paywall)h+='<div class="card pcard">'+esc(m.status)+'</div>';
+        return h;
+        });
+      }
+      h+='<div class="card pcard">✅ Вход выполнен через Telegram<br><span class="sub">'+esc(m.status)+'</span>'+
+        (m.paywall&&m.plan!=="premium"?'<a class="btn" href="'+botLink("pay")+'" target="_blank" rel="noopener">💎 Оформить подписку в Telegram</a>':'')+'</div>';
+      if(!m.memory){
+        h+='<div class="card pcard"><h2>🔒 Память — в подписке</h2><p class="sub" style="margin:0">С подпиской помощник помнит твои аллергии и продукты, которые ты не ешь (их не будет ни в одном рецепте), и «полку» — масло, специи и крупы, которые уже есть дома.</p></div>';
+      } else {
+        var p=m.profile||{};
+        h+='<div class="card pcard"><h2>🚫 Аллергии</h2><textarea id="pf-all" maxlength="300" placeholder="орехи, мёд, креветки">'+esc(p.allergies||"")+'</textarea>'+
+          '<h2 style="margin-top:12px">🙅 Никогда не использовать</h2><textarea id="pf-never" maxlength="300" placeholder="кинза, печень, грибы">'+esc(p.never||"")+'</textarea>'+
+          '<p class="sub" style="margin:6px 0 0">Учитывается в каждом рецепте, меню и плане — на сайте и в боте.</p><button class="btn" data-pf-save="1">Сохранить</button></div>';
+        h+='<div class="card pcard shelf"><h2>🏠 Моя полка</h2><p class="sub" style="margin:0 0 8px">Долгоживущие продукты, которые уже есть дома. В списках покупок они идут отдельно.</p><div class="chips">'+
+          (m.shelf||[]).map(function(x){return '<button class="chip" data-shelf-del="'+esc(x)+'">'+esc(x)+' ✕</button>';}).join("")+'</div>'+
+          '<div class="row" style="margin-top:8px"><input type="text" id="shelf-add" maxlength="60" placeholder="оливковое масло"><button class="btn" style="width:auto;margin:0" data-shelf-add="1">➕</button></div></div>';
+      }
+      h+='<button class="btn ghost" data-unlink="1">Выйти из профиля на этом устройстве</button>';
+      return h;
+    });
+  }
+  // код входа создаём заранее (кнопка — настоящая ссылка t.me, её не блокирует браузер), живёт 10 минут
+  var LINK=null;
+  function linkCode(){
+    if(LINK&&Date.now()-LINK.ts<8*60*1000)return Promise.resolve(LINK);
+    return call("POST","/api/link/start").then(function(j){LINK={code:j.code,url:j.url,ts:Date.now()};return LINK;});
+  }
+  function linkWait(){
+    var box=document.getElementById("link-wait"),code=LINK&&LINK.code;
+    if(box)box.innerHTML='<p class="sub" style="margin:10px 0 0">Открываю Telegram. Нажми там «Запустить» (Start) и вернись сюда — вход выполнится сам.</p>';
+    var n=0;(function poll(){
+      if(cur!=="profile"||!code||n++>240)return;   // ждём до 10 минут
+      sleep(2500).then(function(){return call("GET","/api/link/status?code="+encodeURIComponent(code));}).then(function(s){
+        if(s.linked){LINK=null;toast("✅ Вход выполнен — профиль общий с Telegram");loadMe().then(function(){show("profile");});}else poll();
+      }).catch(function(){poll();});
+    })();
+  }
+
+  var VIEWS={menus:viewMenus,favs:viewFavs,profile:viewProfile};
   function offlineBanner(){return '<div class="card" style="padding:12px 16px;margin:0 0 12px;border-left:4px solid var(--primary)"><strong>📴 Нет интернета.</strong> Показываю сохранённое с прошлого раза: меню, план, избранное, рецепты и таймеры работают. Новые подборы — когда появится сеть.</div>';}
   window.addEventListener("online",function(){if(OFFLINE&&(cur==="menus"||cur==="favs"))show(cur);});
   function show(tab){
@@ -501,6 +576,14 @@ input[type=text]{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid
     if(b=t.closest(".step")){b.classList.toggle("checked",b.querySelector("input").checked);return;}
     if(b=t.closest(".k-wake")){ if(b.checked){navigator.wakeLock.request("screen").then(function(l){wake=l;}).catch(function(){b.checked=false;});} else if(wake){wake.release();wake=null;} return;}
     if(b=t.closest(".tab")){show(b.getAttribute("data-tab"));return;}
+    if(b=t.closest("[data-open-favs]")){show("favs");return;}
+    if(b=t.closest("[data-tab-go]")){show(b.getAttribute("data-tab-go"));return;}
+    if(b=t.closest("[data-link-go]")){linkWait();return;}   // ссылка откроется сама, ждём подтверждения
+    if(b=t.closest("[data-unlink]")){if(confirm("Выйти из профиля на этом устройстве? В Telegram всё останется."))call("POST","/api/unlink").then(function(){ocClear();return loadMe();}).then(function(){show("profile");}).catch(fail);return;}
+    if(b=t.closest("[data-pf-save]")){b.disabled=true;call("PUT","/api/profile",{allergies:document.getElementById("pf-all").value,never:document.getElementById("pf-never").value}).then(function(){toast("✅ Сохранил — учту в каждом рецепте");show("profile");}).catch(function(e){b.disabled=false;alert(e.message);});return;}
+    if(b=t.closest("[data-shelf-del]")){call("DELETE","/api/shelf?item="+encodeURIComponent(b.getAttribute("data-shelf-del"))).then(function(){show("profile");}).catch(fail);return;}
+    if(b=t.closest("[data-shelf-add]")){var si=document.getElementById("shelf-add");if(si&&si.value.trim())call("POST","/api/shelf",{item:si.value.trim()}).then(function(){show("profile");}).catch(function(e){alert(e.message);});return;}
+    if(b=t.closest("[data-home]")){b.disabled=true;call("POST","/api/shelf",{item:b.getAttribute("data-home")}).then(function(){b.textContent="🏠 на полке";}).catch(function(e){b.disabled=false;alert(e.message);});return;}
     if(b=t.closest("[data-last-recipe]")){try{showRecipe(JSON.parse(ls("lastrecipe")));}catch(e){}return;}
     if(b=t.closest("[data-tm-start]")){tmStart(b);return;}
     if(b=t.closest("[data-tm-stop]")){tmStop(b);return;}
@@ -530,7 +613,15 @@ input[type=text]{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid
     .then(function(m){ls("metacache",JSON.stringify(m));return m;})
     .catch(function(e){var c=ls("metacache");if(c){try{return JSON.parse(c);}catch(x){}}throw e;})
     .then(function(m){
-      META=m; call("POST","/api/visit").catch(function(){}); show("new");
+      META=m; call("POST","/api/visit").catch(function(){});
+      // открыт по одноразовой ссылке из бота (Профиль → Открыть сайт): входим и убираем код из адреса
+      var lg=null;try{lg=new URLSearchParams(location.search).get("login");}catch(e){}
+      if(lg){
+        try{history.replaceState(null,"",location.pathname);}catch(e){}
+        return call("POST","/api/link/claim",{code:lg}).then(function(){ocClear();toast("✅ Вход выполнен — профиль общий с Telegram");},function(e){toast(e.message);})
+          .then(loadMe).then(function(){show("profile");});
+      }
+      return loadMe().then(function(){show("new");});
     }).catch(function(e){main.innerHTML='<div class="card err">'+esc(errText(e))+'</div>';});
 })();
 </script>

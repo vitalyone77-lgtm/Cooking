@@ -5,10 +5,12 @@
 ai.py, search.py, prompts.py, day_menu.py, week_menu.py, favorites.py, shopping.py, stores/.
 
 Пользователь = устройство: при первом визите браузер получает случайный код и хранит его у себя
-(без регистрации). Данные веба лежат отдельно от бота (папка web_data/), поэтому два процесса не
-портят друг другу JSON-файлы.
+(без регистрации). Меню и планы веба лежат отдельно от бота (папка web_data/). После «Войти через Telegram»
+устройство привязано к аккаунту (accounts.py): лимиты, подписка, профиль, полка и избранное — общие с ботом.
 """
 import asyncio
+import contextvars
+from collections import deque
 from html import escape
 import hashlib
 import hmac
@@ -43,8 +45,11 @@ fav_mod.FAVORITES_FILE = web_db.DATA_DIR / "favorites.json"
 
 from ai import generate_recipe
 import usage
+import accounts
+import plans
+import profile_ctx
 from cuisines import CUISINE_LABELS, PORTION_LABELS, PORTION_ORDER
-from keyboards import MEAL_LABELS, sort_meals
+from keyboards import MEAL_LABELS, sort_meals, CUISINE_BUTTONS
 from search import search_recipes, format_results_for_prompt
 from shopping import extract_shopping_terms, extract_dish_title, amounts_from_recipe_text, _fmt_amount, _find_amount
 from storage import get_all_users
@@ -65,7 +70,23 @@ def _dev(x_device: str | None) -> int:
     dev_id = web_db.device_id((x_device or "").strip())
     if dev_id is None:
         raise HTTPException(401, "device")
+    tg = accounts.tg_of_device(dev_id)
+    if tg:
+        usage.touch(tg)          # заходит на сайт — напоминания в Telegram не нужны
     return dev_id
+
+
+def _uid(dev_id: int) -> str:
+    return accounts.web_uid(dev_id)
+
+
+def _mark_home(dev_id: int, items: list[dict]) -> list[dict]:
+    """Продукты, которые уже на полке аккаунта, помечаем home=True (на сайте они идут отдельным списком)."""
+    uid = _uid(dev_id)
+    if items and not plans.is_anon(uid) and plans.has_feature(uid, "memory"):
+        for i in accounts.shelf_match(uid, [it.get("name", "") for it in items]):
+            items[i]["home"] = True
+    return items
 
 
 def _cid(dev_id: int) -> int:
@@ -138,39 +159,29 @@ def _msk_midnight(days_back: int = 0) -> float:
     return now - (now % 86400) - days_back * 86400 - MSK
 
 
-# вид подбора -> (сколько раз, за сколько календарных дней по Москве, как назвать)
-LIMITS = {
-    "recipe": (config.WEB_LIMIT_RECIPE, 1, "подбора блюда в сутки"),
-    "daymenu": (config.WEB_LIMIT_DAYMENU, 1, "меню на день в сутки"),
-    "week": (config.WEB_LIMIT_WEEK, 3, "план питания на 3 дня"),
-    "missing": (config.WEB_LIMIT_MISSING, 1, "замен продуктов в сутки"),
-}
-
-
-def _spend(dev_id: int, kind: str):
-    """Лимиты: 3 блюда в сутки, 1 меню на день в сутки, 1 план на 3 дня за 3 календарных дня (МСК)."""
+def _spend(dev_id: int, kind: str) -> dict:
+    """Списать подбор с аккаунта (usage.try_spend: тариф, дневные потолки, лимит на IP). Отказ — 429 с понятным текстом."""
     # повторный запрос, пока первый ещё готовится, отклоняем ДО списания — иначе дубль съест попытку
     if any(j["dev"] == dev_id and j["status"] == "running" for j in JOBS.values()):
         raise HTTPException(429, "Предыдущий запрос ещё выполняется — подожди минутку.")
-    if usage.cap_reached():
-        raise HTTPException(429, usage.CAP_TEXT)
-    if kind in LIMITS:
-        n, days, label = LIMITS[kind]
-        if web_db.count_since(dev_id, kind, _msk_midnight(days - 1)) >= n:
-            raise HTTPException(429, "На сегодня лимитов больше нет 🙂 Приходи завтра." if days == 1 else "Лимит на этот план исчерпан — новый можно будет составить через пару дней 🙂")
+    uid = _uid(dev_id)
+    spent, why = usage.try_spend(uid, kind, "web", ip=_ip_var.get())
+    if not spent:
+        raise HTTPException(429, why)
     web_db.log_event(dev_id, "gen")
     web_db.log_event(dev_id, kind)
-    usage.log("web", dev_id, kind)
+    profile_ctx.set_for(uid)      # аллергии и «не использовать» — в генерацию (задача копирует контекст)
+    return {"id": spent, "kind": kind, "notice": why}
 
 
-def _refund(dev_id: int, kind: str):
+def _refund(dev_id: int, spend: dict):
     """Подбор не получился (сбой ИИ) — возвращаем попытку."""
-    web_db.drop_last_event(dev_id, kind)
+    web_db.drop_last_event(dev_id, spend["kind"])
     web_db.drop_last_event(dev_id, "gen")
-    usage.unlog_last("web", dev_id, kind)
+    usage.unlog(spend["id"])
 
 
-def _start_job(dev_id: int, coro_fn, kind: str | None = None) -> dict:
+def _start_job(dev_id: int, coro_fn, spend: dict | None = None) -> dict:
     # чистим старые задачи
     for k in [k for k, v in JOBS.items() if time.time() - v["ts"] > 3600]:
         JOBS.pop(k, None)
@@ -186,11 +197,11 @@ def _start_job(dev_id: int, coro_fn, kind: str | None = None) -> dict:
         except Exception as e:  # noqa: BLE001
             JOBS[job_id]["status"] = "error"
             JOBS[job_id]["error"] = str(e)[:300]
-            if kind:
-                _refund(dev_id, kind)
+            if spend:
+                _refund(dev_id, spend)
 
     asyncio.create_task(runner())
-    return {"job": job_id}
+    return {"job": job_id, "notice": (spend or {}).get("notice", "")}
 
 
 @app.get("/api/job/{job_id}")
@@ -215,9 +226,36 @@ def _prune(log: dict[str, list[float]], window: float) -> None:
             log.pop(k, None)
 
 
+_ip_var: contextvars.ContextVar = contextvars.ContextVar("client_ip", default=None)
+_rate: dict[str, deque] = {}
+API_RATE_PER_MIN = 240     # запросов к /api в минуту с одного IP (опрос задачи — 30 в минуту)
+
+
+def _client_ip(request: Request) -> str:
+    return request.headers.get("x-real-ip") or (request.client.host if request.client else "?")
+
+
+@app.middleware("http")
+async def _ip_and_rate(request: Request, call_next):
+    ip = _client_ip(request)
+    _ip_var.set(ip)
+    if request.url.path.startswith("/api/"):
+        now = time.time()
+        q = _rate.setdefault(ip, deque())
+        while q and now - q[0] > 60:
+            q.popleft()
+        if len(q) >= API_RATE_PER_MIN:
+            return JSONResponse({"detail": "Слишком много запросов — подожди минутку."}, status_code=429)
+        q.append(now)
+        if len(_rate) > 5000:
+            for key in [k for k, v in _rate.items() if not v or now - v[-1] > 60]:
+                _rate.pop(key, None)
+    return await call_next(request)
+
+
 @app.post("/api/device")
 def new_device(request: Request):
-    ip = request.headers.get("x-forwarded-for", request.client.host if request.client else "?").split(",")[0].strip()
+    ip = _client_ip(request)
     hist = [t for t in _new_dev_log.get(ip, []) if time.time() - t < 3600]
     if len(hist) >= 20:
         raise HTTPException(429, "Слишком много новых устройств с одного адреса")
@@ -236,13 +274,15 @@ def visit(x_device: str | None = Header(default=None)):
 @app.get("/api/meta")
 def meta():
     return {
-        "cuisines": [{"key": k, "label": v} for k, v in CUISINE_LABELS.items()],
+        "cuisines": [{"key": k, "label": v} for k, v in CUISINE_BUTTONS.items()],   # порядок и подписи как в боте
         "appliances": [{"key": k, "label": v} for k, v in APPLIANCES.items()],
         "meals": [{"key": k, "label": v} for k, v in MEAL_LABELS.items()],
         "portions": [{"key": k, "label": PORTION_LABELS[k]} for k in PORTION_ORDER],
         "week_days": config.WEEK_MENU_DAYS,
         "limit": config.WEB_DAILY_LIMIT,
         "limits": {"recipe": config.WEB_LIMIT_RECIPE, "daymenu": config.WEB_LIMIT_DAYMENU, "week": config.WEB_LIMIT_WEEK},
+        "paywall": config.PAYWALL_ENABLED,
+        "bot": config.BOT_USERNAME,
     }
 
 
@@ -252,7 +292,7 @@ def meta():
 async def api_recipe(p: Params, x_device: str | None = Header(default=None)):
     dev_id = _dev(x_device)
     data = p.to_data()
-    _spend(dev_id, "recipe")
+    sp = _spend(dev_id, "recipe")
 
     async def work():
         query, results = await search_recipes(data)
@@ -262,16 +302,17 @@ async def api_recipe(p: Params, x_device: str | None = Header(default=None)):
         text, terms = extract_shopping_terms(text)
         if not text.strip():
             raise RuntimeError("Не получилось составить рецепт под эти параметры")
-        return {"title": extract_dish_title(text) or "Рецепт", "text": text, "shopping": with_amounts(links_for(terms), amounts_from_recipe_text(text))}
+        return {"title": extract_dish_title(text) or "Рецепт", "text": text,
+                "shopping": _mark_home(dev_id, with_amounts(links_for(terms), amounts_from_recipe_text(text)))}
 
-    return _start_job(dev_id, work, "recipe")
+    return _start_job(dev_id, work, sp)
 
 
 @app.post("/api/daymenu")
 async def api_daymenu(p: Params, x_device: str | None = Header(default=None)):
     dev_id = _dev(x_device)
     data, meals = p.to_data(), p.meal_keys()
-    _spend(dev_id, "daymenu")
+    sp = _spend(dev_id, "daymenu")
     cid = _cid(dev_id)
 
     async def work():
@@ -280,21 +321,21 @@ async def api_daymenu(p: Params, x_device: str | None = Header(default=None)):
         web_db.kv_set(f"dayshop:{cid}", json.dumps(shopping, ensure_ascii=False))
         return {"ok": True}
 
-    return _start_job(dev_id, work, "daymenu")
+    return _start_job(dev_id, work, sp)
 
 
 @app.post("/api/week")
 async def api_week(p: Params, x_device: str | None = Header(default=None)):
     dev_id = _dev(x_device)
     data, meals = p.to_data(), p.meal_keys()
-    _spend(dev_id, "week")
+    sp = _spend(dev_id, "week")
     cid = _cid(dev_id)
 
     async def work():
         _, shopping_md = await week_menu.start_week_plan(cid, meals, config.WEEK_MENU_DAYS, data)
         return {"ok": True}
 
-    return _start_job(dev_id, work, "week")
+    return _start_job(dev_id, work, sp)
 
 
 @app.post("/api/week/cart")
@@ -305,6 +346,8 @@ async def api_week_cart(x_device: str | None = Header(default=None)):
     info = week_menu.get_basket_info(cid)
     if not info:
         raise HTTPException(404, "Плана нет")
+    if not plans.has_feature(_uid(dev_id), "cart"):
+        raise HTTPException(402, "Корзина с ценами — в подписке 💎")
     if web_db.count_today(dev_id, "cart") >= 30:
         raise HTTPException(429, "Слишком много запросов корзины — попробуй завтра.")
     web_db.log_event(dev_id, "cart")
@@ -325,7 +368,7 @@ async def api_week_cook(x_device: str | None = Header(default=None)):
     index = week_menu.current_day_first_index(cid)
     if index is None:
         raise HTTPException(400, "План завершён или не найден")
-    _spend(dev_id, "weekday")
+    sp = _spend(dev_id, "weekday")
 
     async def work():
         slot = await week_menu.ensure_slot(cid, index)
@@ -335,7 +378,7 @@ async def api_week_cook(x_device: str | None = Header(default=None)):
                           json.dumps(parse_shopping(slot.get("shopping_message", "")), ensure_ascii=False))
         return {"ok": True}
 
-    return _start_job(dev_id, work, "weekday")
+    return _start_job(dev_id, work, sp)
 
 
 # ---------------- чтение меню ----------------
@@ -346,9 +389,10 @@ def _meal_out(key: str, meal: dict) -> dict:
 
 @app.get("/api/overview")
 def overview(x_device: str | None = Header(default=None)):
-    cid = _cid(_dev(x_device))
+    dev_id = _dev(x_device)
+    cid = _cid(dev_id)
     return {"has_day": day_menu.has_menu(cid), "has_week": week_menu.has_plan(cid),
-            "favorites": len(fav_mod.get_favorites(cid))}
+            "favorites": len(fav_mod.get_favorites(_uid(dev_id)))}
 
 
 @app.get("/api/day")
@@ -359,12 +403,13 @@ def day(x_device: str | None = Header(default=None)):
         raise HTTPException(404, "Меню на день ещё не собрано.")
     shop = web_db.kv_get(f"dayshop:{cid}")
     return {"meals": [_meal_out(k, entry["meals"][k]) for k in entry["order"]],
-            "shopping": json.loads(shop) if shop else []}
+            "shopping": _mark_home(_dev(x_device), json.loads(shop) if shop else [])}
 
 
 @app.get("/api/week")
 def week(x_device: str | None = Header(default=None)):
-    cid = _cid(_dev(x_device))
+    dev_id = _dev(x_device)
+    cid = _cid(dev_id)
     state = week_menu._load(cid)
     if not state:
         raise HTTPException(404, "План питания ещё не собран.")
@@ -382,11 +427,12 @@ def week(x_device: str | None = Header(default=None)):
         extra = web_db.kv_get(f"weekshop:{cid}:{d}")
         days.append({"day": d, "generated": bool(entry), "is_next": d == state["current_day"], "meals": meals,
                      "done_count": max(0, min(n, state["progress_index"] - first)), "total": n,
-                     "extra_shopping": json.loads(extra) if extra else []})
+                     "extra_shopping": _mark_home(dev_id, json.loads(extra) if extra else [])})
     info = week_menu.get_basket_info(cid)
     items = [{"name": k, "amount": _fmt_amount(k, v),
               "links": [{"store": short_name(s), "url": search_url(s, k)} for s in DEFAULT_STORES]}
              for k, v in info["inventory_initial"].items()]
+    _mark_home(dev_id, items)
     priced = re.sub(r"[*_`]|\[([^\]]+)\]\(([^)]+)\)", lambda m: m.group(1) or "", info["priced"] or "")
     return {"days": days, "basket": {"items": items, "priced_text": priced, "advice": info["basket_text"]},
             "remaining": {k: v for k, v in state["inventory"].items() if v > 0}}
@@ -408,13 +454,13 @@ class FavIn(BaseModel):
 
 @app.get("/api/favorites")
 def favorites(x_device: str | None = Header(default=None)):
-    cid = _cid(_dev(x_device))
+    cid = _uid(_dev(x_device))
     return {"items": fav_mod.get_favorites(cid)}
 
 
 @app.post("/api/favorites")
 def favorites_add(f: FavIn, x_device: str | None = Header(default=None)):
-    cid = _cid(_dev(x_device))
+    cid = _uid(_dev(x_device))
     if len(fav_mod.get_favorites(cid)) >= 200:
         raise HTTPException(400, "Слишком много сохранённых рецептов (лимит 200)")
     return {"id": fav_mod.add_favorite(cid, f.title, f.text, f.cuisine)}
@@ -422,7 +468,103 @@ def favorites_add(f: FavIn, x_device: str | None = Header(default=None)):
 
 @app.delete("/api/favorites/{fav_id}")
 def favorites_delete(fav_id: str, x_device: str | None = Header(default=None)):
-    return {"ok": fav_mod.remove_favorite(_cid(_dev(x_device)), fav_id)}
+    return {"ok": fav_mod.remove_favorite(_uid(_dev(x_device)), fav_id)}
+
+
+# ---------------- личный кабинет: вход через Telegram, профиль, полка ----------------
+
+_link_log: dict[int, list[float]] = {}
+
+
+@app.get("/api/me")
+def me(x_device: str | None = Header(default=None)):
+    dev_id = _dev(x_device)
+    tg = accounts.tg_of_device(dev_id)
+    uid = _uid(dev_id)
+    memory = bool(tg) and plans.has_feature(uid, "memory")
+    out = {"linked": bool(tg), "plan": plans.plan_of(uid), "status": plans.status_text(uid),
+           "paywall": config.PAYWALL_ENABLED, "memory": memory, "bot": config.BOT_USERNAME,
+           "favorites": len(fav_mod.get_favorites(uid))}
+    if memory:
+        out["profile"] = accounts.get_profile(uid)
+        out["shelf"] = [x["item"] for x in accounts.shelf_list(uid)]
+    return out
+
+
+@app.post("/api/link/start")
+def link_start(x_device: str | None = Header(default=None)):
+    """«Войти через Telegram»: одноразовый код → ссылка t.me/бот?start=link_<код>; сайт ждёт подтверждения."""
+    dev_id = _dev(x_device)
+    hist = [t for t in _link_log.get(dev_id, []) if time.time() - t < 3600]
+    if len(hist) >= 10:
+        raise HTTPException(429, "Слишком много попыток входа — попробуй через час.")
+    _link_log[dev_id] = hist + [time.time()]
+    _prune(_link_log, 3600)
+    code = accounts.new_link_code(dev_id)
+    return {"code": code, "url": f"https://t.me/{config.BOT_USERNAME}?start=link_{code}"}
+
+
+@app.get("/api/link/status")
+def link_status(code: str = "", x_device: str | None = Header(default=None)):
+    return {"linked": accounts.link_code_status(code[:64], _dev(x_device))}
+
+
+class CodeIn(BaseModel):
+    code: str = Field(max_length=64)
+
+
+@app.post("/api/link/claim")
+def link_claim(body: CodeIn, x_device: str | None = Header(default=None)):
+    """Сайт открыт по одноразовой ссылке из бота (?login=<код>)."""
+    if not accounts.claim_login_code(body.code, _dev(x_device)):
+        raise HTTPException(400, "Ссылка для входа устарела или уже использована — возьми новую в боте (Профиль → Открыть сайт).")
+    return {"ok": True}
+
+
+@app.post("/api/unlink")
+def unlink(x_device: str | None = Header(default=None)):
+    accounts.unlink_device(_dev(x_device))
+    return {"ok": True}
+
+
+def _need_memory(dev_id: int) -> str:
+    uid = _uid(dev_id)
+    if plans.is_anon(uid):
+        raise HTTPException(403, "Сначала войди через Telegram")
+    if not plans.has_feature(uid, "memory"):
+        raise HTTPException(402, "Профиль и полка — в подписке 💎")
+    return uid
+
+
+class ProfileIn(BaseModel):
+    allergies: str = Field("", max_length=300)
+    never: str = Field("", max_length=300)
+
+
+@app.put("/api/profile")
+def profile_save(body: ProfileIn, x_device: str | None = Header(default=None)):
+    uid = _need_memory(_dev(x_device))
+    return accounts.set_profile(uid, allergies=body.allergies, never=body.never)
+
+
+class ShelfIn(BaseModel):
+    item: str = Field(min_length=1, max_length=60)
+
+
+@app.post("/api/shelf")
+def shelf_add(body: ShelfIn, x_device: str | None = Header(default=None)):
+    uid = _need_memory(_dev(x_device))
+    if len(accounts.shelf_list(uid)) >= 100:
+        raise HTTPException(400, "На полке уже 100 продуктов")
+    accounts.shelf_add(uid, body.item)
+    return {"shelf": [x["item"] for x in accounts.shelf_list(uid)]}
+
+
+@app.delete("/api/shelf")
+def shelf_del(item: str = "", x_device: str | None = Header(default=None)):
+    uid = _need_memory(_dev(x_device))
+    accounts.shelf_remove(uid, item[:60])
+    return {"shelf": [x["item"] for x in accounts.shelf_list(uid)]}
 
 
 # ---------------- PDF (скачать рецепт/меню одним файлом, чтобы не потерять) ----------------
@@ -445,6 +587,8 @@ def _pdf_filename(name: str) -> str:
 @app.post("/api/pdf")
 def api_pdf(body: PdfIn, x_device: str | None = Header(default=None)):
     dev_id = _dev(x_device)
+    if not plans.has_feature(_uid(dev_id), "pdf"):
+        raise HTTPException(402, "PDF — в подписке 💎")
     if web_db.count_today(dev_id, "pdf") >= 200:
         raise HTTPException(429, "Слишком много PDF за сутки — попробуй завтра")
     if sum(len(i.text) for i in body.items) > 600_000:
@@ -466,6 +610,10 @@ def api_pdf(body: PdfIn, x_device: str | None = Header(default=None)):
 
 @app.get("/api/ad")
 def get_ad(slot: str = "top", x_device: str | None = Header(default=None)):
+    if config.PAYWALL_ENABLED and "noads" in config.PREMIUM_FEATURES:
+        dev_id = web_db.device_id((x_device or "").strip())
+        if dev_id and plans.plan_of(_uid(dev_id)) == "premium":
+            return {"ad": None}
     with web_db.db() as c:
         rows = c.execute("SELECT * FROM ads WHERE slot=? AND active=1", (slot,)).fetchall()
         if not rows:
@@ -526,7 +674,12 @@ async def admin_login(request: Request, response: Response):
 @app.get("/admin/api/stats")
 def admin_stats(request: Request):
     _need_admin(request)
-    return web_db.stats(tg_users=len(get_all_users()))
+    out = web_db.stats(tg_users=len(get_all_users()))
+    out["subs"] = accounts.sub_stats()
+    out["refs"] = accounts.ref_stats()
+    out["gens_today"] = usage.total_today()
+    out["gen_cap"] = config.DAILY_GEN_CAP
+    return out
 
 
 @app.post("/admin/api/ads")
@@ -693,6 +846,8 @@ class CartIn(BaseModel):
 async def api_cart(body: CartIn, x_device: str | None = Header(default=None)):
     """Корзина ВкусВилла с ценами для списка продуктов (рецепт, день или план) — после выбора магазина."""
     dev_id = _dev(x_device)
+    if not plans.has_feature(_uid(dev_id), "cart"):
+        raise HTTPException(402, "Корзина с ценами — в подписке 💎")
     if web_db.count_today(dev_id, "cart") >= 30:
         raise HTTPException(429, "Слишком много запросов корзины — попробуй завтра.")
     web_db.log_event(dev_id, "cart")
@@ -738,13 +893,13 @@ async def api_missing(body: MissingIn, x_device: str | None = Header(default=Non
         raise HTTPException(404, "Меню на день не найдено")
     if body.ctx == "week" and not week_menu.has_plan(cid):
         raise HTTPException(404, "План не найден")
-    _spend(dev_id, "missing")
+    sp = _spend(dev_id, "missing")
 
     async def work():
         if body.ctx == "recipe":
             text, terms = await missing_mod.adapt_recipe(body.text, names)
             return {"title": extract_dish_title(text) or "Рецепт", "text": text,
-                    "shopping": with_amounts(links_for(terms), amounts_from_recipe_text(text))}
+                    "shopping": _mark_home(dev_id, with_amounts(links_for(terms), amounts_from_recipe_text(text)))}
         if body.ctx == "day":
             await missing_mod.rebuild_day(cid, names)
             terms = day_menu.get_shopping_terms(cid)
@@ -754,4 +909,4 @@ async def api_missing(body: MissingIn, x_device: str | None = Header(default=Non
         mode = await missing_mod.adjust_plan(cid, names)
         return {"ok": True, "mode": mode}
 
-    return _start_job(dev_id, work, "missing")
+    return _start_job(dev_id, work, sp)

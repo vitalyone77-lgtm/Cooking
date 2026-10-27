@@ -93,7 +93,40 @@ WEB_LIMIT_MISSING = int(os.getenv("WEB_LIMIT_MISSING", "5"))   # замен «н
 WEB_LIMIT_WEEK = int(os.getenv("WEB_LIMIT_WEEK", "1"))         # планов на 3 дня за 3 календарных дня
 # Общий потолок генераций ИИ в сутки (МСК) на весь проект — бот + сайт + напоминания. 0 — без потолка.
 DAILY_GEN_CAP = int(os.getenv("DAILY_GEN_CAP", "500"))
-# Напоминания шлём только тем, кто заходил в бота за последние N дней
-REMINDER_ACTIVE_DAYS = int(os.getenv("REMINDER_ACTIVE_DAYS", "14"))
+# Напоминания — только тем, кто пропал: через сколько дней тишины каждое следующее («4,6» — первое через 4 дня
+# без визитов, второе ещё через 6; дальше молчим, пока человек не зайдёт снова)
+REMINDER_GAPS = [int(x) for x in os.getenv("REMINDER_GAPS", "4,6").split(",") if x.strip()]
+# Отдельный дневной запас для сайта БЕЗ входа через Telegram (внутри общего потолка): накрутка через новые
+# устройства не может съесть запас пользователей Telegram и подписчиков
+DAILY_GEN_CAP_ANON = int(os.getenv("DAILY_GEN_CAP_ANON", "150"))
+# Генераций в сутки с одного IP для сайта без входа (сколько бы устройств с него ни создали)
+WEB_IP_DAILY_GENS = int(os.getenv("WEB_IP_DAILY_GENS", "8"))
+
+# ---------------------------------------------------------------------------
+# Подписка (plans.py). Пока PAYWALL_ENABLED=false — у всех лимиты LIMITS_OPEN, как раньше.
+# Лимит «вид=сколько/за сколько дней», например recipe=2/1 — 2 блюда в сутки, week=1/3 — 1 план за 3 дня.
+# ---------------------------------------------------------------------------
+PAYWALL_ENABLED = os.getenv("PAYWALL_ENABLED", "false").lower() == "true"
+LIMITS_OPEN = os.getenv("LIMITS_OPEN", f"recipe={WEB_LIMIT_RECIPE}/1,daymenu={WEB_LIMIT_DAYMENU}/1,"
+                                       f"week={WEB_LIMIT_WEEK}/3,missing={WEB_LIMIT_MISSING}/1")
+LIMITS_FREE = os.getenv("LIMITS_FREE", "recipe=2/1,daymenu=1/7,week=0/3,missing=2/1")
+LIMITS_PREMIUM = os.getenv("LIMITS_PREMIUM", "recipe=6/1,daymenu=2/1,week=1/2,missing=10/1")
+LIMITS_ANON = os.getenv("LIMITS_ANON", "recipe=1/1,daymenu=0/1,week=0/3,missing=1/1")   # сайт без входа
+# Функции только для подписки (при PAYWALL_ENABLED): memory (профиль — аллергии и «не использовать», и полка:
+# без подписки бот ничего не запоминает), pdf, cart (корзина ВкусВилла с ценами), noads (сайт без рекламы)
+PREMIUM_FEATURES = [x.strip() for x in os.getenv("PREMIUM_FEATURES", "memory,pdf,cart,noads").split(",") if x.strip()]
+TRIAL_DAYS = int(os.getenv("TRIAL_DAYS", "7"))     # пробный полный доступ — включается сам при первом упоре в лимит
+# Тарифы: имя=дни:цена_в_рублях:цена_в_звёздах
+PREMIUM_PLANS = os.getenv("PREMIUM_PLANS", "month=30:199:150,year=365:1490:1100")
+# Промокоды: КОД=дней (для блогера и акций), регистр не важен
+PROMO_CODES = os.getenv("PROMO_CODES", "")
+# Оплата: Telegram Stars работают без договора; рубли — через платёжный сервис (данные пришлют позже):
+# PAYMENT_PROVIDER_TOKEN — токен из @BotFather → Payments (ЮKassa и др.) для счёта прямо в боте;
+PAYMENT_STARS_ENABLED = os.getenv("PAYMENT_STARS_ENABLED", "true").lower() == "true"
+PAYMENT_PROVIDER_TOKEN = os.getenv("PAYMENT_PROVIDER_TOKEN", "")
+# Кому из Telegram приходят тревоги (потолок, баланс DeepSeek) и кто может /grant: id через запятую
+ADMIN_TG_IDS = [int(x) for x in os.getenv("ADMIN_TG_IDS", "").replace(" ", "").split(",") if x.strip().lstrip("-").isdigit()]
+BOT_USERNAME = os.getenv("BOT_USERNAME", "Cookingvkusno_bot")
+DEEPSEEK_BALANCE_ALERT_USD = float(os.getenv("DEEPSEEK_BALANCE_ALERT_USD", "3"))
 WEB_DAILY_LIMIT = int(os.getenv("WEB_DAILY_LIMIT", "12"))   # генераций в сутки на одно устройство
 WEB_DATA_DIR = os.getenv("WEB_DATA_DIR", "web_data")        # база и данные веба (отдельно от бота)

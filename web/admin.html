@@ -51,8 +51,9 @@ function load(){
     return r.json();
   }).then(function(s){
     if(!s) return; $("login").className="hide";$("app").className="";
-    var g=s.generations,cards=[["Устройств всего",s.devices_total],["Новых за 24 ч",s.new_24h],["Новых за 7 дней",s.new_7d],["Активных за 24 ч",s.active_24h],["Активных за 7 дней",s.active_7d],["Активных за 30 дней",s.active_30d],["Пользователей Telegram-бота",s.tg_users],["Подборов за 24 ч",s.generations_24h],["Рецептов всего",g.recipe],["Меню на день",g.daymenu],["Планов",g.week]];
+    var g=s.generations,cards=[["Устройств всего",s.devices_total],["Новых за 24 ч",s.new_24h],["Новых за 7 дней",s.new_7d],["Активных за 24 ч",s.active_24h],["Активных за 7 дней",s.active_7d],["Активных за 30 дней",s.active_30d],["Пользователей Telegram-бота",s.tg_users],["Подборов за 24 ч",s.generations_24h],["Рецептов всего",g.recipe],["Меню на день",g.daymenu],["Планов",g.week],["ИИ сегодня / потолок",s.gens_today+" / "+s.gen_cap],["Подписок активно",s.subs.active],["Из них пробных",s.subs.trial_active],["Оплат",s.subs.payments],["Выручка (₽ или ⭐)",s.subs.revenue]];
     $("cards").innerHTML=cards.map(function(c){return '<div class="c"><div class="n">'+c[1]+'</div><div class="k">'+c[0]+'</div></div>';}).join("");
+    $("cards").innerHTML+=(s.refs||[]).map(function(r){return '<div class="c"><div class="n">'+r.users+' / '+r.paid_users+'</div><div class="k">Ссылка ref_'+esc(r.ref)+': пришли / оплатили</div></div>';}).join("");
     var max=Math.max.apply(null,s.daily.map(function(d){return d.n;}).concat([1]));
     $("bars").innerHTML=s.daily.map(function(d){return '<div class="bar" style="height:'+Math.round(d.n/max*100)+'%"><span>'+d.n+'</span></div>';}).join("");
     $("lab").innerHTML=s.daily.map(function(d){return '<div>'+d.date+'</div>';}).join("");

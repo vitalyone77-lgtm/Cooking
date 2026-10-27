@@ -48,3 +48,11 @@ class WeekMenuForm(StatesGroup):
     servings = State()
     appliance = State()
     confirm = State()
+
+
+class ProfileForm(StatesGroup):
+    """Личный кабинет: ввод текста для профиля."""
+    allergies = State()         # аллергии
+    never = State()             # «никогда не использовать»
+    shelf_add = State()         # добавить продукт на полку
+    promo = State()             # промокод

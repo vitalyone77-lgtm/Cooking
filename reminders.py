@@ -1,5 +1,7 @@
 """
-Ежедневное напоминание — сразу предлагает новый рецепт по сохранённым параметрам.
+Напоминание тем, кто пропал: раз в день проверяем, кто давно не заходил, и предлагаем новый рецепт
+по сохранённым параметрам. Не каждый день — только после config.REMINDER_GAPS дней тишины (по умолчанию
+первое через 4 дня, второе ещё через 6), дальше молчим до следующего визита.
 В сообщении — только название и время; кнопки: «Готовить» (полный рецепт), «Найти другое» (анкета), «Выключить напоминания».
 """
 import asyncio
@@ -32,7 +34,9 @@ def reminder_kb() -> InlineKeyboardMarkup:
     return b.as_markup()
 
 
-REMINDER_INTRO = "👋 Идея, давай приготовим завтра —"
+# Вступление по номеру напоминания (1 — первое после паузы, 2 — последнее)
+REMINDER_INTROS = {1: "👋 Давно не виделись! Вот идея, что приготовить —",
+                   2: "👋 Загляни, когда будет минутка. Подобрал для тебя —"}
 # Тип блюда на сегодня — по кругу случайно, чтобы напоминания не предлагали каждый день похожее
 VARIETY_HINTS = ["суп", "рагу или тушёное блюдо", "запеканка", "сытный салат", "каша или блюдо из крупы",
                  "паста или лапша", "котлеты или тефтели", "блюдо из яиц", "блюдо из бобовых",
@@ -41,15 +45,15 @@ _PARALLEL = 3            # одновременно готовим рецепт�
 _PER_USER_TIMEOUT = 150  # секунд на одного пользователя: поиск + ИИ
 
 
-def recipe_teaser(recipe_text: str) -> str:
+def recipe_teaser(recipe_text: str, n: int = 1) -> str:
     """Короткое превью рецепта: строка с названием (🍽) и строка «⏱ Время | 👥 Порций | 🔥 Способ»."""
     lines = [ln.strip() for ln in recipe_text.splitlines() if ln.strip()]
     title = next((ln for ln in lines if ln.startswith("🍽")), lines[0] if lines else "")
     meta = next((ln for ln in lines if ln.startswith("⏱")), "")
-    return "\n\n".join(x for x in (REMINDER_INTRO, title, meta) if x)
+    return "\n\n".join(x for x in (REMINDER_INTROS.get(n, REMINDER_INTROS[1]), title, meta) if x)
 
 
-async def _remind_one(bot: Bot, chat_id: int, data: dict) -> None:
+async def _remind_one(bot: Bot, chat_id: int, data: dict, n: int = 1) -> None:
     # Прошлые параметры, но без названия прошлого блюда — иначе ИИ снова предложит то же самое
     search_data = {k: v for k, v in data.items()
                    if k not in ("reminders_off", "reminder_recipe", "reminder_history", "dish_title")}
@@ -67,7 +71,7 @@ async def _remind_one(bot: Bot, chat_id: int, data: dict) -> None:
     if not recipe_text.strip() or recipe_text.startswith("😔"):
         # ИИ недоступен — короткое напоминание без рецепта, чем ничего или текст ошибки
         await bot.send_message(
-            chat_id, "👋 Как насчёт завтра приготовить что-нибудь новое?",
+            chat_id, "👋 Давно не виделись! Как насчёт приготовить что-нибудь новое?",
             reply_markup=InlineKeyboardBuilder().button(text="🍳 Подобрать рецепт", callback_data="menu:open").as_markup(),
         )
         return
@@ -77,32 +81,38 @@ async def _remind_one(bot: Bot, chat_id: int, data: dict) -> None:
     push_reminder_history(chat_id, title, hint)
     # Полный рецепт храним в файле (переживёт перезапуск бота) и показываем по кнопке «Готовить»
     save_reminder_recipe(chat_id, recipe_text, terms)
-    await bot.send_message(chat_id, recipe_teaser(recipe_text), reply_markup=reminder_kb())
+    await bot.send_message(chat_id, recipe_teaser(recipe_text, n), reply_markup=reminder_kb())
 
 
 async def send_daily_reminders(bot: Bot, dp: Dispatcher):
     users = {cid: d for cid, d in get_all_users().items() if d.get("cuisine") and not d.get("reminders_off")}
-    # только тем, кто заходил в бота недавно: разовые посетители не должны стоить денег каждый день
-    users = {cid: d for cid, d in users.items() if usage.is_active(int(cid), config.REMINDER_ACTIVE_DAYS)}
-    if not users:
+    # только тем, кто пропал на config.REMINDER_GAPS дней (и не больше len(gaps) раз подряд)
+    due = {}
+    for cid, d in users.items():
+        n = usage.reminder_due(int(cid), config.REMINDER_GAPS)
+        if n:
+            due[cid] = (d, n)
+    if not due:
         logger.info("Напоминания: некому отправлять")
         return
     sem = asyncio.Semaphore(_PARALLEL)
 
-    async def guarded(chat_id: int, data: dict):
+    async def guarded(chat_id: int, data: dict, n: int):
         async with sem:
-            if usage.cap_reached():          # дневной запас генераций исчерпан — напоминания подождут
+            if usage.cap_reached():          # дневной запас генераций исчерпан — напоминание уйдёт завтра
                 return
             usage.log("reminder", chat_id, "reminder")
             try:
-                await asyncio.wait_for(_remind_one(bot, chat_id, data), timeout=_PER_USER_TIMEOUT)
+                await asyncio.wait_for(_remind_one(bot, chat_id, data, n), timeout=_PER_USER_TIMEOUT)
+                usage.mark_reminded(chat_id, n)
             except TelegramForbiddenError:
+                usage.mark_reminded(chat_id, len(config.REMINDER_GAPS))   # заблокировал бота — больше не пытаемся
                 logger.info("Напоминание %s: пользователь заблокировал бота", chat_id)
             except Exception as e:  # noqa: BLE001 — один пользователь не должен ломать рассылку остальным
                 logger.warning("Не удалось отправить напоминание %s: %r", chat_id, e)
 
-    await asyncio.gather(*(guarded(int(cid), data) for cid, data in users.items()))
-    logger.info("Напоминания разосланы: %d пользователей", len(users))
+    await asyncio.gather(*(guarded(int(cid), data, n) for cid, (data, n) in due.items()))
+    logger.info("Напоминания разосланы: %d пользователей", len(due))
 
 
 def setup_scheduler(bot: Bot, dp: Dispatcher) -> AsyncIOScheduler:
@@ -114,9 +124,12 @@ def setup_scheduler(bot: Bot, dp: Dispatcher) -> AsyncIOScheduler:
         id="daily_reminder",
         replace_existing=True,
     )
+    # тревоги админу: 80% дневного потолка, мало денег на DeepSeek
+    import alerts
+    scheduler.add_job(alerts.check, trigger=CronTrigger(minute=7), args=[bot], id="admin_alerts", replace_existing=True)
     scheduler.start()
     logger.info(
-        f"Напоминания включены: каждый день в {config.REMINDER_HOUR:02d}:{config.REMINDER_MINUTE:02d} "
+        f"Напоминания пропавшим (паузы {config.REMINDER_GAPS} дн.): проверка в {config.REMINDER_HOUR:02d}:{config.REMINDER_MINUTE:02d} "
         f"({config.REMINDER_TIMEZONE})"
     )
     return scheduler

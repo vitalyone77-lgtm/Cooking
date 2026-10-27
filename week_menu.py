@@ -284,8 +284,9 @@ def build_slot_view(chat_id: int, slot: dict) -> tuple[str, InlineKeyboardMarkup
         b.button(text="✅ Готово — следующий рецепт", callback_data=f"weekmenu:done:{index}")
     else:
         b.button(text="✅ Готово — план завершён", callback_data=f"weekmenu:done:{index}")
+    b.button(text="👨‍🍳 Готовить по шагам", callback_data="ck:start")
     b.button(text="⬅️ К плану", callback_data=f"weekmenu:open:{day_number}")
-    b.adjust(2, 1, 1)
+    b.adjust(*([len(nav_row)] if nav_row else []), 1, 1, 1)
     return text, b.as_markup()
 
 

@@ -12,6 +12,7 @@ import logging
 import httpx
 
 import config
+import profile_ctx
 from prompts import SYSTEM_PROMPT, build_user_prompt
 
 logger = logging.getLogger(__name__)
@@ -103,6 +104,26 @@ async def call_llm_with_fallback(messages: list[dict], max_tokens: int = 3000) -
     поднимает RuntimeError, только если ВСЕ провалились — вызывающий код сам решает,
     что показать пользователю или на какой альтернативный путь переключиться.
     """
+    block = profile_ctx.prompt_block()
+    if block:
+        # профиль — в конец запроса пользователя: системный промпт не меняется и остаётся в кэше DeepSeek
+        messages = messages[:-1] + [{**messages[-1], "content": messages[-1]["content"] + block}]
+    text = await _call_any(messages, max_tokens)
+    bad = profile_ctx.hits(text)
+    if bad:
+        # нашёлся продукт из профиля — одна повторная попытка с явным указанием, что не так
+        logger.warning("В ответе продукты из профиля %s — перегенерирую", bad)
+        retry = messages + [{"role": "assistant", "content": text},
+                            {"role": "user", "content": "В ответе есть запрещённые продукты из профиля: " + ", ".join(bad)
+                             + ". Перепиши ответ полностью в том же формате без них (и без всего, что их содержит)."}]
+        try:
+            text = await _call_any(retry, max_tokens)
+        except RuntimeError:
+            pass
+    return text
+
+
+async def _call_any(messages: list[dict], max_tokens: int) -> str:
     providers = [config.LLM_PROVIDER] + [p for p in LLM_FALLBACK_ORDER if p != config.LLM_PROVIDER]
     errors = []
 
@@ -123,7 +144,11 @@ async def generate_recipe(data: dict, search_query: str, search_results_text: st
         {"role": "user", "content": build_user_prompt(data, search_query, search_results_text)},
     ]
     try:
-        return await call_llm_with_fallback(messages)
+        text = await call_llm_with_fallback(messages)
+        bad = profile_ctx.hits(text)
+        if bad:   # и после повторной попытки — предупреждаем, а не молчим
+            text = "⚠️ Проверь состав: возможно, есть " + ", ".join(bad) + " — у тебя это в профиле.\n\n" + text
+        return text
     except RuntimeError as e:
         logger.error(f"Все LLM-провайдеры не сработали: {e}")
         return (
