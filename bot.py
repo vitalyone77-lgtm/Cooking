@@ -43,7 +43,7 @@ from last_recipe import set_last_recipe, get_last_recipe
 from stores import prefs as store_prefs
 from stores.links import DEFAULT_STORES
 from stores.basket import build_priced_basket
-from tg_safety import SafeSendMiddleware, OneHeavyAtATime, FloodGuard
+from tg_safety import SafeSendMiddleware, OneHeavyAtATime, FloodGuard, ChatSequential
 import usage
 import bot_profile
 import plans
@@ -68,7 +68,8 @@ dp = Dispatcher(storage=MemoryStorage())
 _flood = FloodGuard()
 dp.message.outer_middleware(_flood)          # десятки нажатий в секунду от одного человека — игнорируем
 dp.callback_query.outer_middleware(_flood)
-dp.callback_query.outer_middleware(OneHeavyAtATime())   # двойной тап по «Подобрать», корзине и т. п. не запускает вторую генерацию
+dp.callback_query.outer_middleware(OneHeavyAtATime())
+dp.callback_query.outer_middleware(ChatSequential())   # лёгкие кнопки одного чата — по очереди   # двойной тап по «Подобрать», корзине и т. п. не запускает вторую генерацию
 
 
 @dp.errors()
@@ -100,11 +101,11 @@ HELP_TEXT = (
     "❓ *Справка*\n\n"
     "Я помогаю решить, что приготовить: подбираю рецепт, считаю калории и продукты, "
     "показываю, где их купить.\n\n"
-    "*Внизу три кнопки (они всегда на месте):*\n"
-    "📋 *Показать меню* — выбрать тип питания и получить рецепт, собрать меню на день или на "
-    f"{config.WEEK_MENU_DAYS} дня, открыть избранное.\n"
+    "*Внизу три кнопки* (свернуть и открыть — значок ⊞ справа от смайлика):\n"
+    "🍳 *Создать* — выбрать тип питания и получить рецепт, собрать меню на день или на "
+    f"{config.WEEK_MENU_DAYS} дня, открыть избранное или последний рецепт.\n"
     "🗂 *Готовые меню* — открыть уже собранное меню на день и план на несколько дней.\n"
-    "❓ *Справка* — этот текст.\n\n"
+    "👤 *Профиль* — аллергии, полка, напоминания, вход на сайт и эта справка.\n\n"
     "Под рецептом:\n"
     "👨‍🍳 *Готовить по шагам* — один шаг на экране, таймер прямо в шаге, галочки «готово».\n"
     "🛒 *Список покупок* — отмечай ✅ купил, ❌ нет в магазине (подберу замену), 🏠 есть дома; "
@@ -258,10 +259,38 @@ async def shop_cart(callback: CallbackQuery):
         await wait.edit_text("ℹ️ ВкусВилл сейчас не ответил или ничего не нашёл — открой список ссылок и ищи продукты вручную.")
 
 
+async def ensure_reply_kb(message: Message) -> None:
+    """Нижнее меню (Создать · Готовые меню · Профиль): если у человека старое или оно пропало — присылаем один раз."""
+    key = f"kbv:{message.chat.id}"
+    if (accounts.sess_get(key) or {}).get("v") == kb.KB_VERSION:
+        return
+    await message.answer("⌨️ Внизу — кнопки «🍳 Создать», «🗂 Готовые меню» и «👤 Профиль». Свернуть и открыть их "
+                         "снова можно значком ⊞ справа от смайлика.", reply_markup=kb.main_reply_kb(), parse_mode=None)
+    _kb_sent(message.chat.id)
+
+
+def _kb_sent(chat_id: int) -> None:
+    accounts.sess_set(f"kbv:{chat_id}", {"v": kb.KB_VERSION})
+    accounts.sess_mark_forever(f"kbv:{chat_id}")
+
+
 async def show_main_menu(message: Message, state: FSMContext, intro: str = "Что готовим? Выбери тип питания/кухни:"):
     await state.clear()
-    await message.answer(intro, reply_markup=kb.cuisine_kb())
+    await ensure_reply_kb(message)
+    last = get_last_recipe(message.chat.id)
+    await message.answer(intro, reply_markup=kb.cuisine_kb(last_title=(last or {}).get("title") or ("Рецепт" if last else None)))
     await state.set_state(RecipeForm.cuisine)
+
+
+@dp.callback_query(F.data == "last:open")
+async def last_open(callback: CallbackQuery, state: FSMContext):
+    last = get_last_recipe(callback.message.chat.id)
+    if not last:
+        await callback.answer("Последний рецепт не найден — подбери новый.", show_alert=True)
+        return
+    await state.clear()
+    await callback.answer()
+    await callback.message.answer(last["text"], reply_markup=recipe_kb(last["text"]))
 
 
 async def show_ready_menus(message: Message, state: FSMContext):
@@ -270,6 +299,7 @@ async def show_ready_menus(message: Message, state: FSMContext):
     на несколько дней) — открывает его сразу; если оба — даёт выбор; если ни одного — предлагает собрать.
     """
     await state.clear()
+    await ensure_reply_kb(message)
     chat_id = message.chat.id
     has_day = day_menu.has_menu(chat_id)
     has_week = week_menu.has_plan(chat_id)
@@ -294,10 +324,11 @@ async def cmd_start(message: Message, state: FSMContext, command: CommandObject)
     # Reply-клавиатура и инлайн-клавиатура — разные типы reply_markup, за один вызов
     # можно прикрепить только один, поэтому нижнее меню отправляем отдельным сообщением.
     await message.answer(
-        "Привет! 👋 Я кухонный помощник. Внизу — постоянные кнопки: "
-        "«Показать меню», «Готовые меню» и «Справка».",
+        "Привет! 👋 Я кухонный помощник. Внизу — кнопки «🍳 Создать», «🗂 Готовые меню» и «👤 Профиль» "
+        "(свернуть и открыть их — значок ⊞ справа от смайлика).",
         reply_markup=kb.main_reply_kb(),
     )
+    _kb_sent(message.chat.id)
     await show_main_menu(message, state, "Для начала выбери тип питания/кухни:")
 
 
@@ -363,7 +394,7 @@ async def help_open(callback: CallbackQuery):
 # Зарегистрированы раньше остальных message-хэндлеров, чтобы иметь приоритет: даже если
 # пользователь сейчас в середине анкеты, нажатие кнопки нижнего меню перехватывает управление.
 
-@dp.message(F.text == kb.BTN_MENU)
+@dp.message(F.text == kb.BTN_CREATE)
 async def menu_btn_menu(message: Message, state: FSMContext):
     await show_main_menu(message, state)
 
@@ -373,17 +404,22 @@ async def menu_btn_ready(message: Message, state: FSMContext):
     await show_ready_menus(message, state)
 
 
-@dp.message(F.text == kb.BTN_HELP)
-async def menu_btn_help(message: Message, state: FSMContext):
-    await state.clear()
-    await message.answer(HELP_TEXT)
+@dp.message(F.text == kb.BTN_PROFILE)
+async def menu_btn_profile(message: Message, state: FSMContext):
+    await bot_profile.show_profile(message, state)
 
 
 # Кнопки старых версий: клавиатура могла остаться у пользователя в чате. Обрабатываем и
 # заодно подставляем новую клавиатуру.
-@dp.message(F.text.in_({kb.LEGACY_BTN_COOK, kb.LEGACY_BTN_FAVORITES, kb.LEGACY_BTN_DAY_MENU, kb.LEGACY_BTN_WEEK_MENU}))
+@dp.message(F.text.in_({kb.LEGACY_BTN_COOK, kb.LEGACY_BTN_FAVORITES, kb.LEGACY_BTN_DAY_MENU, kb.LEGACY_BTN_WEEK_MENU,
+                         kb.LEGACY_BTN_MENU, kb.LEGACY_BTN_HELP}))
 async def legacy_buttons(message: Message, state: FSMContext):
     await message.answer("Обновил нижнее меню ⌨️", reply_markup=kb.main_reply_kb())
+    _kb_sent(message.chat.id)
+    if message.text == kb.LEGACY_BTN_HELP:
+        await state.clear()
+        await message.answer(HELP_TEXT)
+        return
     if message.text == kb.LEGACY_BTN_FAVORITES:
         favs = get_favorites(message.chat.id)
         if favs:
@@ -1700,6 +1736,7 @@ dp.include_router(fallback_router)
 @fallback_router.message(StateFilter(None), F.text)
 async def fallback_text(message: Message, state: FSMContext):
     await message.answer("Не совсем понял 🙂 Вот меню:", reply_markup=kb.main_reply_kb())
+    _kb_sent(message.chat.id)
     await show_main_menu(message, state)
 
 

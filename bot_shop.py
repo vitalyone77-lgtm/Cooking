@@ -129,6 +129,7 @@ async def list_open(callback: CallbackQuery):
         if plans.has_feature(msg.chat.id, "memory"):
             st = {str(i): "h" for i in accounts.shelf_match(msg.chat.id, terms)}
         s = {"ctx": ctx, "terms": terms, "st": st, "mode": "b", "page": 0}
+    _save(msg, s)
     await callback.answer("Выбери отметку сверху и нажимай на продукты")
     await _redraw(callback, s)
 
@@ -140,6 +141,7 @@ async def list_mode(callback: CallbackQuery):
         return
     mode = callback.data.split(":")[2]
     s["mode"] = mode if mode in MODES else "b"
+    _save(callback.message, s)
     await callback.answer({"b": "Отмечаю купленное", "m": "Отмечаю, чего нет в магазине",
                            "h": "Отмечаю, что уже есть дома"}[s["mode"]])
     await _redraw(callback, s)
@@ -162,6 +164,7 @@ async def list_item(callback: CallbackQuery):
         term = s["terms"][int(i)]
         if mode in ("b", "h") and plans.has_feature(callback.message.chat.id, "memory") and accounts.shelf_life_days(term):
             accounts.shelf_add(callback.message.chat.id, term)
+    _save(callback.message, s)
     await callback.answer()
     await _redraw(callback, s)
 
@@ -172,6 +175,7 @@ async def list_page(callback: CallbackQuery):
     if not s:
         return
     s["page"] = int(callback.data.split(":")[2])
+    _save(callback.message, s)
     await callback.answer()
     await _redraw(callback, s)
 

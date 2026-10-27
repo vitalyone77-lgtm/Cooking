@@ -1,15 +1,18 @@
 """
 Последний показанный пользователю рецепт — хранится отдельно от анкеты (FSM),
 чтобы кнопка "⭐ В избранное" работала даже после того, как анкета уже была
-сброшена (например, пользователь нажал "Подобрать ещё рецепт" и вернулся
-к старому сообщению). Живёт в памяти процесса — этого достаточно для одного бота.
+сброшена, и чтобы в «Создать» можно было заново открыть последний рецепт.
+Лежит в базе (accounts.sess) — переживает перезапуск бота.
 """
-_last_recipes: dict[int, dict] = {}
+import accounts
 
 
 def set_last_recipe(chat_id: int, title: str, text: str, cuisine: str) -> None:
-    _last_recipes[chat_id] = {"title": title, "text": text, "cuisine": cuisine}
+    key = f"last:{chat_id}"
+    accounts.sess_set(key, {"title": title, "text": text, "cuisine": cuisine})
+    accounts.sess_mark_forever(key)
 
 
 def get_last_recipe(chat_id: int) -> dict | None:
-    return _last_recipes.get(chat_id)
+    r = accounts.sess_get(f"last:{chat_id}")
+    return r if r and r.get("text") else None

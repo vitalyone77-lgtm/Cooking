@@ -54,10 +54,13 @@ def _locked_view(uid: int) -> tuple[str, InlineKeyboardMarkup]:
     b.button(text="💎 Подписка", callback_data="pf:sub")
     b.button(text="🎟 Промокод", callback_data="pf:promo")
     b.button(text="🌐 Открыть сайт", callback_data="pf:site")
-    b.button(text="🔕 Выключить напоминания" if reminders_enabled(uid) else "🔔 Включить напоминания",
-             callback_data="pf:rem")
+    b.button(text="🔕 Напоминания" if reminders_enabled(uid) else "🔔 Напоминания", callback_data="pf:rem")
+    devs = accounts.devices_of(uid)
+    if devs:
+        b.button(text=f"🔓 Выйти на сайте ({devs})", callback_data="pf:unall")
+    b.button(text="❓ Справка", callback_data="help:open")
     b.button(text="⬅️ Меню", callback_data="menu:open")
-    b.adjust(2, 1, 1, 1)
+    b.adjust(2, 1, 2 if devs else 1, 2)
     return text, b.as_markup()
 
 
@@ -92,13 +95,13 @@ def _profile_view(uid: int) -> tuple[str, InlineKeyboardMarkup]:
     if config.PAYWALL_ENABLED:
         b.button(text="💎 Подписка", callback_data="pf:sub")
         b.button(text="🎟 Промокод", callback_data="pf:promo")
-    b.button(text="🔕 Выключить напоминания" if reminders_enabled(uid) else "🔔 Включить напоминания",
-             callback_data="pf:rem")
+    b.button(text="🔕 Напоминания" if reminders_enabled(uid) else "🔔 Напоминания", callback_data="pf:rem")
     devs = accounts.devices_of(uid)
     if devs:
         b.button(text=f"🔓 Выйти на сайте ({devs})", callback_data="pf:unall")
+    b.button(text="❓ Справка", callback_data="help:open")
     b.button(text="⬅️ Меню", callback_data="menu:open")
-    b.adjust(2, 2, *([2] if config.PAYWALL_ENABLED else []), 1, *([1] if devs else []), 1)
+    b.adjust(2, 2, *([2] if config.PAYWALL_ENABLED else []), 2 if devs else 1, 2)
     return "\n".join(lines), b.as_markup()
 
 

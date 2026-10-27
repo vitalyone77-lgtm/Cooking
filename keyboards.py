@@ -7,10 +7,12 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 import config
 from cuisines import CUISINE_LABELS, MACRO_GOAL_KEY
 
-# Текст кнопок постоянного нижнего меню (reply-keyboard).
-BTN_MENU = "📋 Показать меню"
+# Текст кнопок нижнего меню (reply-keyboard).
+BTN_CREATE = "🍳 Создать"
 BTN_READY = "🗂 Готовые меню"
-BTN_HELP = "❓ Справка"
+BTN_PROFILE = "👤 Профиль"
+# Версия нижнего меню: если у человека в чате старая (или клавиатура пропала) — бот пришлёт новую один раз
+KB_VERSION = 2
 
 # Тексты кнопок ПРОШЛЫХ версий: у людей, у которых старая клавиатура ещё висит в чате,
 # нажатие должно работать, а клавиатура — обновиться на новую.
@@ -18,22 +20,24 @@ LEGACY_BTN_COOK = "🍳 Готовить"
 LEGACY_BTN_FAVORITES = "⭐ Избранное"
 LEGACY_BTN_DAY_MENU = "📅 Меню дня"
 LEGACY_BTN_WEEK_MENU = "📆 План питания"
+LEGACY_BTN_MENU = "📋 Показать меню"
+LEGACY_BTN_HELP = "❓ Справка"
 
 
 def main_reply_kb() -> ReplyKeyboardMarkup:
     """
-    Постоянное меню внизу экрана: одна строка из трёх кнопок. is_persistent=True — Telegram
-    не прячет её после нажатия и показывает вместо иконки-клавиатуры.
+    Меню внизу экрана: одна строка из трёх кнопок. Не «постоянное» (is_persistent=False): справа от смайлика
+    Telegram показывает значок ⊞ — им меню сворачивают и открывают снова (открытое — значок-стрелка).
     """
     return ReplyKeyboardMarkup(
         keyboard=[[
-            KeyboardButton(text=BTN_MENU),
+            KeyboardButton(text=BTN_CREATE),
             KeyboardButton(text=BTN_READY),
-            KeyboardButton(text=BTN_HELP),
+            KeyboardButton(text=BTN_PROFILE),
         ]],
         resize_keyboard=True,
-        is_persistent=True,
-        input_field_placeholder="Нажми «Показать меню» или напиши, что хочешь приготовить",
+        is_persistent=False,
+        input_field_placeholder="Нажми «Создать» или напиши, что хочешь приготовить",
     )
 
 
@@ -50,11 +54,11 @@ CUISINE_BUTTONS = {
 }
 
 
-def cuisine_kb(with_extras: bool = True) -> InlineKeyboardMarkup:
+def cuisine_kb(with_extras: bool = True, last_title: str | None = None) -> InlineKeyboardMarkup:
     """
-    Главное меню парами: классическая/сбалансированная, спорт кардио/сила, КБЖУ/перекус,
-    аюрведа/избранное, меню на день/на N дней, профиль/справка. Внутри анкет «на день»/«на N дней»
-    extras не нужны (with_extras=False), иначе можно случайно прервать анкету.
+    Главное меню («Создать») парами: классическая/сбалансированная, спорт кардио/сила, КБЖУ/перекус,
+    аюрведа/избранное, меню на день/на N дней; внизу — «Последний рецепт», если он есть. Внутри анкет
+    «на день»/«на N дней» extras не нужны (with_extras=False), иначе можно случайно прервать анкету.
     """
     b = InlineKeyboardBuilder()
     for key, text in CUISINE_BUTTONS.items():
@@ -65,9 +69,10 @@ def cuisine_kb(with_extras: bool = True) -> InlineKeyboardMarkup:
     b.button(text="⭐ Избранное", callback_data="favorites:open")
     b.button(text="📅 Меню на день", callback_data="daymenu:start")
     b.button(text=f"📆 Меню на {config.WEEK_MENU_DAYS} дня", callback_data="weekmenu:start")
-    b.button(text="👤 Профиль", callback_data="profile:open")
-    b.button(text="❓ Справка", callback_data="help:open")
-    b.adjust(2)
+    if last_title:
+        short = last_title if len(last_title) <= 28 else last_title[:26] + "…"
+        b.button(text=f"📖 Последний: {short}", callback_data="last:open")
+    b.adjust(2, 2, 2, 2, 2, 1)
     return b.as_markup()
 
 

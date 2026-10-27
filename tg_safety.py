@@ -127,3 +127,31 @@ class FloodGuard(BaseMiddleware):
         if len(self._log) > 20000:
             self._log = {k: v for k, v in self._log.items() if v and now - v[-1] <= self.window}
         return await handler(event, data)
+
+
+# ---------- лёгкие нажатия одного чата — по очереди ----------
+
+import asyncio
+
+
+class ChatSequential(BaseMiddleware):
+    """
+    Обычные кнопки (анкета, список покупок, режим готовки) одного чата обрабатываем по очереди: двойной тап
+    по «30 мин» иначе мог проскочить два шага анкеты, а два быстрых нажатия — затереть друг друга.
+    Тяжёлые кнопки (HEAVY_PREFIXES — поиск, ИИ) в очередь не ставим, их охраняет OneHeavyAtATime,
+    поэтому пока готовится рецепт, остальные кнопки не «зависают».
+    """
+    def __init__(self):
+        self._locks: dict[int, asyncio.Lock] = {}
+
+    async def __call__(self, handler, event: CallbackQuery, data):
+        if (event.data or "").startswith(HEAVY_PREFIXES) or not event.message:
+            return await handler(event, data)
+        chat_id = event.message.chat.id
+        lock = self._locks.setdefault(chat_id, asyncio.Lock())
+        try:
+            async with lock:
+                return await handler(event, data)
+        finally:
+            if not lock.locked() and len(self._locks) > 5000:
+                self._locks = {k: v for k, v in self._locks.items() if v.locked()}

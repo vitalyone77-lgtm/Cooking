@@ -419,6 +419,10 @@ def fav_add(uid: str, title: str, text: str, cuisine: str) -> str:
         c = _conn()
         try:
             with c:
+                same = c.execute("SELECT id FROM favs WHERE uid=? AND title=? AND text=?",
+                                 (uid, title[:200], text[:20000])).fetchone()
+                if same:              # двойное нажатие «В избранное» — уже сохранено
+                    return same[0]
                 n = c.execute("SELECT COUNT(*) FROM favs WHERE uid=?", (uid,)).fetchone()[0]
                 if n >= FAV_LIMIT:      # самое старое уходит
                     c.execute("DELETE FROM favs WHERE uid=? AND id=(SELECT id FROM favs WHERE uid=? ORDER BY ts LIMIT 1)",

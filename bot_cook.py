@@ -153,9 +153,14 @@ async def _show(callback: CallbackQuery, s: dict):
             raise
 
 
-async def _drop_alerts(bot: Bot, chat_id: int, s: dict):
+def _persist(callback: CallbackQuery, s: dict) -> None:
+    """Сохранить сразу после изменения, до любого await: нажатия обрабатываются параллельно."""
+    accounts.sess_set(_key(callback.message.chat.id, callback.message.message_id), s)
+
+
+async def _drop_alerts(bot: Bot, chat_id: int, alerts: list):
     """Сигналы таймеров, которые уже отработали, убираем — чтобы чат не зарастал."""
-    for mid in s.pop("alerts", []):
+    for mid in alerts:
         try:
             await bot.delete_message(chat_id, mid)
         except Exception:  # noqa: BLE001
@@ -196,12 +201,14 @@ async def cook_done(callback: CallbackQuery):
     done = set(s.get("done", []))
     done.add(i)
     s["done"] = sorted(done)
-    await _drop_alerts(callback.bot, callback.message.chat.id, s)
+    alerts = s.pop("alerts", [])
     if i + 1 < len(s["steps"]):
         s["i"] = i + 1
         s["view"] = "step"
     else:
         s["finished"] = True
+    _persist(callback, s)
+    await _drop_alerts(callback.bot, callback.message.chat.id, alerts)
     await callback.answer()
     await _show(callback, s)
 
@@ -215,6 +222,7 @@ async def cook_goto(callback: CallbackQuery):
     s["i"] = max(0, min(i, len(s["steps"]) - 1))
     s.pop("finished", None)
     s["view"] = "step"
+    _persist(callback, s)
     await callback.answer()
     await _show(callback, s)
 
@@ -226,6 +234,7 @@ async def cook_view(callback: CallbackQuery):
         return
     v = callback.data.split(":")[2]
     s["view"] = v if v in ("step", "ing", "all") else "step"
+    _persist(callback, s)
     await callback.answer()
     await _show(callback, s)
 
@@ -237,8 +246,8 @@ async def cook_close(callback: CallbackQuery):
     task = _tasks.pop(key, None)
     if task:
         task.cancel()
-    await _drop_alerts(callback.bot, callback.message.chat.id, s)
     accounts.sess_set(key, {})
+    await _drop_alerts(callback.bot, callback.message.chat.id, s.get("alerts", []))
     await callback.answer("Закончили 👍")
     try:
         await callback.message.delete()
@@ -262,6 +271,7 @@ async def cook_timer(callback: CallbackQuery):
     now = time.time()
     s["timer"] = {"step": s["i"], "end": now + mn * 60, "end_max": now + mx * 60, "mn": mn, "mx": mx, "fired": 0}
     key = _key(callback.message.chat.id, callback.message.message_id)
+    _persist(callback, s)
     _start_task(callback.bot, callback.message.chat.id, key, s)
     await callback.answer(f"⏱ Таймер запущен: сигнал через {tm.fmt_min(mn)}")
     await _show(callback, s)
@@ -277,6 +287,7 @@ async def cook_timer_stop(callback: CallbackQuery):
     if task:
         task.cancel()
     s.pop("timer", None)
+    _persist(callback, s)
     await callback.answer("Таймер остановлен")
     await _show(callback, s)
 
