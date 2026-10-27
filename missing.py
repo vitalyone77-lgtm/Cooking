@@ -35,18 +35,30 @@ def with_excluded(data: dict, missing: list[str]) -> dict:
     return out
 
 
+REPLACE_RULES = (
+    "ГЛАВНОЕ: это ТО ЖЕ САМОЕ БЛЮДО. Сохрани название, остальные продукты, их граммовки и шаги — меняй только то, что "
+    "касается отсутствующих продуктов (человек, возможно, уже начал готовить).\n"
+    "- Специи, приправы, зелень, соусы для подачи, посыпки, орехи/ягоды/фрукты для украшения, ваниль, корица и т.п. — "
+    "это НЕ основа: либо просто убери (если блюдо и так вкусное), либо замени тем, что легко найти, и коротко скажи, "
+    "что можно и без замены. Пример: нет корицы в овсяноблине → «можно без неё, или щепотка ванили / мускатного ореха; "
+    "мёд добавит сладость, но не аромат корицы».\n"
+    "- Основной продукт (белок, крупа, основа теста и т.п.) — замени ближайшим аналогом (курица → индейка, рис → "
+    "булгур), пересчитай граммовки, время и КБЖУ.\n"
+    "- ДРУГОЕ блюдо — ТОЛЬКО если отсутствует сама основа и у неё нет аналога (например, нет овсянки для овсяноблина и "
+    "нечем заменить). Тогда первой строкой напиши «ℹ️ Без этого блюдо не получится — предлагаю другое:».\n"
+    "Первой строкой ответа (кроме случая с другим блюдом) напиши коротко, что заменено: «🔄 Замена: корица → можно "
+    "без неё или щепотка ванили». Дальше — весь рецепт СТРОГО по формату из системного промпта (КБЖУ пересчитай, "
+    "если замена его меняет), включая служебную строку ПРОДУКТЫ_СПИСОК в конце. Отсутствующие продукты нигде не используй."
+)
+
+
 async def adapt_recipe(recipe_text: str, missing: list[str]) -> tuple[str, list[str]]:
-    """Один рецепт: замена недостающих продуктов (или другое блюдо, если без них никак). -> (текст, продукты для поиска)."""
+    """Один рецепт: МИНИМАЛЬНАЯ замена недостающих (блюдо то же; другое — только если нет самой основы).
+    -> (текст, продукты для поиска)."""
     missing = clean_missing(missing)
     user = (
-        "Вот готовый рецепт. ЭТИХ ПРОДУКТОВ НЕТ в магазине пользователя: " + ", ".join(missing) + ".\n\n"
-        "Перепиши рецепт: замени их подходящими аналогами, которые легко найти в обычном российском магазине "
-        "(вкус, тип питания и КБЖУ должны остаться близкими), и заново пересчитай граммовки, шаги и КБЖУ на порцию. "
-        "Не используй недостающие продукты нигде в рецепте. Если без них блюдо не получится — предложи другое "
-        "подходящее блюдо с теми же условиями и первой строкой ответа напиши «ℹ️ Без этих продуктов блюдо не "
-        "получится — предлагаю другое:». Оформи СТРОГО по формату из системного промпта, включая служебную строку "
-        "ПРОДУКТЫ_СПИСОК в конце.\n"
-        + season_line() + "\nРЕЦЕПТ:\n" + recipe_text
+        "Вот готовый рецепт. ЭТИХ ПРОДУКТОВ НЕТ у пользователя: " + ", ".join(missing) + ".\n\n"
+        + REPLACE_RULES + "\n" + season_line() + "\nРЕЦЕПТ:\n" + recipe_text
     )
     raw = await call_llm_with_fallback([{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": user}])
     text, terms = extract_shopping_terms(raw)
@@ -55,22 +67,35 @@ async def adapt_recipe(recipe_text: str, missing: list[str]) -> tuple[str, list[
     return text, terms
 
 
+def _mentions(text: str, names: list[str]) -> bool:
+    """Есть ли в тексте блюда хоть один из продуктов (по основе первого слова: «корица» ~ «корицей»)."""
+    t = (text or "").lower().replace("ё", "е")
+    for n in names:
+        w = n.lower().replace("ё", "е").split()[0] if n.split() else ""
+        stem = w[:-1] if len(w) >= 4 and w[-1] in "аеиоуыэюяйь" else w
+        if len(stem) >= 3 and stem in t:
+            return True
+    return False
+
+
 async def rebuild_day(chat_id: int, missing: list[str]) -> str:
-    """Меню на день без недостающих продуктов. Возвращает режим: 'regen' (сборка заново) или 'adapt' (правка блюд)."""
+    """Меню на день без недостающих продуктов: правим ТОЛЬКО блюда, где они есть (минимальная замена),
+    остальные не трогаем. Возвращает 'adapt'."""
     missing = clean_missing(missing)
     entry = day_menu._load_menu(chat_id)
     if not entry:
         raise RuntimeError("Меню на день не найдено — собери его заново")
-    base = entry.get("base_data")
-    if base:
-        await day_menu.generate_day_menu(chat_id, entry["order"], with_excluded(base, missing))
-        return "regen"
-    # Меню собрано до появления сохранённых параметров — правим каждое блюдо по отдельности
-    keys = [k for k in entry["order"] if entry["meals"].get(k, {}).get("ok")]
+    if entry.get("base_data"):
+        entry["base_data"] = with_excluded(entry["base_data"], missing)    # и в следующий раз без них
+    keys = [k for k in entry["order"] if entry["meals"].get(k, {}).get("ok")
+            and _mentions(entry["meals"][k].get("text", ""), missing)]
+    if not keys:
+        keys = [k for k in entry["order"] if entry["meals"].get(k, {}).get("ok")]
     results = await asyncio.gather(*[adapt_recipe(entry["meals"][k]["text"], missing) for k in keys])
     for k, (text, terms) in zip(keys, results):
         entry["meals"][k] = {"title": day_menu.extract_dish_title(text) or entry["meals"][k]["title"], "text": text, "ok": True}
-    entry["shopping_terms"] = day_menu._merge_shopping_terms([t for _, t in results])
+    old = [t for t in (entry.get("shopping_terms") or []) if not _mentions(t, missing)]
+    entry["shopping_terms"] = day_menu._merge_shopping_terms([old] + [t for _, t in results])
     day_menu._save_menu(chat_id, entry)
     return "adapt"
 

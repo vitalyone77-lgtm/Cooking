@@ -24,3 +24,6 @@ usage.db
 accounts.db
 *.db-wal
 *.db-shm
+# локальные копии с ключами — не в git
+.env*copy*
+.env.*.local

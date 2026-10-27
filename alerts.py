@@ -51,7 +51,8 @@ async def _send(bot, text: str):
 async def check(bot) -> None:
     if not config.ADMIN_TG_IDS:
         return
-    cap = config.DAILY_GEN_CAP
+    import plans
+    cap = int(plans.cfg("DAILY_GEN_CAP"))
     used = usage.total_today()
     if cap > 0 and used >= cap * 0.8 and _once_today("cap"):
         await _send(bot, f"⚠️ Подборов ИИ сегодня уже {used} из {cap} (80% дневного потолка). Если это не наплыв "

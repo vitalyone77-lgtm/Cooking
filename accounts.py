@@ -34,6 +34,8 @@ CREATE TABLE IF NOT EXISTS refs(uid TEXT PRIMARY KEY, ref TEXT, ts REAL);
 CREATE TABLE IF NOT EXISTS sess(key TEXT PRIMARY KEY, data TEXT, ts REAL);
 CREATE INDEX IF NOT EXISTS sess_ts ON sess(ts);
 CREATE TABLE IF NOT EXISTS favs(uid TEXT, id TEXT, title TEXT, text TEXT, cuisine TEXT, ts REAL, PRIMARY KEY(uid, id));
+CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY, value TEXT, ts REAL, who TEXT);
+CREATE TABLE IF NOT EXISTS admin_log(id INTEGER PRIMARY KEY AUTOINCREMENT, ts REAL, who TEXT, action TEXT, details TEXT);
 """
 
 
@@ -474,3 +476,92 @@ def sess_items(prefix: str) -> list[tuple[str, dict]]:
 def sess_prune() -> None:
     _q("DELETE FROM sess WHERE ts < ?", (time.time() - SESS_TTL,))
     _q("DELETE FROM link_codes WHERE created < ?", (time.time() - 86400,))
+
+
+# ---------- настройки из админки и журнал изменений ----------
+
+def settings_all() -> dict:
+    out = {}
+    for k, v in _q("SELECT key, value FROM settings", all_=True):
+        try:
+            out[k] = json.loads(v)
+        except ValueError:
+            continue
+    return out
+
+
+def settings_set(values: dict, who: str) -> None:
+    with _lock:
+        c = _conn()
+        try:
+            with c:
+                for k, v in values.items():
+                    c.execute("INSERT INTO settings(key, value, ts, who) VALUES(?,?,?,?) ON CONFLICT(key) DO UPDATE SET "
+                              "value=excluded.value, ts=excluded.ts, who=excluded.who",
+                              (k, json.dumps(v, ensure_ascii=False), time.time(), who))
+        finally:
+            c.close()
+
+
+def admin_log(who: str, action: str, details: str = "") -> None:
+    _q("INSERT INTO admin_log(ts, who, action, details) VALUES(?,?,?,?)", (time.time(), who, action, details[:2000]))
+
+
+def admin_log_list(limit: int = 100) -> list[dict]:
+    rows = _q("SELECT ts, who, action, details FROM admin_log ORDER BY id DESC LIMIT ?", (limit,), all_=True)
+    return [{"ts": r[0], "who": r[1], "action": r[2], "details": r[3]} for r in rows]
+
+
+# ---------- статистика для админки ----------
+
+def money_stats() -> dict:
+    """Выручка по месяцам (рубли и звёзды отдельно), последние платежи, конверсия пробного периода."""
+    by_month = {}
+    for ts, amount, cur in _q("SELECT ts, amount, currency FROM payments", all_=True):
+        m = time.strftime("%Y-%m", time.localtime(ts))
+        d = by_month.setdefault(m, {"month": m, "rub": 0, "stars": 0, "count": 0})
+        if cur == "XTR":
+            d["stars"] += amount
+        else:
+            d["rub"] += amount / 100       # Telegram присылает рубли в копейках
+        d["count"] += 1
+    recent = [{"ts": r[0], "uid": r[1], "amount": (r[2] if r[3] == "XTR" else r[2] / 100), "currency": r[3], "plan": r[4]}
+              for r in _q("SELECT ts, uid, amount, currency, plan FROM payments ORDER BY ts DESC LIMIT 50", all_=True)]
+
+    def one(q, *a):
+        return _q(q, a, one=True)[0]
+    now = time.time()
+    trials = one("SELECT COUNT(*) FROM subs WHERE trial_used=1")
+    paid_after_trial = one("SELECT COUNT(DISTINCT p.uid) FROM payments p JOIN subs s ON s.uid=p.uid WHERE s.trial_used=1")
+    return {
+        "months": sorted(by_month.values(), key=lambda d: d["month"], reverse=True),
+        "recent": recent,
+        "total_rub": sum(d["rub"] for d in by_month.values()),
+        "total_stars": sum(d["stars"] for d in by_month.values()),
+        "active": one("SELECT COUNT(*) FROM subs WHERE until > ?", now),
+        "active_paid": one("SELECT COUNT(*) FROM subs WHERE until > ? AND source='payment'", now),
+        "active_trial": one("SELECT COUNT(*) FROM subs WHERE until > ? AND source='trial'", now),
+        "active_promo": one("SELECT COUNT(*) FROM subs WHERE until > ? AND source LIKE 'promo:%'", now),
+        "trials_started": trials,
+        "paid_users": one("SELECT COUNT(DISTINCT uid) FROM payments"),
+        "trial_to_paid_pct": round(100 * paid_after_trial / trials, 1) if trials else 0,
+        "expiring_7d": one("SELECT COUNT(*) FROM subs WHERE until > ? AND until < ?", now, now + 7 * 86400),
+    }
+
+
+def promo_stats() -> list[dict]:
+    rows = _q("SELECT code, COUNT(*) FROM promo_used GROUP BY code ORDER BY 2 DESC", all_=True)
+    return [{"code": r[0], "used": r[1]} for r in rows]
+
+
+def account_stats() -> dict:
+    def one(q):
+        return _q(q, one=True)[0]
+    return {
+        "linked_devices": one("SELECT COUNT(*) FROM links"),
+        "linked_accounts": one("SELECT COUNT(DISTINCT tg_id) FROM links"),
+        "profiles": one("SELECT COUNT(*) FROM profiles WHERE allergies != '' OR never != ''"),
+        "shelf_users": one("SELECT COUNT(DISTINCT uid) FROM shelf"),
+        "favorites": one("SELECT COUNT(*) FROM favs"),
+        "fav_users": one("SELECT COUNT(DISTINCT uid) FROM favs"),
+    }

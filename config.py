@@ -109,7 +109,7 @@ WEB_IP_DAILY_GENS = int(os.getenv("WEB_IP_DAILY_GENS", "40"))   # у мобил�
 PAYWALL_ENABLED = os.getenv("PAYWALL_ENABLED", "false").lower() == "true"
 LIMITS_OPEN = os.getenv("LIMITS_OPEN", f"recipe={WEB_LIMIT_RECIPE}/1,daymenu={WEB_LIMIT_DAYMENU}/1,"
                                        f"week={WEB_LIMIT_WEEK}/3,missing={WEB_LIMIT_MISSING}/1")
-LIMITS_FREE = os.getenv("LIMITS_FREE", "recipe=2/1,daymenu=1/7,week=0/3,missing=2/1")
+LIMITS_FREE = os.getenv("LIMITS_FREE", "recipe=3/1,daymenu=1/7,week=0/3,missing=2/1")
 LIMITS_PREMIUM = os.getenv("LIMITS_PREMIUM", "recipe=6/1,daymenu=2/1,week=1/2,missing=10/1")
 LIMITS_ANON = os.getenv("LIMITS_ANON", "recipe=1/1,daymenu=0/1,week=0/3,missing=1/1")   # сайт без входа
 # Функции только для подписки (при PAYWALL_ENABLED): memory (профиль — аллергии и «не использовать», и полка:
@@ -127,6 +127,9 @@ PAYMENT_PROVIDER_TOKEN = os.getenv("PAYMENT_PROVIDER_TOKEN", "")
 # Кому из Telegram приходят тревоги (потолок, баланс DeepSeek) и кто может /grant: id через запятую
 ADMIN_TG_IDS = [int(x) for x in os.getenv("ADMIN_TG_IDS", "").replace(" ", "").split(",") if x.strip().lstrip("-").isdigit()]
 BOT_USERNAME = os.getenv("BOT_USERNAME", "Cookingvkusno_bot")
+# Вход партнёра (блогера) в админку: статистика, деньги, цены, лимиты, функции подписки, промокоды
+PARTNER_PASSWORD = os.getenv("PARTNER_PASSWORD", "")
+PARTNER_SHARE_PCT = int(os.getenv("PARTNER_SHARE_PCT", "50"))     # доля партнёра от выручки, %
 DEEPSEEK_BALANCE_ALERT_USD = float(os.getenv("DEEPSEEK_BALANCE_ALERT_USD", "3"))
 WEB_DAILY_LIMIT = int(os.getenv("WEB_DAILY_LIMIT", "12"))   # генераций в сутки на одно устройство
 WEB_DATA_DIR = os.getenv("WEB_DATA_DIR", "web_data")        # база и данные веба (отдельно от бота)

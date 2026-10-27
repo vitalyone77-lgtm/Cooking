@@ -15,6 +15,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 import accounts
 import config
 import plans
+import usage
 from states import ProfileForm
 from storage import reminders_enabled, set_reminders_enabled
 
@@ -92,7 +93,7 @@ def _profile_view(uid: int) -> tuple[str, InlineKeyboardMarkup]:
     b.button(text="✏️ Не использовать", callback_data="pf:edit:never")
     b.button(text="🏠 Моя полка", callback_data="pf:shelf")
     b.button(text="🌐 Открыть сайт", callback_data="pf:site")
-    if config.PAYWALL_ENABLED:
+    if plans.paywall():
         b.button(text="💎 Подписка", callback_data="pf:sub")
         b.button(text="🎟 Промокод", callback_data="pf:promo")
     b.button(text="🔕 Напоминания" if reminders_enabled(uid) else "🔔 Напоминания", callback_data="pf:rem")
@@ -101,7 +102,7 @@ def _profile_view(uid: int) -> tuple[str, InlineKeyboardMarkup]:
         b.button(text=f"🔓 Выйти на сайте ({devs})", callback_data="pf:unall")
     b.button(text="❓ Справка", callback_data="help:open")
     b.button(text="⬅️ Меню", callback_data="menu:open")
-    b.adjust(2, 2, *([2] if config.PAYWALL_ENABLED else []), 2 if devs else 1, 2)
+    b.adjust(2, 2, *([2] if plans.paywall() else []), 2 if devs else 1, 2)
     return "\n".join(lines), b.as_markup()
 
 
@@ -173,6 +174,7 @@ async def profile_edit(callback: CallbackQuery, state: FSMContext):
 @router.message(ProfileForm.allergies, F.text)
 async def profile_set_allergies(message: Message, state: FSMContext):
     accounts.set_profile(message.chat.id, allergies=message.text)
+    usage.event("profile_edit", message.chat.id)
     await message.answer("✅ Сохранил.", parse_mode=None)
     await show_profile(message, state)
 
@@ -180,6 +182,7 @@ async def profile_set_allergies(message: Message, state: FSMContext):
 @router.message(ProfileForm.never, F.text)
 async def profile_set_never(message: Message, state: FSMContext):
     accounts.set_profile(message.chat.id, never=message.text)
+    usage.event("profile_edit", message.chat.id)
     await message.answer("✅ Сохранил.", parse_mode=None)
     await show_profile(message, state)
 
@@ -309,6 +312,8 @@ async def handle_start_args(message: Message, args: str | None) -> bool:
 @router.callback_query(F.data.startswith("pf:lk:"))
 async def link_confirm(callback: CallbackQuery):
     dev = accounts.use_link_code(callback.data[6:], callback.message.chat.id)
+    if dev:
+        usage.event("site_link", callback.message.chat.id)
     await callback.answer()
     if dev:
         await callback.message.edit_text("✅ Готово! Сайт привязан к твоему профилю — избранное, профиль, полка и "
@@ -336,7 +341,7 @@ async def unlink_all(callback: CallbackQuery, state: FSMContext):
 def _sub_view(uid: int) -> tuple[str, InlineKeyboardMarkup]:
     lines = ["💎 *Подписка*", "", plans.status_text(uid), "",
              "Что даёт подписка:",
-             f"• {plans.LIMITS['premium'].get('recipe', (0, 1))[0]} блюд в день, меню на день и планы на 3 дня",
+             f"• {plans.limits_of('premium').get('recipe', (0, 1))[0]} блюд в день, меню на день и планы на 3 дня",
              "• замены продуктов, корзина ВкусВилла с ценами, PDF для чтения без интернета",
              "• сайт без рекламы, всё общее с ботом", ""]
     b = InlineKeyboardBuilder()
@@ -367,6 +372,7 @@ async def show_subscription(message: Message, edit: bool = False):
 @router.callback_query(F.data == "pf:sub")
 async def sub_open(callback: CallbackQuery, state: FSMContext):
     await state.clear()
+    usage.event("sub_view", callback.message.chat.id)
     await callback.answer()
     await show_subscription(callback.message, edit=True)
 
@@ -424,6 +430,7 @@ async def payment_done(message: Message):
     until = accounts.apply_payment(sp.telegram_payment_charge_id, uid, sp.total_amount, sp.currency, o["days"], o["key"])
     if until is None:
         return        # этот платёж уже зачислен (повторная доставка)
+    usage.event("payment", uid)
     await message.answer(f"🎉 Спасибо! Подписка действует до {time.strftime('%d.%m.%Y', time.localtime(until))}.",
                          parse_mode=None)
     for admin in config.ADMIN_TG_IDS:
@@ -459,6 +466,7 @@ async def promo_enter(message: Message, state: FSMContext):
         await message.answer("Этот промокод ты уже использовал 🙂", parse_mode=None)
     else:
         until = accounts.grant_days(message.chat.id, days, "promo:" + code.upper())
+        usage.event("promo", message.chat.id)
         await message.answer(f"🎉 Промокод принят! Полный доступ до {time.strftime('%d.%m.%Y', time.localtime(until))}.",
                              parse_mode=None)
     await show_profile(message)

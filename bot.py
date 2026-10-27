@@ -744,6 +744,7 @@ async def send_pdf(callback: CallbackQuery):
     if not items:
         await callback.answer("Нечего скачивать — открой рецепт или меню заново.", show_alert=True)
         return
+    usage.event("pdf", chat_id)
     await callback.answer("Готовлю PDF…")
     try:
         data = await asyncio.to_thread(web_pdf.build_pdf, items, config.WEB_APP_URL, title)
@@ -976,7 +977,7 @@ async def run_missing(callback: CallbackQuery, anchor: Message, ctx: str, names:
             await missing.rebuild_day(chat_id, names)
             await status.delete()
             view = day_menu.build_summary_view(chat_id)
-            await msg.answer("✅ Меню на день пересобрано без: " + ", ".join(names), parse_mode=None)
+            await msg.answer("✅ Заменил в меню на день: " + ", ".join(names) + ". Остальные блюда не трогал.", parse_mode=None)
             await msg.answer(view[0], reply_markup=view[1])
         elif ctx == "w":
             mode = await missing.adjust_plan(chat_id, names)
@@ -1704,6 +1705,7 @@ async def favorite_save(callback: CallbackQuery):
         await callback.answer("Не нашёл рецепт для сохранения, попробуй ещё раз получить его.", show_alert=True)
         return
     add_favorite(callback.message.chat.id, last["title"], last["text"], last["cuisine"])
+    usage.event("fav_save", callback.message.chat.id)
     await callback.answer("Добавлено в избранное ⭐")
 
 

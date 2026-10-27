@@ -3,7 +3,9 @@
 
 Под рецептом кнопка «👨‍🍳 Готовить по шагам» → сообщение «Шаг 2 из 6»: текст текущего шага, кнопка таймера
 для этого шага (если в нём есть время), «✅ Готово → дальше», «⬅️ Назад», ингредиенты и все шаги с галочками.
-Сработавший таймер — НОВОЕ сообщение (правка сообщения не издаёт звук), оно удаляется, когда шаг отмечен.
+Таймеров может идти несколько (у каждого шага свой: суп варится, пока режешь салат); кнопка таймера всегда
+показывает таймер ТЕКУЩЕГО шага. Сработавший таймер — НОВОЕ сообщение (правка сообщения не издаёт звук),
+оно удаляется, когда шаг отмечен.
 Сессия и таймер лежат в SQLite (accounts.sess) — после перезапуска бота продолжают работать (resume_timers).
 """
 import asyncio
@@ -19,6 +21,7 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMar
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 import accounts
+import usage
 import config
 import timers as tm
 
@@ -89,7 +92,8 @@ def render(s: dict) -> tuple[str, InlineKeyboardMarkup]:
     done = set(s.get("done", []))
     b = InlineKeyboardBuilder()
     lines = [f"👨‍🍳 {s['title'] or 'Готовим'}"]
-    t = s.get("timer")
+    _migrate_timer(s)
+    timers = {int(k): v for k, v in (s.get("timers") or {}).items() if v.get("end_max", v.get("end", 0)) > time.time()}
     if s.get("finished"):
         lines += ["", "🎉 Готово! Приятного аппетита!", "", f"Все шаги пройдены: {total} из {total}."]
         b.button(text="⬅️ К шагам", callback_data="ck:g:0")
@@ -97,9 +101,13 @@ def render(s: dict) -> tuple[str, InlineKeyboardMarkup]:
         b.adjust(2)
         return "\n".join(lines), b.as_markup()
     lines.append(f"Шаг {i + 1} из {total}   {_bar(len(done), total)}")
-    if t and t.get("end", 0) > time.time():
-        lines.append(f"⏱ Таймер шага {t['step'] + 1}: сигнал в {_clock(t['end'])}"
-                     + (f", максимум в {_clock(t['end_max'])}" if t.get("end_max", 0) > t["end"] else ""))
+    for k in sorted(timers):
+        t = timers[k]
+        if t["end"] > time.time():
+            lines.append(f"⏱ Шаг {k + 1}: сигнал в {_clock(t['end'])}"
+                         + (f", максимум в {_clock(t['end_max'])}" if t.get("end_max", 0) > t["end"] else ""))
+        else:
+            lines.append(f"⏱ Шаг {k + 1}: можно проверять, максимум в {_clock(t['end_max'])}")
     view = s.get("view", "step")
     if view == "ing":
         lines += ["", "🧾 Продукты:"] + ([f"• {x}" for x in s["ingredients"]] or ["список продуктов не найден"])
@@ -114,8 +122,8 @@ def render(s: dict) -> tuple[str, InlineKeyboardMarkup]:
             nxt = steps[i + 1]
             lines += ["", f"Дальше: {nxt[:90] + ('…' if len(nxt) > 90 else '')}"]
     rows = []
-    if t and t.get("end_max", t.get("end", 0)) > time.time():
-        rows.append([InlineKeyboardButton(text="⏹ Остановить таймер", callback_data="ck:ts")])
+    if i in timers:
+        rows.append([InlineKeyboardButton(text=f"⏹ Остановить таймер шага {i + 1}", callback_data=f"ck:ts:{i}")])
     else:
         times = tm.parse_times(steps[i])
         if times:
@@ -174,6 +182,7 @@ async def cook_start(callback: CallbackQuery):
         await callback.answer("Не нашёл шаги в этом рецепте.", show_alert=True)
         return
     await callback.answer()
+    usage.event("cook_start", callback.message.chat.id)
     s = {**r, "i": 0, "done": [], "view": "step"}
     text, markup = render(s)
     msg = await callback.message.answer(text, reply_markup=markup, parse_mode=None)
@@ -204,9 +213,11 @@ async def cook_done(callback: CallbackQuery):
     alerts = s.pop("alerts", [])
     if i + 1 < len(s["steps"]):
         s["i"] = i + 1
-        s["view"] = "step"
+        if s.get("view") != "all":     # в «Все шаги» остаёмся: галочка ставится, стрелка ▶️ идёт на следующий шаг
+            s["view"] = "step"
     else:
         s["finished"] = True
+        usage.event("cook_finish", callback.message.chat.id)
     _persist(callback, s)
     await _drop_alerts(callback.bot, callback.message.chat.id, alerts)
     await callback.answer()
@@ -221,7 +232,8 @@ async def cook_goto(callback: CallbackQuery):
     i = int(callback.data.split(":")[2])
     s["i"] = max(0, min(i, len(s["steps"]) - 1))
     s.pop("finished", None)
-    s["view"] = "step"
+    if s.get("view") != "all":
+        s["view"] = "step"
     _persist(callback, s)
     await callback.answer()
     await _show(callback, s)
@@ -243,9 +255,8 @@ async def cook_view(callback: CallbackQuery):
 async def cook_close(callback: CallbackQuery):
     key = _key(callback.message.chat.id, callback.message.message_id)
     s = accounts.sess_get(key) or {}
-    task = _tasks.pop(key, None)
-    if task:
-        task.cancel()
+    for tkey in [k for k in _tasks if k.startswith(key + ":")]:
+        _tasks.pop(tkey).cancel()
     accounts.sess_set(key, {})
     await _drop_alerts(callback.bot, callback.message.chat.id, s.get("alerts", []))
     await callback.answer("Закончили 👍")
@@ -255,7 +266,14 @@ async def cook_close(callback: CallbackQuery):
         await callback.message.edit_reply_markup()
 
 
-# ---------- таймер ----------
+# ---------- таймеры (у каждого шага свой) ----------
+
+def _migrate_timer(s: dict) -> None:
+    """Сессии прежней версии: один таймер в s["timer"] -> s["timers"][шаг]."""
+    t = s.pop("timer", None)
+    if t:
+        s.setdefault("timers", {})[str(t["step"])] = t
+
 
 @router.callback_query(F.data.startswith("ck:t:"))
 async def cook_timer(callback: CallbackQuery):
@@ -268,45 +286,53 @@ async def cook_timer(callback: CallbackQuery):
     except ValueError:
         await callback.answer()
         return
-    now = time.time()
-    s["timer"] = {"step": s["i"], "end": now + mn * 60, "end_max": now + mx * 60, "mn": mn, "mx": mx, "fired": 0}
+    _migrate_timer(s)
+    now, step = time.time(), s["i"]
+    usage.event("timer", callback.message.chat.id)
+    s.setdefault("timers", {})[str(step)] = {"step": step, "end": now + mn * 60, "end_max": now + mx * 60,
+                                             "mn": mn, "mx": mx, "fired": 0}
     key = _key(callback.message.chat.id, callback.message.message_id)
     _persist(callback, s)
-    _start_task(callback.bot, callback.message.chat.id, key, s)
-    await callback.answer(f"⏱ Таймер запущен: сигнал через {tm.fmt_min(mn)}")
+    _start_task(callback.bot, callback.message.chat.id, key, step)
+    await callback.answer(f"⏱ Таймер шага {step + 1}: сигнал через {tm.fmt_min(mn)}")
     await _show(callback, s)
 
 
-@router.callback_query(F.data == "ck:ts")
+@router.callback_query(F.data.startswith("ck:ts"))
 async def cook_timer_stop(callback: CallbackQuery):
     s = await _load(callback)
     if not s:
         return
+    _migrate_timer(s)
+    part = callback.data.split(":")
+    step = int(part[2]) if len(part) > 2 and part[2].isdigit() else s["i"]
     key = _key(callback.message.chat.id, callback.message.message_id)
-    task = _tasks.pop(key, None)
+    task = _tasks.pop(f"{key}:{step}", None)
     if task:
         task.cancel()
-    s.pop("timer", None)
+    (s.get("timers") or {}).pop(str(step), None)
     _persist(callback, s)
     await callback.answer("Таймер остановлен")
     await _show(callback, s)
 
 
-def _start_task(bot: Bot, chat_id: int, key: str, s: dict):
-    old = _tasks.pop(key, None)
+def _start_task(bot: Bot, chat_id: int, key: str, step: int):
+    tkey = f"{key}:{step}"
+    old = _tasks.pop(tkey, None)
     if old:
         old.cancel()
-    task = asyncio.create_task(_run_timer(bot, chat_id, key))
-    _tasks[key] = task
-    task.add_done_callback(lambda t, k=key: _tasks.pop(k, None) if _tasks.get(k) is t else None)
+    task = asyncio.create_task(_run_timer(bot, chat_id, key, step))
+    _tasks[tkey] = task
+    task.add_done_callback(lambda t, k=tkey: _tasks.pop(k, None) if _tasks.get(k) is t else None)
 
 
-async def _run_timer(bot: Bot, chat_id: int, key: str):
-    """Ждём до сигнала (и до максимума, если «5–6 мин»), каждый раз перечитывая сессию: её могли остановить."""
+async def _run_timer(bot: Bot, chat_id: int, key: str, step: int):
+    """Ждём до сигнала (и до максимума, если «5–6 мин»), каждый раз перечитывая сессию: таймер могли остановить."""
     try:
         while True:
             s = accounts.sess_get(key) or {}
-            t = s.get("timer")
+            _migrate_timer(s)
+            t = (s.get("timers") or {}).get(str(step))
             if not t:
                 return
             targets = [t["end"]] + ([t["end_max"]] if t.get("end_max", 0) > t["end"] else [])
@@ -316,21 +342,22 @@ async def _run_timer(bot: Bot, chat_id: int, key: str):
             if wait > 0:
                 await _timer_sleep(wait)
                 continue
-            n = t["step"] + 1
             if len(targets) == 2 and t["fired"] == 0:
-                text = f"⏰ Шаг {n}: прошло {tm.fmt_min(t['mn'])} — можно проверять (максимум {tm.fmt_min(t['mx'])})."
+                text = f"⏰ Шаг {step + 1}: прошло {tm.fmt_min(t['mn'])} — можно проверять (максимум {tm.fmt_min(t['mx'])})."
             else:
-                text = f"⏰ Шаг {n}: время вышло ({tm.fmt_min(t['mx'])})!"
+                text = f"⏰ Шаг {step + 1}: время вышло ({tm.fmt_min(t['mx'])})!"
             msg = await bot.send_message(chat_id, text, parse_mode=None)
             s = accounts.sess_get(key) or {}
-            if not s.get("timer"):
+            _migrate_timer(s)
+            cur = (s.get("timers") or {}).get(str(step))
+            if not cur:
                 return
-            s["timer"]["fired"] = t["fired"] + 1
+            cur["fired"] = t["fired"] + 1
             s.setdefault("alerts", []).append(msg.message_id)
-            if s["timer"]["fired"] >= len(targets):
-                s.pop("timer")
+            if cur["fired"] >= len(targets):
+                s["timers"].pop(str(step))
             accounts.sess_set(key, s)
-            try:      # убрать «⏹ Остановить таймер», когда всё отзвенело
+            try:      # обновить строку таймеров и кнопку, когда отзвенело
                 text2, markup = render(s)
                 await bot.edit_message_text(text2, chat_id=chat_id, message_id=int(key.split(":")[2]),
                                             reply_markup=markup, parse_mode=None)
@@ -339,16 +366,16 @@ async def _run_timer(bot: Bot, chat_id: int, key: str):
     except asyncio.CancelledError:
         raise
     except Exception:  # noqa: BLE001 — бот заблокирован и т.п.
-        logger.warning("Таймер готовки %s не сработал", key, exc_info=True)
+        logger.warning("Таймер готовки %s шаг %s не сработал", key, step, exc_info=True)
 
 
 def resume_timers(bot: Bot) -> int:
     """После перезапуска бота: снова запустить таймеры, которые ещё не отзвенели."""
     n = 0
     for key, s in accounts.sess_items("ck:"):
-        if s.get("timer"):
-            chat_id = int(key.split(":")[1])
-            _start_task(bot, chat_id, key, s)
+        _migrate_timer(s)
+        for step in (s.get("timers") or {}):
+            _start_task(bot, int(key.split(":")[1]), key, int(step))
             n += 1
     return n
 

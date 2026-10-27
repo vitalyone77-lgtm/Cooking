@@ -56,6 +56,11 @@ def _conn():
         c.execute("CREATE TABLE IF NOT EXISTS seen(uid TEXT PRIMARY KEY, ts REAL)")
         if "stage" not in {r[1] for r in c.execute("PRAGMA table_info(seen)")}:
             c.execute("ALTER TABLE seen ADD COLUMN stage INTEGER DEFAULT 0")   # сколько напоминаний с последнего визита
+        if "first" not in {r[1] for r in c.execute("PRAGMA table_info(seen)")}:
+            c.execute("ALTER TABLE seen ADD COLUMN first REAL")             # когда человек появился впервые
+            c.execute("UPDATE seen SET first = ts WHERE first IS NULL")
+        c.execute("CREATE TABLE IF NOT EXISTS events(name TEXT, uid TEXT, ts REAL)")   # какие функции используют
+        c.execute("CREATE INDEX IF NOT EXISTS events_ts ON events(ts, name)")
         if "ip" not in {r[1] for r in c.execute("PRAGMA table_info(gens)")}:
             c.execute("ALTER TABLE gens ADD COLUMN ip TEXT")
         c.execute("CREATE INDEX IF NOT EXISTS gens_acc ON gens(uid, kind, ts)")
@@ -91,7 +96,9 @@ def total_today() -> int:
 
 
 def cap_reached() -> bool:
-    return config.DAILY_GEN_CAP > 0 and total_today() >= config.DAILY_GEN_CAP
+    import plans
+    cap = int(plans.cfg("DAILY_GEN_CAP"))
+    return cap > 0 and total_today() >= cap
 
 
 def log(src: str, uid, kind: str, ip: str | None = None) -> int:
@@ -128,7 +135,7 @@ def _refusal(uid, kind: str, n: int, days: int) -> str:
         text = f"План на 3 дня можно составлять раз в {days} дн. 🙂 Текущий план открывается в «Готовых меню»."
     else:
         text = f"Лимит на {days} дн. исчерпан 🙂 Скоро снова будет доступно."
-    if anon and config.PAYWALL_ENABLED:
+    if anon and plans.paywall():
         text += " Войди через Telegram — подборов станет больше."
     elif plans.can_upsell(uid):
         text += " С подпиской 💎 — больше подборов каждый день."
@@ -143,15 +150,17 @@ def try_spend(uid, kind: str, src: str, ip: str | None = None) -> tuple[int | No
     import plans
     uid = str(uid)
     premium = plans.plan_of(uid) == "premium"
-    cap = config.DAILY_GEN_CAP
+    cap = int(plans.cfg("DAILY_GEN_CAP"))
     if cap > 0 and total_today() >= (cap * 3 // 2 if premium else cap):
         return None, CAP_TEXT
     if plans.is_anon(uid):
-        if config.DAILY_GEN_CAP_ANON > 0 and _count(
-                "SELECT COUNT(*) FROM gens WHERE uid LIKE 'w%' AND ts >= ?", (msk_midnight(),)) >= config.DAILY_GEN_CAP_ANON:
+        anon_cap = int(plans.cfg("DAILY_GEN_CAP_ANON"))
+        if anon_cap > 0 and _count(
+                "SELECT COUNT(*) FROM gens WHERE uid LIKE 'w%' AND ts >= ?", (msk_midnight(),)) >= anon_cap:
             return None, ANON_CAP_TEXT
-        if ip and config.WEB_IP_DAILY_GENS > 0 and _count(
-                "SELECT COUNT(*) FROM gens WHERE ip=? AND ts >= ?", (ip, msk_midnight())) >= config.WEB_IP_DAILY_GENS:
+        ip_cap = int(plans.cfg("WEB_IP_DAILY_GENS"))
+        if ip and ip_cap > 0 and _count(
+                "SELECT COUNT(*) FROM gens WHERE ip=? AND ts >= ?", (ip, msk_midnight())) >= ip_cap:
             return None, "С этого адреса сегодня уже было много подборов 🙂 Войди через Telegram или приходи завтра."
     notice = ""
     lim = plans.limit(uid, kind)
@@ -162,7 +171,8 @@ def try_spend(uid, kind: str, src: str, ip: str | None = None) -> tuple[int | No
             lim2 = plans.limit(uid, kind) if until else None
             if not lim2 or used(uid, kind, lim2[1]) >= lim2[0]:
                 return None, _refusal(uid, kind, n, days)
-            notice = TRIAL_TEXT.format(days=config.TRIAL_DAYS)
+            notice = TRIAL_TEXT.format(days=plans.cfg("TRIAL_DAYS"))
+            event("trial_start", uid)
     return log(src, uid, kind, ip), notice
 
 
@@ -179,8 +189,8 @@ def touch(chat_id) -> None:
     _seen_cache[chat_id] = now
     if len(_seen_cache) > 50000:
         _seen_cache.clear()
-    _q("INSERT INTO seen(uid, ts, stage) VALUES (?, ?, 0) "
-       "ON CONFLICT(uid) DO UPDATE SET ts = excluded.ts, stage = 0", (str(chat_id), now))
+    _q("INSERT INTO seen(uid, ts, stage, first) VALUES (?, ?, 0, ?) "
+       "ON CONFLICT(uid) DO UPDATE SET ts = excluded.ts, stage = 0", (str(chat_id), now, now))
 
 
 _seen_cache: dict = {}
@@ -199,7 +209,7 @@ def reminder_due(chat_id: int, gaps: list[int]) -> int | None:
     """
     row = _q("SELECT ts, stage FROM seen WHERE uid = ?", (str(chat_id),), one=True)
     if row is None:
-        _q("INSERT OR IGNORE INTO seen(uid, ts, stage) VALUES (?, ?, 0)", (str(chat_id), time.time()))
+        _q("INSERT OR IGNORE INTO seen(uid, ts, stage, first) VALUES (?, ?, 0, ?)", (str(chat_id), time.time(), time.time()))
         return None
     ts, stage = row[0], row[1] or 0
     if stage >= len(gaps):
@@ -212,3 +222,62 @@ def reminder_due(chat_id: int, gaps: list[int]) -> int | None:
 def mark_reminded(chat_id: int, n: int) -> None:
     """Напоминание n отправлено (сама отправка визитом не считается)."""
     _q("UPDATE seen SET stage = ? WHERE uid = ?", (n, str(chat_id)))
+
+
+# ---------- использование функций и статистика для админки ----------
+
+def event(name: str, uid) -> None:
+    """Отметить использование функции (режим готовки, список покупок, вход на сайт…) — для статистики."""
+    try:
+        _q("INSERT INTO events(name, uid, ts) VALUES (?, ?, ?)", (name, str(uid), time.time()))
+    except Exception:  # noqa: BLE001 — статистика не должна мешать работе
+        pass
+
+
+# примерная стоимость одного подбора ИИ, ₽ (замеры токенов DeepSeek, с запасом)
+GEN_COST_RUB = {"recipe": 0.3, "daymenu": 0.7, "week": 0.6, "weekday": 0.7, "missing": 0.3, "reminder": 0.3}
+
+
+def _rows(sql: str, args=()) -> list:
+    with _lock:
+        return _conn().execute(sql, args).fetchall()
+
+
+def admin_stats(days: int = 14) -> dict:
+    now = time.time()
+    start = msk_midnight(days - 1)
+    first_day = int((start + MSK) // 86400)
+    labels = [time.strftime("%d.%m", time.gmtime(start + MSK + i * 86400)) for i in range(days)]
+
+    def by_day(sql: str) -> list[int]:
+        out = [0] * days
+        for d, n in _rows(sql, (MSK, start)):
+            if 0 <= int(d) - first_day < days:
+                out[int(d) - first_day] = n
+        return out
+
+    def one(sql: str, *a) -> int:
+        return _rows(sql, a)[0][0]
+
+    def cost(since: float) -> float:
+        rows = _rows("SELECT kind, COUNT(*) FROM gens WHERE ts >= ? GROUP BY kind", (since,))
+        return round(sum(GEN_COST_RUB.get(k, 0.5) * n for k, n in rows), 1)
+    ev = _rows("SELECT name, COUNT(*), COUNT(DISTINCT uid) FROM events WHERE ts >= ? GROUP BY name", (now - 7 * 86400,))
+    return {
+        "labels": labels,
+        "gens_daily": by_day("SELECT CAST((ts + ?) / 86400 AS INT) d, COUNT(*) FROM gens WHERE ts >= ? GROUP BY d"),
+        "new_tg_daily": by_day("SELECT CAST((first + ?) / 86400 AS INT) d, COUNT(*) FROM seen "
+                               "WHERE first >= ? AND uid NOT LIKE 'w%' GROUP BY d"),
+        "active_gen_daily": by_day("SELECT CAST((ts + ?) / 86400 AS INT) d, COUNT(DISTINCT uid) FROM gens WHERE ts >= ? GROUP BY d"),
+        "tg_known": one("SELECT COUNT(*) FROM seen WHERE uid NOT LIKE 'w%'"),
+        "tg_active_1d": one("SELECT COUNT(*) FROM seen WHERE ts >= ? AND uid NOT LIKE 'w%'", now - 86400),
+        "tg_active_7d": one("SELECT COUNT(*) FROM seen WHERE ts >= ? AND uid NOT LIKE 'w%'", now - 7 * 86400),
+        "tg_active_30d": one("SELECT COUNT(*) FROM seen WHERE ts >= ? AND uid NOT LIKE 'w%'", now - 30 * 86400),
+        "gens_today": total_today(),
+        "gens_today_by_src": dict(_rows("SELECT src, COUNT(*) FROM gens WHERE ts >= ? GROUP BY src", (msk_midnight(),))),
+        "gens_30d_by_kind": dict(_rows("SELECT kind, COUNT(*) FROM gens WHERE ts >= ? GROUP BY kind", (msk_midnight(29),))),
+        "ai_cost_today": cost(msk_midnight()),
+        "ai_cost_7d": cost(msk_midnight(6)),
+        "ai_cost_30d": cost(msk_midnight(29)),
+        "features_7d": {name: {"times": t, "users": u} for name, t, u in ev},
+    }

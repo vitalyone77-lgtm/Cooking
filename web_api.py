@@ -281,7 +281,7 @@ def meta():
         "week_days": config.WEEK_MENU_DAYS,
         "limit": config.WEB_DAILY_LIMIT,
         "limits": {"recipe": config.WEB_LIMIT_RECIPE, "daymenu": config.WEB_LIMIT_DAYMENU, "week": config.WEB_LIMIT_WEEK},
-        "paywall": config.PAYWALL_ENABLED,
+        "paywall": plans.paywall(),
         "bot": config.BOT_USERNAME,
     }
 
@@ -463,6 +463,7 @@ def favorites_add(f: FavIn, x_device: str | None = Header(default=None)):
     cid = _uid(_dev(x_device))
     if len(fav_mod.get_favorites(cid)) >= 200:
         raise HTTPException(400, "Слишком много сохранённых рецептов (лимит 200)")
+    usage.event("fav_save", cid)
     return {"id": fav_mod.add_favorite(cid, f.title, f.text, f.cuisine)}
 
 
@@ -483,7 +484,7 @@ def me(x_device: str | None = Header(default=None)):
     uid = _uid(dev_id)
     memory = bool(tg) and plans.has_feature(uid, "memory")
     out = {"linked": bool(tg), "plan": plans.plan_of(uid), "status": plans.status_text(uid),
-           "paywall": config.PAYWALL_ENABLED, "memory": memory, "bot": config.BOT_USERNAME,
+           "paywall": plans.paywall(), "memory": memory, "bot": config.BOT_USERNAME,
            "favorites": len(fav_mod.get_favorites(uid))}
     if memory:
         out["profile"] = accounts.get_profile(uid)
@@ -516,7 +517,10 @@ class CodeIn(BaseModel):
 @app.post("/api/link/claim")
 def link_claim(body: CodeIn, x_device: str | None = Header(default=None)):
     """Сайт открыт по одноразовой ссылке из бота (?login=<код>)."""
-    if not accounts.claim_login_code(body.code, _dev(x_device)):
+    tg = accounts.claim_login_code(body.code, _dev(x_device))
+    if tg:
+        usage.event("site_link", tg)
+    if not tg:
         raise HTTPException(400, "Ссылка для входа устарела или уже использована — возьми новую в боте (Профиль → Открыть сайт).")
     return {"ok": True}
 
@@ -598,6 +602,7 @@ def api_pdf(body: PdfIn, x_device: str | None = Header(default=None)):
     except web_pdf.PdfUnavailable as e:
         raise HTTPException(501, f"PDF на сервере недоступен: {e}")
     web_db.log_event(dev_id, "pdf")
+    usage.event("pdf", _uid(dev_id))
     filename = _pdf_filename(body.name or body.items[0].title)
     return Response(
         pdf, media_type="application/pdf",
@@ -610,7 +615,7 @@ def api_pdf(body: PdfIn, x_device: str | None = Header(default=None)):
 
 @app.get("/api/ad")
 def get_ad(slot: str = "top", x_device: str | None = Header(default=None)):
-    if config.PAYWALL_ENABLED and "noads" in config.PREMIUM_FEATURES:
+    if plans.paywall() and "noads" in (plans.cfg("PREMIUM_FEATURES") or []):
         dev_id = web_db.device_id((x_device or "").strip())
         if dev_id and plans.plan_of(_uid(dev_id)) == "premium":
             return {"ad": None}
@@ -636,21 +641,34 @@ def go(ad_id: int):
 # ---------------- админка ----------------
 
 _login_fail: dict[str, list[float]] = {}
+ROLE_TITLES = {"owner": "владелец", "partner": "партнёр"}
 
 
-def _admin_cookie() -> str:
-    key = config.WEB_SECRET.encode()
-    return hmac.new(key, ("admin:" + config.ADMIN_PASSWORD).encode(), hashlib.sha256).hexdigest()
+def _role_password(role: str) -> str:
+    return {"owner": config.ADMIN_PASSWORD, "partner": config.PARTNER_PASSWORD}.get(role, "")
 
 
-def _need_admin(request: Request):
-    if not (config.ADMIN_PASSWORD and config.WEB_SECRET) or not hmac.compare_digest(request.cookies.get("adm", "").encode(), _admin_cookie().encode()):
-        raise HTTPException(401, "admin")
+def _admin_cookie(role: str) -> str:
+    """«роль.подпись»: подпись зависит от пароля роли — сменили пароль, и старые входы перестают работать."""
+    sig = hmac.new(config.WEB_SECRET.encode(), f"admin:{role}:{_role_password(role)}".encode(), hashlib.sha256).hexdigest()
+    return f"{role}.{sig}"
+
+
+def _need_admin(request: Request, owner: bool = False) -> str:
+    """Роль вошедшего: owner (владелец — всё) или partner (партнёр — статистика, цены, лимиты, промокоды, реклама)."""
+    raw = request.cookies.get("adm", "")
+    role = raw.split(".", 1)[0]
+    if (config.WEB_SECRET and _role_password(role) and role in ROLE_TITLES
+            and hmac.compare_digest(raw.encode(), _admin_cookie(role).encode())):
+        if owner and role != "owner":
+            raise HTTPException(403, "Это может менять только владелец")
+        return role
+    raise HTTPException(401, "admin")
 
 
 @app.post("/admin/login")
 async def admin_login(request: Request, response: Response):
-    ip = request.headers.get("x-forwarded-for", request.client.host if request.client else "?").split(",")[0].strip()
+    ip = _client_ip(request)
     fails = [t for t in _login_fail.get(ip, []) if time.time() - t < 600]
     if len(fails) >= 5:
         raise HTTPException(429, "Слишком много попыток, подожди 10 минут")
@@ -660,32 +678,157 @@ async def admin_login(request: Request, response: Response):
         raise HTTPException(400, "Неверный запрос")
     if not isinstance(body, dict):
         raise HTTPException(400, "Неверный запрос")
-    if not (config.ADMIN_PASSWORD and config.WEB_SECRET) or not hmac.compare_digest(str(body.get("password", "")).encode(), config.ADMIN_PASSWORD.encode()):
+    pw = str(body.get("password", "")).encode()
+    role = next((r for r in ("owner", "partner") if _role_password(r) and config.WEB_SECRET
+                 and hmac.compare_digest(pw, _role_password(r).encode())), None)
+    if not role:
         fails.append(time.time())
         _login_fail[ip] = fails
         _prune(_login_fail, 600)
         raise HTTPException(401, "Неверный пароль")
-    resp = JSONResponse({"ok": True})
-    resp.set_cookie("adm", _admin_cookie(), httponly=True, samesite="strict",
+    accounts.admin_log(role, "вход", ip)
+    resp = JSONResponse({"ok": True, "role": role})
+    resp.set_cookie("adm", _admin_cookie(role), httponly=True, samesite="strict",
                     secure=request.headers.get("x-forwarded-proto") == "https", max_age=30 * 86400)
     return resp
 
 
+@app.post("/admin/logout")
+def admin_logout():
+    resp = JSONResponse({"ok": True})
+    resp.delete_cookie("adm")
+    return resp
+
+
+def _settings_view() -> dict:
+    """Текущие настройки тарифов в удобном для формы виде (что можно менять — и кем)."""
+    plans.reload()
+    return {
+        "paywall": plans.paywall(),
+        "limits": {p: {k: list(v) for k, v in plans.limits_of(p).items()} for p in ("free", "premium", "anon")},
+        "features": list(plans.cfg("PREMIUM_FEATURES") or []),
+        "feature_titles": plans.FEATURE_TITLES,
+        "kind_titles": plans.KIND_TITLES,
+        "trial_days": int(plans.cfg("TRIAL_DAYS") or 0),
+        "offers": plans.offers(),
+        "promo": plans.promo_codes(),
+        "daily_cap": int(plans.cfg("DAILY_GEN_CAP")),
+        "anon_cap": int(plans.cfg("DAILY_GEN_CAP_ANON")),
+        "ip_cap": int(plans.cfg("WEB_IP_DAILY_GENS")),
+        "partner_share": int(plans.cfg("PARTNER_SHARE_PCT")),
+        "editable": {k: v[0] for k, v in plans.EDITABLE.items()},
+    }
+
+
 @app.get("/admin/api/stats")
-def admin_stats(request: Request):
-    _need_admin(request)
+async def admin_stats(request: Request):
+    role = _need_admin(request)
     out = web_db.stats(tg_users=len(get_all_users()))
-    out["subs"] = accounts.sub_stats()
+    out["role"] = role
+    out["usage"] = usage.admin_stats()
+    out["money"] = accounts.money_stats()
+    out["accounts"] = accounts.account_stats()
     out["refs"] = accounts.ref_stats()
-    out["gens_today"] = usage.total_today()
-    out["gen_cap"] = config.DAILY_GEN_CAP
+    out["promos"] = accounts.promo_stats()
+    out["settings"] = _settings_view()
+    out["bot"] = config.BOT_USERNAME
+    import alerts
+    out["deepseek_balance_usd"] = await alerts.deepseek_balance()
     return out
+
+
+def _limits_spec(d: dict) -> str:
+    parts = []
+    for kind in ("recipe", "daymenu", "week", "missing"):
+        n, days = (d.get(kind) or [0, 1])[:2]
+        parts.append(f"{kind}={max(0, min(int(n), 100))}/{max(1, min(int(days), 30))}")
+    return ",".join(parts)
+
+
+@app.post("/admin/api/settings")
+async def admin_settings(request: Request):
+    """Сохранить тарифы/лимиты/функции/промокоды. Потолки расходов, включение подписки и доля — только владелец."""
+    role = _need_admin(request)
+    try:
+        body = await request.json()
+        assert isinstance(body, dict)
+    except (ValueError, AssertionError):
+        raise HTTPException(400, "Неверный запрос")
+    new: dict = {}
+    try:
+        if "paywall" in body:
+            new["PAYWALL_ENABLED"] = bool(body["paywall"])
+        for key, name in (("daily_cap", "DAILY_GEN_CAP"), ("anon_cap", "DAILY_GEN_CAP_ANON"),
+                          ("ip_cap", "WEB_IP_DAILY_GENS"), ("trial_days", "TRIAL_DAYS")):
+            if key in body:
+                new[name] = max(0, min(int(body[key]), 100000))
+        if "partner_share" in body:
+            new["PARTNER_SHARE_PCT"] = max(0, min(int(body["partner_share"]), 100))
+        for plan, name in (("free", "LIMITS_FREE"), ("premium", "LIMITS_PREMIUM"), ("anon", "LIMITS_ANON")):
+            if plan in (body.get("limits") or {}):
+                new[name] = _limits_spec(body["limits"][plan])
+        if "features" in body:
+            new["PREMIUM_FEATURES"] = [f for f in body["features"] if f in plans.FEATURE_TITLES]
+        if "offers" in body:
+            rows = []
+            for o in body["offers"][:6]:
+                key = re.sub(r"[^a-z0-9_]", "", str(o.get("key", "")).lower())[:16]
+                days, rub, stars = int(o.get("days", 0)), int(o.get("rub", 0)), int(o.get("stars", 0))
+                if key and 1 <= days <= 3650 and rub >= 0 and stars >= 0:
+                    rows.append(f"{key}={days}:{rub}:{stars}")
+            new["PREMIUM_PLANS"] = ",".join(rows)
+        if "promo" in body:
+            rows = []
+            for code, days in (body["promo"] or {}).items():
+                code = re.sub(r"[^A-Za-z0-9_-]", "", str(code)).upper()[:32]
+                if code and 0 < int(days) <= 365:
+                    rows.append(f"{code}={int(days)}")
+            new["PROMO_CODES"] = ",".join(rows)
+    except (TypeError, ValueError, AttributeError):
+        raise HTTPException(400, "Проверь значения — где-то не число")
+    owner_only = [k for k in new if plans.EDITABLE[k][0] == "owner"]
+    if role != "owner":
+        # партнёр может прислать форму целиком — поля владельца молча не трогаем, если они не изменились
+        cur = {k: plans.cfg(k) for k in owner_only}
+        changed = [k for k in owner_only if new[k] != cur[k]]
+        if changed:
+            raise HTTPException(403, "Это может менять только владелец: " + ", ".join(changed))
+        for k in owner_only:
+            new.pop(k)
+    before = {k: plans.cfg(k) for k in new}
+    diff = {k: v for k, v in new.items() if v != before[k]}
+    if diff:
+        accounts.settings_set(diff, role)
+        accounts.admin_log(role, "настройки", "; ".join(f"{k}: {before[k]} → {v}" for k, v in diff.items()))
+    plans.reload()
+    return {"ok": True, "changed": list(diff), "settings": _settings_view()}
+
+
+class GrantIn(BaseModel):
+    uid: int
+    days: int = Field(ge=1, le=365)
+
+
+@app.post("/admin/api/grant")
+def admin_grant(body: GrantIn, request: Request):
+    """Выдать подписку вручную (например, блогеру или в подарок) — по id в Telegram."""
+    role = _need_admin(request)
+    until = accounts.grant_days(body.uid, body.days, f"admin:{role}")
+    accounts.admin_log(role, "подписка вручную", f"{body.uid}: +{body.days} дн.")
+    return {"until": until}
+
+
+@app.get("/admin/api/log")
+def admin_log_view(request: Request):
+    _need_admin(request)
+    return {"items": accounts.admin_log_list(200)}
 
 
 @app.post("/admin/api/ads")
 async def admin_ad_add(request: Request, slot: str = FForm(...), title: str = FForm(""), url: str = FForm(...),
                        image: UploadFile = File(...)):
-    _need_admin(request)
+    role = _need_admin(request)
+    accounts.admin_log(role, "реклама: новый баннер", url[:200])
     if slot not in ("top", "inline"):
         raise HTTPException(400, "slot")
     if not re.match(r"^https?://", url):

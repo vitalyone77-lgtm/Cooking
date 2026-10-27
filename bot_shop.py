@@ -14,6 +14,7 @@ from aiogram.exceptions import TelegramRetryAfter
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 import accounts
+import usage
 import plans
 from shopping import format_store_links
 from stores.links import DEFAULT_STORES, STORES
@@ -130,6 +131,7 @@ async def list_open(callback: CallbackQuery):
             st = {str(i): "h" for i in accounts.shelf_match(msg.chat.id, terms)}
         s = {"ctx": ctx, "terms": terms, "st": st, "mode": "b", "page": 0}
     _save(msg, s)
+    usage.event("list_open", msg.chat.id)
     await callback.answer("Выбери отметку сверху и нажимай на продукты")
     await _redraw(callback, s)
 
@@ -242,6 +244,7 @@ async def list_store_pick(callback: CallbackQuery):
     if not s:
         return
     rest = _remaining(s)
+    usage.event("store_links", callback.message.chat.id)
     if not rest:
         await callback.answer("Всё уже куплено или есть дома 🎉", show_alert=True)
         return
@@ -285,6 +288,7 @@ async def list_text(callback: CallbackQuery):
     home = [t for i, t in enumerate(s["terms"]) if st.get(str(i)) == "h"]
     if home:
         lines += ["", "🏠 Есть дома: " + ", ".join(home)]
+    usage.event("list_share", callback.message.chat.id)
     kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="✖ Убрать", callback_data="sl:tx:x")]])
     await callback.message.answer("\n".join(lines), reply_markup=kb, parse_mode=None)
 
@@ -295,6 +299,7 @@ async def list_replace(callback: CallbackQuery):
     if not s:
         return
     names = [t for i, t in enumerate(s["terms"]) if s["st"].get(str(i)) == "m"]
+    usage.event("list_replace", callback.message.chat.id)
     if not names:
         await callback.answer("Отметь ❌ продукты, которых нет в магазине.", show_alert=True)
         return

@@ -6,65 +6,211 @@
 <meta name="robots" content="noindex,nofollow">
 <title>Админка — Кухонный помощник</title>
 <style>
-:root{--bg:#F4F1EC;--s:#fff;--t:#2B2622;--m:#6B625A;--l:#E2DAD0;--p:#2F6B4F;--d:#A33A2B}
-@media (prefers-color-scheme:dark){:root{--bg:#171512;--s:#231F1B;--t:#F1EAE2;--m:#B5AA9E;--l:#39332D;--p:#7CC5A0;--d:#F0907F}}
+:root{--bg:#F4F1EC;--s:#fff;--t:#2B2622;--m:#6B625A;--l:#E2DAD0;--p:#2F6B4F;--d:#A33A2B;--soft:#E6F0EA}
+@media (prefers-color-scheme:dark){:root{--bg:#171512;--s:#231F1B;--t:#F1EAE2;--m:#B5AA9E;--l:#39332D;--p:#7CC5A0;--d:#F0907F;--soft:#24352C}}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--t);font:16px/1.5 -apple-system,Segoe UI,Roboto,Arial,sans-serif}
-.w{max-width:900px;margin:0 auto;padding:16px}h1{font-size:22px}h2{font-size:18px;margin:24px 0 8px}
-.g{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
-.c{background:var(--s);border:1px solid var(--l);border-radius:14px;padding:14px}.n{font-size:28px;font-weight:700}.k{color:var(--m);font-size:13px}
-input,select,button{font:inherit;padding:10px 12px;border-radius:10px;border:1.5px solid var(--l);background:var(--s);color:var(--t)}
+.w{max-width:1000px;margin:0 auto;padding:16px}h1{font-size:22px;margin:4px 0}h2{font-size:18px;margin:24px 0 8px}
+.top{display:flex;align-items:center;gap:12px;flex-wrap:wrap}.top .who{color:var(--m);font-size:14px;margin-left:auto}
+.tabs{display:flex;gap:6px;flex-wrap:wrap;margin:12px 0 16px}.tabs button{border-radius:99px}.tabs button[aria-pressed=true]{background:var(--p);color:#fff;border-color:var(--p)}
+.g{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px}
+.c{background:var(--s);border:1px solid var(--l);border-radius:14px;padding:14px}.n{font-size:26px;font-weight:700;line-height:1.2}.k{color:var(--m);font-size:13px}
+input,select,button,textarea{font:inherit;padding:8px 10px;border-radius:10px;border:1.5px solid var(--l);background:var(--s);color:var(--t)}
+input[type=number]{width:80px}input[disabled]{opacity:.55}
 button{cursor:pointer}.pri{background:var(--p);color:#fff;border-color:var(--p);font-weight:600}.dng{color:var(--d)}
-.bars{display:flex;align-items:flex-end;gap:4px;height:120px;background:var(--s);border:1px solid var(--l);border-radius:14px;padding:12px}
+.bars{display:flex;align-items:flex-end;gap:4px;height:120px;background:var(--s);border:1px solid var(--l);border-radius:14px;padding:22px 12px 12px}
 .bar{flex:1;background:var(--p);border-radius:4px 4px 0 0;min-height:2px;position:relative}.bar span{position:absolute;top:-18px;left:0;right:0;text-align:center;font-size:11px;color:var(--m)}
 .lab{display:flex;gap:4px;padding:0 12px;font-size:10px;color:var(--m)}.lab div{flex:1;text-align:center}
-table{width:100%;border-collapse:collapse;background:var(--s);border:1px solid var(--l);border-radius:14px;overflow:hidden}td,th{padding:8px 10px;border-bottom:1px solid var(--l);text-align:left;font-size:14px}
+.tbl{overflow-x:auto}table{width:100%;border-collapse:collapse;background:var(--s);border:1px solid var(--l);border-radius:14px;overflow:hidden}td,th{padding:8px 10px;border-bottom:1px solid var(--l);text-align:left;font-size:14px;vertical-align:middle}th{color:var(--m);font-weight:600}
 img.th{width:120px;max-height:60px;object-fit:cover;border-radius:6px}
-form.f{display:grid;gap:8px;background:var(--s);border:1px solid var(--l);border-radius:14px;padding:14px}
-.hide{display:none}.err{color:var(--d)}
+form.f,.box{display:grid;gap:8px;background:var(--s);border:1px solid var(--l);border-radius:14px;padding:14px}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.hide{display:none}.err{color:var(--d)}.ok{color:var(--p)}.note{color:var(--m);font-size:13px}
+.split{background:var(--soft);border-color:transparent}
+code{background:var(--soft);padding:2px 6px;border-radius:6px;font-size:13px}
 </style>
 </head>
 <body><div class="w">
 <div id="login" class="hide"><h1>Вход в админку</h1>
   <form class="f" id="lf"><input type="password" id="pw" placeholder="Пароль" autocomplete="current-password" required><button class="pri">Войти</button><div class="err" id="le"></div></form></div>
 <div id="app" class="hide">
-  <h1>Кухонный помощник — админка</h1>
-  <div class="g" id="cards"></div>
-  <h2>Уникальные посетители по дням</h2><div class="bars" id="bars"></div><div class="lab" id="lab"></div>
-  <h2>Реклама</h2>
-  <table><thead><tr><th>Баннер</th><th>Место</th><th>Показы</th><th>Клики</th><th>CTR</th><th></th></tr></thead><tbody id="ads"></tbody></table>
-  <h2>Добавить баннер</h2>
-  <form class="f" id="af">
-    <select name="slot"><option value="top">Сверху на странице «Создать» (рекомендуемо 640×120)</option><option value="inline">После рецепта и меню (640×200)</option></select>
-    <input name="title" placeholder="Подпись (для скринридеров), необязательно">
-    <input name="url" type="url" placeholder="Куда ведёт (https://…)" required>
-    <input name="image" type="file" accept="image/png,image/jpeg,image/webp,image/gif" required>
-    <button class="pri">Загрузить</button><div class="err" id="ae"></div>
-  </form>
-  <p class="k">Если в месте несколько активных баннеров — показываются случайно. Пусто — место не занимает экран.</p>
+  <div class="top"><h1>Кухонный помощник — админка</h1><span class="who" id="who"></span><button id="logout">Выйти</button></div>
+  <div class="tabs" id="tabs">
+    <button data-t="sum" aria-pressed="true">Сводка</button><button data-t="money">Деньги</button><button data-t="users">Пользователи и функции</button>
+    <button data-t="plans">Тарифы и лимиты</button><button data-t="ads">Реклама</button><button data-t="log">Журнал</button>
+  </div>
+
+  <section data-s="sum">
+    <div class="g" id="cards"></div>
+    <h2>Подборы ИИ по дням</h2><div class="bars" id="b-gens"></div><div class="lab" id="l-gens"></div>
+    <h2>Новые пользователи Telegram по дням</h2><div class="bars" id="b-new"></div><div class="lab" id="l-new"></div>
+    <h2>Посетители сайта по дням</h2><div class="bars" id="b-web"></div><div class="lab" id="l-web"></div>
+  </section>
+
+  <section data-s="money" class="hide">
+    <div class="g" id="m-cards"></div>
+    <h2>Раздел выручки</h2><div class="c split" id="m-split"></div>
+    <h2>По месяцам</h2><div class="tbl"><table><thead><tr><th>Месяц</th><th>Оплат</th><th>₽</th><th>⭐</th><th>Доля партнёра</th><th>Доля владельца</th></tr></thead><tbody id="m-months"></tbody></table></div>
+    <h2>Последние оплаты</h2><div class="tbl"><table><thead><tr><th>Когда</th><th>Пользователь</th><th>Сумма</th><th>Тариф</th></tr></thead><tbody id="m-recent"></tbody></table></div>
+    <h2>Ссылки для продвижения</h2><p class="note">Ссылка вида <code id="ref-example"></code> — все, кто пришёл по ней, видны здесь. Метку придумай любую (латиница, цифры, _ и -).</p>
+    <div class="tbl"><table><thead><tr><th>Метка</th><th>Пришли</th><th>Оплатили</th><th>Выручка</th></tr></thead><tbody id="m-refs"></tbody></table></div>
+    <h2>Промокоды — сколько раз использовали</h2><div class="tbl"><table><thead><tr><th>Код</th><th>Использовали</th></tr></thead><tbody id="m-promos"></tbody></table></div>
+    <h2>Выдать подписку вручную</h2>
+    <form class="f" id="gf"><div class="row"><input name="uid" type="number" placeholder="id в Telegram" style="width:180px" required><input name="days" type="number" value="30" min="1" max="365"> дней <button class="pri">Выдать</button></div><div id="ge" class="note"></div></form>
+  </section>
+
+  <section data-s="users" class="hide">
+    <div class="g" id="u-cards"></div>
+    <h2>Какими функциями пользуются (7 дней)</h2><div class="tbl"><table><thead><tr><th>Функция</th><th>Раз</th><th>Людей</th></tr></thead><tbody id="u-feat"></tbody></table></div>
+    <h2>Подборы ИИ за 30 дней по видам</h2><div class="tbl"><table><thead><tr><th>Вид</th><th>Подборов</th></tr></thead><tbody id="u-kinds"></tbody></table></div>
+    <h2>Активные пользователи (делали подборы) по дням</h2><div class="bars" id="b-act"></div><div class="lab" id="l-act"></div>
+  </section>
+
+  <section data-s="plans" class="hide">
+    <p class="note" id="p-role"></p>
+    <div class="box">
+      <label class="row"><input type="checkbox" id="s-paywall"> <strong>Подписка включена</strong> <span class="note">— выключено: у всех прежние лимиты, ничего не продаётся</span></label>
+    </div>
+    <h2>Лимиты по тарифам</h2>
+    <p class="note">«Сколько / за сколько дней». Например 1 / 7 — одно меню на день в неделю; 0 — недоступно в этом тарифе.</p>
+    <div class="tbl"><table><thead><tr><th></th><th>Без входа (сайт)</th><th>Бесплатный</th><th>Подписка</th></tr></thead><tbody id="s-limits"></tbody></table></div>
+    <h2>Что только в подписке</h2><div class="box" id="s-features"></div>
+    <h2>Цены</h2>
+    <div class="tbl"><table><thead><tr><th>Код</th><th>Дней</th><th>₽</th><th>⭐ звёзд</th><th></th></tr></thead><tbody id="s-offers"></tbody></table></div>
+    <div class="row" style="margin-top:8px"><button id="add-offer">+ тариф</button><span class="note">Пробный период: <input type="number" id="s-trial" min="0" max="60"> дней (включается сам при первом упоре в лимит, 0 — без пробного)</span></div>
+    <h2>Промокоды</h2>
+    <div class="tbl"><table><thead><tr><th>Код</th><th>Дней подписки</th><th></th></tr></thead><tbody id="s-promo"></tbody></table></div>
+    <div class="row" style="margin-top:8px"><button id="add-promo">+ промокод</button></div>
+    <h2>Защита и расходы <span class="note">(меняет владелец)</span></h2>
+    <div class="box">
+      <label class="row">Подборов ИИ в сутки на всех, потолок: <input type="number" id="s-cap" min="0"> <span class="note">≈ <span id="s-cap-rub"></span> ₽ в день максимум</span></label>
+      <label class="row">Из них для сайта без входа: <input type="number" id="s-anon" min="0"></label>
+      <label class="row">Подборов с одного IP (сайт без входа): <input type="number" id="s-ip" min="0"></label>
+      <label class="row">Доля партнёра от выручки: <input type="number" id="s-share" min="0" max="100"> %</label>
+    </div>
+    <div class="row" style="margin-top:12px"><button class="pri" id="save">Сохранить</button><span id="s-msg" class="note"></span></div>
+  </section>
+
+  <section data-s="ads" class="hide">
+    <div class="tbl"><table><thead><tr><th>Баннер</th><th>Место</th><th>Показы</th><th>Клики</th><th>CTR</th><th></th></tr></thead><tbody id="ads"></tbody></table></div>
+    <h2>Добавить баннер</h2>
+    <form class="f" id="af">
+      <select name="slot"><option value="top">Сверху на странице «Создать» (рекомендуемо 640×120)</option><option value="inline">После рецепта и меню (640×200)</option></select>
+      <input name="title" placeholder="Подпись (для скринридеров), необязательно">
+      <input name="url" type="url" placeholder="Куда ведёт (https://…)" required>
+      <input name="image" type="file" accept="image/png,image/jpeg,image/webp,image/gif" required>
+      <button class="pri">Загрузить</button><div class="err" id="ae"></div>
+    </form>
+    <p class="note">Если в месте несколько активных баннеров — показываются случайно. Подписчикам реклама не показывается, если «без рекламы» отмечено в подписке.</p>
+  </section>
+
+  <section data-s="log" class="hide">
+    <p class="note">Кто и когда входил и что менял — чтобы обоим партнёрам было видно все изменения.</p>
+    <div class="tbl"><table><thead><tr><th>Когда</th><th>Кто</th><th>Что</th><th>Подробности</th></tr></thead><tbody id="log"></tbody></table></div>
+  </section>
 </div></div>
 <script>
 function $(i){return document.getElementById(i);}
-function esc(s){return String(s).replace(/[&<>"]/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"}[c];});}
+function esc(s){return String(s==null?"":s).replace(/[&<>"]/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"}[c];});}
+function num(n){return (Math.round(n*10)/10).toLocaleString("ru-RU");}
+function dt(ts){var d=new Date(ts*1000);return d.toLocaleDateString("ru-RU")+" "+d.toLocaleTimeString("ru-RU",{hour:"2-digit",minute:"2-digit"});}
+function card(v,k){return '<div class="c"><div class="n">'+v+'</div><div class="k">'+k+'</div></div>';}
+function bars(id,labels,vals){var max=Math.max.apply(null,vals.concat([1]));
+  $("b-"+id).innerHTML=vals.map(function(n){return '<div class="bar" style="height:'+Math.round(n/max*100)+'%"><span>'+n+'</span></div>';}).join("");
+  $("l-"+id).innerHTML=labels.map(function(d){return '<div>'+esc(d)+'</div>';}).join("");}
+var FEAT={cook_start:"👨‍🍳 Готовить по шагам — начали",cook_finish:"🎉 Приготовили до конца",timer:"⏱ Таймеры",list_open:"🛒 Список покупок",
+  store_links:"🏪 Ссылки на магазин",list_replace:"🔄 Замена из списка",list_share:"📤 Список текстом",pdf:"📄 PDF",fav_save:"⭐ В избранное",
+  site_link:"🌐 Вход на сайт через Telegram",profile_edit:"👤 Профиль: аллергии / не использовать",promo:"🎟 Промокод",sub_view:"💎 Открыли «Подписку»",
+  trial_start:"🎁 Начали пробный период",payment:"💰 Оплата"};
+var KINDS={recipe:"Рецепт",daymenu:"Меню на день",week:"План на 3 дня",weekday:"День плана",missing:"Замена продуктов",reminder:"Напоминание"};
+var S=null, ROLE="";
+
 function load(){
   fetch("/admin/api/stats").then(function(r){
     if(r.status===401){$("login").className="";$("app").className="hide";return null;}
     return r.json();
-  }).then(function(s){
-    if(!s) return; $("login").className="hide";$("app").className="";
-    var g=s.generations,cards=[["Устройств всего",s.devices_total],["Новых за 24 ч",s.new_24h],["Новых за 7 дней",s.new_7d],["Активных за 24 ч",s.active_24h],["Активных за 7 дней",s.active_7d],["Активных за 30 дней",s.active_30d],["Пользователей Telegram-бота",s.tg_users],["Подборов за 24 ч",s.generations_24h],["Рецептов всего",g.recipe],["Меню на день",g.daymenu],["Планов",g.week],["ИИ сегодня / потолок",s.gens_today+" / "+s.gen_cap],["Подписок активно",s.subs.active],["Из них пробных",s.subs.trial_active],["Оплат",s.subs.payments],["Выручка (₽ или ⭐)",s.subs.revenue]];
-    $("cards").innerHTML=cards.map(function(c){return '<div class="c"><div class="n">'+c[1]+'</div><div class="k">'+c[0]+'</div></div>';}).join("");
-    $("cards").innerHTML+=(s.refs||[]).map(function(r){return '<div class="c"><div class="n">'+r.users+' / '+r.paid_users+'</div><div class="k">Ссылка ref_'+esc(r.ref)+': пришли / оплатили</div></div>';}).join("");
-    var max=Math.max.apply(null,s.daily.map(function(d){return d.n;}).concat([1]));
-    $("bars").innerHTML=s.daily.map(function(d){return '<div class="bar" style="height:'+Math.round(d.n/max*100)+'%"><span>'+d.n+'</span></div>';}).join("");
-    $("lab").innerHTML=s.daily.map(function(d){return '<div>'+d.date+'</div>';}).join("");
-    $("ads").innerHTML=s.ads.length?s.ads.map(function(a){var ctr=a.views?(a.clicks/a.views*100).toFixed(1)+"%":"—";
-      return '<tr><td><img class="th" src="/uploads/'+esc(a.image)+'" alt=""><br><small>'+esc(a.title||"")+'</small></td><td>'+esc(a.slot)+'</td><td>'+a.views+'</td><td>'+a.clicks+'</td><td>'+ctr+'</td><td><button data-t="'+a.id+'">'+(a.active?"Выключить":"Включить")+'</button> <button class="dng" data-d="'+a.id+'">Удалить</button></td></tr>';}).join(""):'<tr><td colspan="6">Баннеров пока нет</td></tr>';
-  });
+  }).then(function(s){if(!s)return;S=s;ROLE=s.role;$("login").className="hide";$("app").className="";render();loadLog();});
 }
-$("lf").onsubmit=function(e){e.preventDefault();fetch("/admin/login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({password:$("pw").value})}).then(function(r){if(!r.ok)return r.json().then(function(j){$("le").textContent=j.detail||"Ошибка";});$("pw").value="";load();});};
+function render(){
+  var s=S,u=s.usage,m=s.money,a=s.accounts,st=s.settings,month=(m.months[0]||{rub:0,stars:0});
+  $("who").textContent="Вы вошли как "+(ROLE==="owner"?"владелец":"партнёр");
+  var bal=s.deepseek_balance_usd;
+  $("cards").innerHTML=[
+    card(u.tg_known,"Пользователей Telegram (с учётом)"),card(u.tg_active_1d+" / "+u.tg_active_7d+" / "+u.tg_active_30d,"Активны: сутки / 7 дней / 30 дней"),
+    card(u.new_tg_daily[u.new_tg_daily.length-1],"Новых в Telegram сегодня"),card(s.devices_total,"Устройств на сайте всего"),
+    card(s.active_7d,"Сайт: активных за 7 дней"),card(a.linked_accounts,"Вошли на сайте через Telegram"),
+    card(u.gens_today+" / "+st.daily_cap,"Подборов ИИ сегодня / потолок"),card(num(u.ai_cost_today)+" ₽","Расходы на ИИ сегодня (оценка)"),
+    card(num(u.ai_cost_30d)+" ₽","Расходы на ИИ за 30 дней"),card(bal==null?"—":"$"+num(bal),"Баланс DeepSeek"),
+    card(m.active,"Активных подписок (всего)"),card(num(month.rub)+" ₽ / "+month.stars+" ⭐","Выручка в этом месяце")
+  ].join("");
+  bars("gens",u.labels,u.gens_daily);bars("new",u.labels,u.new_tg_daily);
+  bars("web",s.daily.map(function(d){return d.date;}),s.daily.map(function(d){return d.n;}));bars("act",u.labels,u.active_gen_daily);
+  var share=st.partner_share;
+  $("m-cards").innerHTML=[card(num(m.total_rub)+" ₽","Выручка в рублях за всё время"),card(m.total_stars+" ⭐","Выручка в звёздах за всё время"),
+    card(m.active_paid,"Оплаченных подписок сейчас"),card(m.active_trial,"Пробных сейчас"),card(m.active_promo,"По промокодам сейчас"),
+    card(m.trials_started,"Пробных начато всего"),card(m.trial_to_paid_pct+"%","Из пробного — оплатили"),card(m.expiring_7d,"Подписок кончается за 7 дней")].join("");
+  $("m-split").innerHTML='Доля партнёра <strong>'+share+'%</strong>, владельца <strong>'+(100-share)+'%</strong>. За всё время: партнёру <strong>'+num(m.total_rub*share/100)+' ₽</strong> и <strong>'+Math.floor(m.total_stars*share/100)+' ⭐</strong>, владельцу <strong>'+num(m.total_rub*(100-share)/100)+' ₽</strong> и <strong>'+Math.ceil(m.total_stars*(100-share)/100)+' ⭐</strong>. <span class="note">Расходы на ИИ и сервер здесь не вычитаются — договоритесь, делите ли выручку или прибыль.</span>';
+  $("m-months").innerHTML=m.months.length?m.months.map(function(x){return '<tr><td>'+x.month+'</td><td>'+x.count+'</td><td>'+num(x.rub)+'</td><td>'+x.stars+'</td><td>'+num(x.rub*share/100)+' ₽ · '+Math.floor(x.stars*share/100)+' ⭐</td><td>'+num(x.rub*(100-share)/100)+' ₽ · '+Math.ceil(x.stars*(100-share)/100)+' ⭐</td></tr>';}).join(""):'<tr><td colspan="6">Оплат пока нет</td></tr>';
+  $("m-recent").innerHTML=m.recent.length?m.recent.map(function(p){return '<tr><td>'+dt(p.ts)+'</td><td>'+esc(p.uid)+'</td><td>'+num(p.amount)+' '+(p.currency==="XTR"?"⭐":esc(p.currency))+'</td><td>'+esc(p.plan)+'</td></tr>';}).join(""):'<tr><td colspan="4">Оплат пока нет</td></tr>';
+  $("ref-example").textContent="https://t.me/"+s.bot+"?start=ref_blogger";
+  $("m-refs").innerHTML=s.refs.length?s.refs.map(function(r){return '<tr><td><code>ref_'+esc(r.ref)+'</code></td><td>'+r.users+'</td><td>'+r.paid_users+'</td><td>'+num(r.amount)+'</td></tr>';}).join(""):'<tr><td colspan="4">Пока никто не пришёл по ссылкам</td></tr>';
+  $("m-promos").innerHTML=s.promos.length?s.promos.map(function(p){return '<tr><td><code>'+esc(p.code)+'</code></td><td>'+p.used+'</td></tr>';}).join(""):'<tr><td colspan="2">Промокоды пока не использовали</td></tr>';
+  $("u-cards").innerHTML=[card(a.profiles,"Заполнили профиль (аллергии и т.п.)"),card(a.shelf_users,"Ведут полку"),card(a.favorites,"Рецептов в избранном"),
+    card(a.fav_users,"Людей с избранным"),card(a.linked_devices,"Устройств сайта привязано к Telegram"),
+    card(Object.keys(u.gens_today_by_src).map(function(k){return ({bot:"бот",web:"сайт",reminder:"напомин."}[k]||k)+" "+u.gens_today_by_src[k];}).join(" · ")||"0","Подборы сегодня: откуда")].join("");
+  var fk=Object.keys(u.features_7d).sort(function(x,y){return u.features_7d[y].times-u.features_7d[x].times;});
+  $("u-feat").innerHTML=fk.length?fk.map(function(k){return '<tr><td>'+esc(FEAT[k]||k)+'</td><td>'+u.features_7d[k].times+'</td><td>'+u.features_7d[k].users+'</td></tr>';}).join(""):'<tr><td colspan="3">Пока нет данных</td></tr>';
+  $("u-kinds").innerHTML=Object.keys(u.gens_30d_by_kind).map(function(k){return '<tr><td>'+esc(KINDS[k]||k)+'</td><td>'+u.gens_30d_by_kind[k]+'</td></tr>';}).join("")||'<tr><td colspan="2">Пока нет</td></tr>';
+  $("ads").innerHTML=s.ads.length?s.ads.map(function(a){var ctr=a.views?(a.clicks/a.views*100).toFixed(1)+"%":"—";
+    return '<tr><td><img class="th" src="/uploads/'+esc(a.image)+'" alt=""><br><small>'+esc(a.title||"")+'</small></td><td>'+esc(a.slot)+'</td><td>'+a.views+'</td><td>'+a.clicks+'</td><td>'+ctr+'</td><td><button data-at="'+a.id+'">'+(a.active?"Выключить":"Включить")+'</button> <button class="dng" data-ad="'+a.id+'">Удалить</button></td></tr>';}).join(""):'<tr><td colspan="6">Баннеров пока нет</td></tr>';
+  renderSettings(st);
+}
+function renderSettings(st){
+  var owner=ROLE==="owner";
+  $("p-role").textContent=owner?"Вы владелец — можно менять всё. Изменения доходят до бота и сайта примерно за 15 секунд.":
+    "Вы партнёр: можно менять цены, лимиты, функции подписки, пробный период и промокоды. Включение подписки, потолок расходов и доли меняет владелец. Изменения доходят до бота и сайта примерно за 15 секунд.";
+  $("s-paywall").checked=st.paywall;$("s-paywall").disabled=!owner;
+  var kinds=["recipe","daymenu","week","missing"];
+  $("s-limits").innerHTML=kinds.map(function(k){return '<tr><td>'+esc(st.kind_titles[k]||k)+'</td>'+["anon","free","premium"].map(function(p){var v=(st.limits[p]||{})[k]||[0,1];
+    return '<td><input type="number" min="0" max="100" data-lim="'+p+':'+k+':n" value="'+v[0]+'"> / <input type="number" min="1" max="30" data-lim="'+p+':'+k+':d" value="'+v[1]+'"> дн.</td>';}).join("")+'</tr>';}).join("");
+  $("s-features").innerHTML=Object.keys(st.feature_titles).map(function(f){return '<label class="row"><input type="checkbox" data-feat="'+f+'"'+(st.features.indexOf(f)>=0?" checked":"")+'> '+esc(st.feature_titles[f])+'</label>';}).join("")+
+    '<p class="note">Неотмеченное доступно всем бесплатно. Режим готовки, список покупок и таймеры — всегда бесплатно.</p>';
+  $("s-offers").innerHTML=st.offers.map(offerRow).join("");
+  $("s-trial").value=st.trial_days;
+  $("s-promo").innerHTML=Object.keys(st.promo).map(function(c){return promoRow(c,st.promo[c]);}).join("");
+  $("s-cap").value=st.daily_cap;$("s-anon").value=st.anon_cap;$("s-ip").value=st.ip_cap;$("s-share").value=st.partner_share;
+  ["s-cap","s-anon","s-ip","s-share"].forEach(function(i){$(i).disabled=!owner;});
+  $("s-cap-rub").textContent=num(st.daily_cap*0.5);
+}
+function offerRow(o){return '<tr data-offer><td><input data-o="key" value="'+esc(o.key)+'" style="width:100px"></td><td><input type="number" data-o="days" value="'+o.days+'"></td><td><input type="number" data-o="rub" value="'+o.rub+'"></td><td><input type="number" data-o="stars" value="'+o.stars+'"></td><td><button class="dng" data-rm>✕</button></td></tr>';}
+function promoRow(c,d){return '<tr data-promo><td><input data-p="code" value="'+esc(c)+'" style="width:160px"></td><td><input type="number" data-p="days" value="'+d+'"></td><td><button class="dng" data-rm>✕</button></td></tr>';}
+function collect(){
+  var limits={};Array.prototype.forEach.call(document.querySelectorAll("[data-lim]"),function(i){var p=i.getAttribute("data-lim").split(":");
+    limits[p[0]]=limits[p[0]]||{};limits[p[0]][p[1]]=limits[p[0]][p[1]]||[0,1];limits[p[0]][p[1]][p[2]==="n"?0:1]=parseInt(i.value||"0",10);});
+  var offers=Array.prototype.map.call(document.querySelectorAll("[data-offer]"),function(r){var o={};Array.prototype.forEach.call(r.querySelectorAll("[data-o]"),function(i){o[i.getAttribute("data-o")]=i.getAttribute("data-o")==="key"?i.value:parseInt(i.value||"0",10);});return o;});
+  var promo={};Array.prototype.forEach.call(document.querySelectorAll("[data-promo]"),function(r){var c=r.querySelector('[data-p="code"]').value.trim();if(c)promo[c]=parseInt(r.querySelector('[data-p="days"]').value||"0",10);});
+  var body={limits:limits,offers:offers,promo:promo,trial_days:parseInt($("s-trial").value||"0",10),
+    features:Array.prototype.filter.call(document.querySelectorAll("[data-feat]"),function(i){return i.checked;}).map(function(i){return i.getAttribute("data-feat");})};
+  if(ROLE==="owner"){body.paywall=$("s-paywall").checked;body.daily_cap=parseInt($("s-cap").value,10);body.anon_cap=parseInt($("s-anon").value,10);body.ip_cap=parseInt($("s-ip").value,10);body.partner_share=parseInt($("s-share").value,10);}
+  return body;
+}
+function loadLog(){fetch("/admin/api/log").then(function(r){return r.json();}).then(function(j){
+  $("log").innerHTML=j.items.length?j.items.map(function(x){return '<tr><td>'+dt(x.ts)+'</td><td>'+(x.who==="owner"?"владелец":x.who==="partner"?"партнёр":esc(x.who))+'</td><td>'+esc(x.action)+'</td><td>'+esc(x.details)+'</td></tr>';}).join(""):'<tr><td colspan="4">Пока пусто</td></tr>';});}
+
+$("lf").onsubmit=function(e){e.preventDefault();$("le").textContent="";fetch("/admin/login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({password:$("pw").value})}).then(function(r){if(!r.ok)return r.json().then(function(j){$("le").textContent=j.detail||"Ошибка";});$("pw").value="";load();});};
+$("logout").onclick=function(){fetch("/admin/logout",{method:"POST"}).then(function(){location.reload();});};
 $("af").onsubmit=function(e){e.preventDefault();$("ae").textContent="";fetch("/admin/api/ads",{method:"POST",body:new FormData($("af"))}).then(function(r){if(!r.ok)return r.json().then(function(j){$("ae").textContent=j.detail||"Ошибка";});$("af").reset();load();});};
+$("gf").onsubmit=function(e){e.preventDefault();var f=new FormData($("gf"));fetch("/admin/api/grant",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({uid:parseInt(f.get("uid"),10),days:parseInt(f.get("days"),10)})}).then(function(r){return r.json().then(function(j){$("ge").textContent=r.ok?"Готово: подписка до "+new Date(j.until*1000).toLocaleDateString("ru-RU"):(j.detail||"Ошибка");if(r.ok)loadLog();});});};
+$("add-offer").onclick=function(){$("s-offers").insertAdjacentHTML("beforeend",offerRow({key:"",days:30,rub:0,stars:0}));};
+$("add-promo").onclick=function(){$("s-promo").insertAdjacentHTML("beforeend",promoRow("",14));};
+$("save").onclick=function(){var b=$("save");b.disabled=true;$("s-msg").textContent="";
+  fetch("/admin/api/settings",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(collect())}).then(function(r){return r.json().then(function(j){
+    b.disabled=false;if(!r.ok){$("s-msg").innerHTML='<span class="err">'+esc(j.detail||"Ошибка")+'</span>';return;}
+    S.settings=j.settings;renderSettings(j.settings);loadLog();$("s-msg").innerHTML='<span class="ok">'+(j.changed.length?"Сохранено ✓":"Изменений нет")+'</span>';});}).catch(function(){b.disabled=false;$("s-msg").textContent="Нет связи";});};
 document.addEventListener("click",function(e){var b=e.target.closest("button");if(!b)return;
-  if(b.dataset.t)fetch("/admin/api/ads/"+b.dataset.t+"/toggle",{method:"POST"}).then(load);
-  if(b.dataset.d&&confirm("Удалить баннер?"))fetch("/admin/api/ads/"+b.dataset.d,{method:"DELETE"}).then(load);});
+  if(b.dataset.t){Array.prototype.forEach.call(document.querySelectorAll("#tabs button"),function(x){x.setAttribute("aria-pressed",x===b);});
+    Array.prototype.forEach.call(document.querySelectorAll("section[data-s]"),function(sec){sec.classList.toggle("hide",sec.getAttribute("data-s")!==b.dataset.t);});return;}
+  if(b.hasAttribute("data-rm")){b.closest("tr").remove();return;}
+  if(b.dataset.at)fetch("/admin/api/ads/"+b.dataset.at+"/toggle",{method:"POST"}).then(load);
+  if(b.dataset.ad&&confirm("Удалить баннер?"))fetch("/admin/api/ads/"+b.dataset.ad,{method:"DELETE"}).then(load);});
 load();
 </script></body></html>
