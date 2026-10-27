@@ -228,7 +228,7 @@ def _prune(log: dict[str, list[float]], window: float) -> None:
 
 _ip_var: contextvars.ContextVar = contextvars.ContextVar("client_ip", default=None)
 _rate: dict[str, deque] = {}
-API_RATE_PER_MIN = 240     # запросов к /api в минуту с одного IP (опрос задачи — 30 в минуту)
+API_RATE_PER_MIN = 600     # запросов к /api в минуту с одного IP (за одним IP мобильного оператора — много людей)
 
 
 def _client_ip(request: Request) -> str:
@@ -239,7 +239,7 @@ def _client_ip(request: Request) -> str:
 async def _ip_and_rate(request: Request, call_next):
     ip = _client_ip(request)
     _ip_var.set(ip)
-    if request.url.path.startswith("/api/"):
+    if request.url.path.startswith("/api/") and not request.url.path.startswith("/api/job/"):   # опрос задачи — не в счёт
         now = time.time()
         q = _rate.setdefault(ip, deque())
         while q and now - q[0] > 60:

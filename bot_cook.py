@@ -14,6 +14,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from aiogram import Bot, F, Router
+from aiogram.exceptions import TelegramRetryAfter
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
@@ -145,6 +146,8 @@ async def _show(callback: CallbackQuery, s: dict):
     text, markup = render(s)
     try:
         await callback.message.edit_text(text, reply_markup=markup, parse_mode=None)
+    except TelegramRetryAfter:
+        pass          # слишком быстро нажимают — шаг сохранён, нарисуется со следующим нажатием
     except Exception as e:  # noqa: BLE001 — «message is not modified» при двойном нажатии
         if "not modified" not in str(e):
             raise

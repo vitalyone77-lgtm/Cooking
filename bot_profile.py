@@ -94,8 +94,11 @@ def _profile_view(uid: int) -> tuple[str, InlineKeyboardMarkup]:
         b.button(text="🎟 Промокод", callback_data="pf:promo")
     b.button(text="🔕 Выключить напоминания" if reminders_enabled(uid) else "🔔 Включить напоминания",
              callback_data="pf:rem")
+    devs = accounts.devices_of(uid)
+    if devs:
+        b.button(text=f"🔓 Выйти на сайте ({devs})", callback_data="pf:unall")
     b.button(text="⬅️ Меню", callback_data="menu:open")
-    b.adjust(2, 2, *( [2] if config.PAYWALL_ENABLED else [] ), 1, 1)
+    b.adjust(2, 2, *([2] if config.PAYWALL_ENABLED else []), 1, *([1] if devs else []), 1)
     return "\n".join(lines), b.as_markup()
 
 
@@ -278,13 +281,18 @@ async def handle_start_args(message: Message, args: str | None) -> bool:
         return False
     uid = message.chat.id
     if args.startswith("link_"):
-        dev = accounts.use_link_code(args[5:], uid)
-        if dev:
-            await message.answer("✅ Готово! Сайт привязан к твоему профилю — избранное, профиль, полка и подписка "
-                                 "теперь общие. Можно вернуться в браузер.", parse_mode=None)
-        else:
+        code = args[5:]
+        if not accounts.link_code_valid(code):
             await message.answer("😔 Ссылка для входа устарела или уже использована. Нажми «Войти через Telegram» "
                                  "на сайте ещё раз.", parse_mode=None)
+            return True
+        b = InlineKeyboardBuilder()
+        b.button(text="✅ Да, войти на сайте", callback_data=f"pf:lk:{code}")
+        b.button(text="Нет", callback_data="pf:lkno")
+        b.adjust(1)
+        await message.answer("🌐 Войти на сайте под твоим профилем?\n\nЕсли ты сам только что нажал «Войти через "
+                             "Telegram» на сайте — подтверждай. Если ссылку тебе кто-то прислал — нажми «Нет»: "
+                             "иначе он получит доступ к твоему профилю.", reply_markup=b.as_markup(), parse_mode=None)
         return True
     if args.startswith("ref_"):
         accounts.set_ref(uid, args[4:])
@@ -293,6 +301,31 @@ async def handle_start_args(message: Message, args: str | None) -> bool:
         await show_subscription(message)
         return True
     return False
+
+
+@router.callback_query(F.data.startswith("pf:lk:"))
+async def link_confirm(callback: CallbackQuery):
+    dev = accounts.use_link_code(callback.data[6:], callback.message.chat.id)
+    await callback.answer()
+    if dev:
+        await callback.message.edit_text("✅ Готово! Сайт привязан к твоему профилю — избранное, профиль, полка и "
+                                         "подписка теперь общие. Можно вернуться в браузер.", parse_mode=None)
+    else:
+        await callback.message.edit_text("😔 Ссылка для входа устарела. Нажми «Войти через Telegram» на сайте ещё раз.",
+                                         parse_mode=None)
+
+
+@router.callback_query(F.data == "pf:lkno")
+async def link_reject(callback: CallbackQuery):
+    await callback.answer()
+    await callback.message.edit_text("Хорошо, вход отменён.", parse_mode=None)
+
+
+@router.callback_query(F.data == "pf:unall")
+async def unlink_all(callback: CallbackQuery, state: FSMContext):
+    n = accounts.unlink_all(callback.message.chat.id)
+    await callback.answer(f"Отвязано устройств: {n}", show_alert=True)
+    await show_profile(callback.message, state, edit=True)
 
 
 # ---------- подписка и оплата ----------
@@ -385,9 +418,9 @@ async def payment_done(message: Message):
         logger.error("Оплата с непонятным payload %r", sp.invoice_payload)
         return
     o, uid = parsed
-    if not accounts.record_payment(sp.telegram_payment_charge_id, uid, sp.total_amount, sp.currency, o["days"], o["key"]):
+    until = accounts.apply_payment(sp.telegram_payment_charge_id, uid, sp.total_amount, sp.currency, o["days"], o["key"])
+    if until is None:
         return        # этот платёж уже зачислен (повторная доставка)
-    until = accounts.grant_days(uid, o["days"], "payment")
     await message.answer(f"🎉 Спасибо! Подписка действует до {time.strftime('%d.%m.%Y', time.localtime(until))}.",
                          parse_mode=None)
     for admin in config.ADMIN_TG_IDS:
@@ -396,6 +429,13 @@ async def payment_done(message: Message):
                                                   f"пользователь {uid}", parse_mode=None)
         except Exception:  # noqa: BLE001
             pass
+
+
+@router.message(Command("paysupport"))
+async def cmd_paysupport(message: Message):
+    """Обязательная для оплаты звёздами команда поддержки по платежам."""
+    await message.answer("💬 Вопросы по оплате и возврату: напиши сюда, в этот чат, что случилось и когда платил — "
+                         "мы ответим и при необходимости вернём деньги. Статус подписки — /profile.", parse_mode=None)
 
 
 @router.callback_query(F.data == "pf:promo")

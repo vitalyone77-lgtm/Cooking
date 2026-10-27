@@ -10,6 +10,7 @@
 import logging
 
 from aiogram import F, Router
+from aiogram.exceptions import TelegramRetryAfter
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 import accounts
@@ -105,6 +106,8 @@ async def _redraw(callback: CallbackQuery, s: dict):
     _save(callback.message, s)
     try:
         await callback.message.edit_reply_markup(reply_markup=checklist_kb(s))
+    except TelegramRetryAfter:
+        pass          # слишком быстро нажимают — отметка сохранена, нарисуется со следующим нажатием
     except Exception as e:  # noqa: BLE001
         if "not modified" not in str(e):
             raise

@@ -248,6 +248,22 @@ def claim_login_code(code: str, dev_id: int) -> int | None:
             c.close()
 
 
+def link_code_valid(code: str) -> bool:
+    """Код входа с сайта ещё действует и не использован (для кнопки подтверждения в боте)."""
+    row = _q("SELECT 1 FROM link_codes WHERE code=? AND tg_id IS NULL AND dev_id >= 0 AND created >= ?",
+             (code[:64], time.time() - LINK_CODE_TTL), one=True)
+    return bool(row)
+
+
+def unlink_all(tg_id: int) -> int:
+    """Отвязать от аккаунта все устройства сайта (например, если входили по чужой ссылке)."""
+    return _q("DELETE FROM links WHERE tg_id=?", (tg_id,))
+
+
+def devices_of(tg_id: int) -> int:
+    return _q("SELECT COUNT(*) FROM links WHERE tg_id=?", (tg_id,), one=True)[0]
+
+
 def link_code_status(code: str, dev_id: int) -> bool:
     """Сайт опрашивает: код уже подтвердили в боте?"""
     row = _q("SELECT tg_id FROM link_codes WHERE code=? AND dev_id=?", (code, dev_id), one=True)
@@ -316,6 +332,27 @@ def record_payment(charge_id: str, uid, amount: int, currency: str, days: int, p
         return True
     except sqlite3.IntegrityError:
         return False
+
+
+def apply_payment(charge_id: str, uid, amount: int, currency: str, days: int, plan: str) -> float | None:
+    """Зачислить платёж и продлить подписку ОДНОЙ транзакцией (сбой посередине не «съест» деньги).
+    None — этот платёж уже зачислен (Telegram может прислать его повторно)."""
+    with _lock:
+        c = _conn()
+        try:
+            with c:
+                try:
+                    c.execute("INSERT INTO payments(charge_id, uid, amount, currency, days, plan, ts) VALUES(?,?,?,?,?,?,?)",
+                              (charge_id, str(uid), amount, currency, days, plan, time.time()))
+                except sqlite3.IntegrityError:
+                    return None
+                row = c.execute("SELECT until FROM subs WHERE uid=?", (str(uid),)).fetchone()
+                until = max(time.time(), (row[0] or 0) if row else 0) + days * 86400
+                c.execute("INSERT INTO subs(uid, until, source) VALUES(?,?,?) ON CONFLICT(uid) DO UPDATE SET "
+                          "until=excluded.until, source=excluded.source", (str(uid), until, "payment"))
+                return until
+        finally:
+            c.close()
 
 
 def use_promo(uid, code: str) -> bool:

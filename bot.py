@@ -12,7 +12,7 @@ from collections import OrderedDict
 from aiogram import Bot, Dispatcher, F, Router
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
-from aiogram.exceptions import TelegramBadRequest
+from aiogram.exceptions import TelegramBadRequest, TelegramRetryAfter
 from aiogram.filters import CommandStart, Command, CommandObject, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.storage.memory import MemoryStorage
@@ -46,6 +46,7 @@ from stores.basket import build_priced_basket
 from tg_safety import SafeSendMiddleware, OneHeavyAtATime, FloodGuard
 import usage
 import bot_profile
+import plans
 import bot_cook
 import bot_shop
 import accounts
@@ -73,6 +74,9 @@ dp.callback_query.outer_middleware(OneHeavyAtATime())   # двойной тап 
 @dp.errors()
 async def on_error(event: ErrorEvent):
     """Любая непойманная ошибка в обработчике: пишем в лог и коротко сообщаем пользователю, а не молчим."""
+    if isinstance(event.exception, TelegramRetryAfter):
+        logger.warning("Telegram просит подождать %s с", event.exception.retry_after)
+        return True        # ограничение частоты: сообщение «что-то пошло не так» тоже упрётся в него
     logger.exception("Ошибка при обработке обновления", exc_info=event.exception)
     upd = event.update
     chat_id = None
@@ -236,6 +240,9 @@ def resolve_shopping_amounts(message: Message, ctx: str) -> dict[str, int]:
 async def shop_cart(callback: CallbackQuery):
     """Собирает корзину во ВкусВилле: подбирает товары и упаковки, считает цену, даёт ссылку «открыть корзину»."""
     ctx = callback.data.split(":", 2)[2]
+    if not plans.has_feature(callback.message.chat.id, "cart"):
+        await callback.answer("Корзина с ценами — в подписке 💎 (Профиль → Подписка)", show_alert=True)
+        return
     amounts = resolve_shopping_amounts(callback.message, ctx)
     if not amounts:
         await callback.answer("В рецепте нет продуктов с количеством — собрать корзину не из чего.", show_alert=True)
@@ -693,6 +700,9 @@ def _pdf_items(chat_id: int, ctx: str, message: Message) -> tuple[list[dict], st
 async def send_pdf(callback: CallbackQuery):
     ctx = callback.data.split(":", 1)[1]
     chat_id = callback.message.chat.id
+    if not plans.has_feature(chat_id, "pdf"):
+        await callback.answer("PDF — в подписке 💎 (Профиль → Подписка)", show_alert=True)
+        return
     items, title = _pdf_items(chat_id, ctx, callback.message) if ctx in ("r", "d", "w") else ([], "")
     items = [i for i in items if i.get("text", "").strip()]
     if not items:

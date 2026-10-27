@@ -100,7 +100,7 @@ REMINDER_GAPS = [int(x) for x in os.getenv("REMINDER_GAPS", "4,6").split(",") if
 # устройства не может съесть запас пользователей Telegram и подписчиков
 DAILY_GEN_CAP_ANON = int(os.getenv("DAILY_GEN_CAP_ANON", "150"))
 # Генераций в сутки с одного IP для сайта без входа (сколько бы устройств с него ни создали)
-WEB_IP_DAILY_GENS = int(os.getenv("WEB_IP_DAILY_GENS", "8"))
+WEB_IP_DAILY_GENS = int(os.getenv("WEB_IP_DAILY_GENS", "40"))   # у мобильных операторов за одним IP много людей
 
 # ---------------------------------------------------------------------------
 # Подписка (plans.py). Пока PAYWALL_ENABLED=false — у всех лимиты LIMITS_OPEN, как раньше.

@@ -99,7 +99,7 @@ class OneHeavyAtATime(BaseMiddleware):
 import time
 from collections import deque
 
-FLOOD_MAX = 25        # не больше 25 нажатий/сообщений
+FLOOD_MAX = 40        # не больше 40 нажатий/сообщений (список покупок отмечают быстро)
 FLOOD_WINDOW = 10     # за 10 секунд от одного человека — дальше молча игнорируем (бот, скрипт, зажатая кнопка)
 
 

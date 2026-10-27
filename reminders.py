@@ -17,6 +17,7 @@ from apscheduler.triggers.cron import CronTrigger
 
 import config
 import usage
+import profile_ctx
 from ai import generate_recipe
 from search import search_recipes, format_results_for_prompt
 from shopping import extract_shopping_terms, extract_dish_title
@@ -102,6 +103,7 @@ async def send_daily_reminders(bot: Bot, dp: Dispatcher):
             if usage.cap_reached():          # дневной запас генераций исчерпан — напоминание уйдёт завтра
                 return
             usage.log("reminder", chat_id, "reminder")
+            profile_ctx.set_for(chat_id)     # аллергии и «не использовать» (у каждой задачи gather свой контекст)
             try:
                 await asyncio.wait_for(_remind_one(bot, chat_id, data, n), timeout=_PER_USER_TIMEOUT)
                 usage.mark_reminded(chat_id, n)
