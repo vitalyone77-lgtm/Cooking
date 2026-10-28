@@ -108,13 +108,21 @@ WEB_IP_DAILY_GENS = int(os.getenv("WEB_IP_DAILY_GENS", "40"))   # у мобил�
 # ---------------------------------------------------------------------------
 PAYWALL_ENABLED = os.getenv("PAYWALL_ENABLED", "false").lower() == "true"
 LIMITS_OPEN = os.getenv("LIMITS_OPEN", f"recipe={WEB_LIMIT_RECIPE}/1,daymenu={WEB_LIMIT_DAYMENU}/1,"
-                                       f"week={WEB_LIMIT_WEEK}/3,missing={WEB_LIMIT_MISSING}/1")
-LIMITS_FREE = os.getenv("LIMITS_FREE", "recipe=3/1,daymenu=1/7,week=0/3,missing=2/1")
-LIMITS_PREMIUM = os.getenv("LIMITS_PREMIUM", "recipe=6/1,daymenu=2/1,week=1/2,missing=10/1")
-LIMITS_ANON = os.getenv("LIMITS_ANON", "recipe=1/1,daymenu=0/1,week=0/3,missing=1/1")   # сайт без входа
+                                       f"week={WEB_LIMIT_WEEK}/3,missing={WEB_LIMIT_MISSING}/1,photo=5/1")
+LIMITS_FREE = os.getenv("LIMITS_FREE", "recipe=3/1,daymenu=1/7,week=0/3,missing=2/1,photo=1/1")
+LIMITS_PREMIUM = os.getenv("LIMITS_PREMIUM", "recipe=6/1,daymenu=2/1,week=1/2,missing=10/1,photo=5/1")
+LIMITS_ANON = os.getenv("LIMITS_ANON", "recipe=1/1,daymenu=0/1,week=0/3,missing=1/1,photo=0/1")   # сайт без входа
 # Функции только для подписки (при PAYWALL_ENABLED): memory (профиль — аллергии и «не использовать», и полка:
 # без подписки бот ничего не запоминает), pdf, cart (корзина ВкусВилла с ценами), noads (сайт без рекламы)
 PREMIUM_FEATURES = [x.strip() for x in os.getenv("PREMIUM_FEATURES", "memory,pdf,cart,noads").split(",") if x.strip()]
+# Новые функции — кому включены: off (никому), testers (только тестировщикам), premium (подписке), all (всем).
+# voice — голосовой ввод, photo_recipe — рецепт по фото холодильника, photo_shelf — полка по фото
+FEATURE_ROLLOUT = os.getenv("FEATURE_ROLLOUT", "voice=testers,photo_recipe=testers,photo_shelf=testers")
+# Тестировщики: Telegram id через запятую — им видны функции в режиме testers и полный доступ при подписке
+TESTER_IDS = [x.strip() for x in os.getenv("TESTER_IDS", "").split(",") if x.strip().lstrip("-").isdigit()]
+VISION_MODEL = os.getenv("VISION_MODEL", "deepseek-v4-flash-vision-exp")   # DeepSeek с картинками
+STT_MODEL = os.getenv("STT_MODEL", "whisper-large-v3-turbo")              # распознавание голоса (Groq)
+VOICE_DAILY = int(os.getenv("VOICE_DAILY", "30"))                          # голосовых в сутки на человека
 TRIAL_DAYS = int(os.getenv("TRIAL_DAYS", "7"))     # пробный полный доступ — включается сам при первом упоре в лимит
 # Тарифы: имя=дни:цена_в_рублях:цена_в_звёздах
 PREMIUM_PLANS = os.getenv("PREMIUM_PLANS", "month=30:199:150,year=365:1490:1100")

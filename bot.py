@@ -49,6 +49,7 @@ import bot_profile
 import plans
 import bot_cook
 import bot_shop
+import bot_vision
 import accounts
 import profile_ctx
 
@@ -274,10 +275,26 @@ def _kb_sent(chat_id: int) -> None:
     accounts.sess_mark_forever(f"kbv:{chat_id}")
 
 
+def _left_line(chat_id: int, kind: str) -> str:
+    """Счётчик под анкетой — чтобы лимит не заканчивался внезапно."""
+    t = usage.left_text(chat_id, kind)
+    return f"\n\n🔢 {t}" if t else ""
+
+
+def _input_hints(chat_id: int) -> str:
+    hints = []
+    if plans.feature_on(chat_id, "photo_recipe"):
+        hints.append("📷 пришли фото холодильника — подберу рецепт из того, что видно")
+    if plans.feature_on(chat_id, "voice"):
+        hints.append("🎙 или скажи голосом, что хочется")
+    return ("\n\n" + "\n".join(hints)) if hints else ""
+
+
 async def show_main_menu(message: Message, state: FSMContext, intro: str = "Что готовим? Выбери тип питания/кухни:"):
     await state.clear()
     await ensure_reply_kb(message)
     last = get_last_recipe(message.chat.id)
+    intro += _input_hints(message.chat.id) + _left_line(message.chat.id, "recipe")
     await message.answer(intro, reply_markup=kb.cuisine_kb(last_title=(last or {}).get("title") or ("Рецепт" if last else None)))
     await state.set_state(RecipeForm.cuisine)
 
@@ -477,7 +494,7 @@ async def step_cuisine(callback: CallbackQuery, state: FSMContext):
 
 # ---------- Шаг 1.5 (только ветка «Подобрать по КБЖУ»): цель по КБЖУ ----------
 
-@dp.message(RecipeForm.macro_goal)
+@dp.message(RecipeForm.macro_goal, F.text)
 async def step_macro_goal_text(message: Message, state: FSMContext):
     await state.update_data(macro_goal=message.text.strip())
     await ask_preferred(message, state)
@@ -492,19 +509,46 @@ async def step_macro_goal_skip(callback: CallbackQuery, state: FSMContext):
 
 
 async def ask_preferred(message: Message, state: FSMContext):
+    data = await state.get_data()
+    if data.get("preset_preferred"):        # продукты уже есть — с фото или из голосового
+        await state.update_data(preset_preferred=False)
+        await ask_excluded(message, state)
+        return
+    extra = ""
+    if plans.feature_on(message.chat.id, "photo_recipe"):
+        extra += "\n📷 Можно прислать фото холодильника — найду продукты на нём."
+    if plans.feature_on(message.chat.id, "voice"):
+        extra += "\n🎙 Можно ответить голосом."
     await message.answer(
         "Отлично! Теперь напиши, какие продукты ты хочешь использовать "
         "(например: курица, рис, брокколи) — или сразу название блюда, "
         "которое хочешь приготовить (например: «хочу плов» или «хочу борщ»).\n"
-        "Если без разницы — нажми «Пропустить».",
+        "Если без разницы — нажми «Пропустить»." + extra,
         reply_markup=kb.skip_kb("preferred"),
     )
     await state.set_state(RecipeForm.preferred)
 
 
+async def start_recipe_with(message: Message, state: FSMContext, preferred: str):
+    """Анкета рецепта с уже известными продуктами (фото холодильника, голосовое вне анкеты)."""
+    await state.clear()
+    await state.update_data(preferred=preferred, preset_preferred=True)
+    await state.set_state(RecipeForm.cuisine)
+    last = get_last_recipe(message.chat.id)
+    await message.answer(f"🧺 Продукты: {preferred}\n\nВыбери тип питания:" + _left_line(message.chat.id, "recipe"),
+                         reply_markup=kb.cuisine_kb(last_title=(last or {}).get("title") or ("Рецепт" if last else None)),
+                         parse_mode=None)
+
+
+async def set_preferred_from(message: Message, state: FSMContext, preferred: str):
+    await state.update_data(preferred=preferred)
+    await message.answer(f"🧺 Продукты: {preferred}", parse_mode=None)
+    await ask_excluded(message, state)
+
+
 # ---------- Шаг 2: предпочитаемые продукты ----------
 
-@dp.message(RecipeForm.preferred)
+@dp.message(RecipeForm.preferred, F.text)
 async def step_preferred_text(message: Message, state: FSMContext):
     await state.update_data(preferred=message.text.strip())
     await ask_excluded(message, state)
@@ -530,7 +574,7 @@ async def ask_excluded(message: Message, state: FSMContext):
 
 # ---------- Шаг 3: исключения ----------
 
-@dp.message(RecipeForm.excluded)
+@dp.message(RecipeForm.excluded, F.text)
 async def step_excluded_text(message: Message, state: FSMContext):
     await state.update_data(excluded=message.text.strip())
     await ask_time(message, state)
@@ -620,7 +664,7 @@ async def show_summary(message: Message, state: FSMContext):
         f"Порций: {data.get('servings')}\n"
         f"Размер порции: {PORTION_LABELS[data.get('portion') or portion]}\n"
         f"Техника: {', '.join(data.get('appliance_labels', []))}\n"
-    )
+    ) + _left_line(message.chat.id, "recipe")
     await message.answer(text, reply_markup=kb.confirm_kb(data.get('portion') or portion))
     await state.set_state(RecipeForm.confirm)
 
@@ -685,6 +729,9 @@ async def _seen_message(handler, event, data):
     except Exception:  # noqa: BLE001 — учёт не должен мешать ответу
         logger.exception("usage.touch")
     return await handler(event, data)
+
+
+dp.message.outer_middleware(bot_vision.voice_middleware)    # после учёта: голосовое → текст до фильтров
 
 
 @dp.callback_query.outer_middleware()
@@ -1059,7 +1106,7 @@ async def dm_step_cuisine(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
 
 
-@dp.message(DayMenuForm.macro_goal)
+@dp.message(DayMenuForm.macro_goal, F.text)
 async def dm_step_macro_goal_text(message: Message, state: FSMContext):
     await state.update_data(macro_goal=message.text.strip())
     await dm_ask_preferred(message, state)
@@ -1082,7 +1129,7 @@ async def dm_ask_preferred(message: Message, state: FSMContext):
     await state.set_state(DayMenuForm.preferred)
 
 
-@dp.message(DayMenuForm.preferred)
+@dp.message(DayMenuForm.preferred, F.text)
 async def dm_step_preferred_text(message: Message, state: FSMContext):
     await state.update_data(preferred=message.text.strip())
     await dm_ask_excluded(message, state)
@@ -1105,7 +1152,7 @@ async def dm_ask_excluded(message: Message, state: FSMContext):
     await state.set_state(DayMenuForm.excluded)
 
 
-@dp.message(DayMenuForm.excluded)
+@dp.message(DayMenuForm.excluded, F.text)
 async def dm_step_excluded_text(message: Message, state: FSMContext):
     await state.update_data(excluded=message.text.strip())
     await dm_ask_time(message, state)
@@ -1190,7 +1237,7 @@ async def dm_show_summary(message: Message, state: FSMContext):
         f"Порций (на человека): {data.get('servings')}\n"
         f"Размер порции: {PORTION_LABELS[data.get('portion') or portion]}\n"
         f"Техника: {', '.join(data.get('appliance_labels', []))}\n"
-    )
+    ) + _left_line(message.chat.id, "daymenu")
     await message.answer(text, reply_markup=kb.confirm_kb(data.get('portion') or portion))
     await state.set_state(DayMenuForm.confirm)
 
@@ -1312,7 +1359,7 @@ async def wm_step_cuisine(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
 
 
-@dp.message(WeekMenuForm.macro_goal)
+@dp.message(WeekMenuForm.macro_goal, F.text)
 async def wm_step_macro_goal_text(message: Message, state: FSMContext):
     await state.update_data(macro_goal=message.text.strip())
     await wm_ask_preferred(message, state)
@@ -1335,7 +1382,7 @@ async def wm_ask_preferred(message: Message, state: FSMContext):
     await state.set_state(WeekMenuForm.preferred)
 
 
-@dp.message(WeekMenuForm.preferred)
+@dp.message(WeekMenuForm.preferred, F.text)
 async def wm_step_preferred_text(message: Message, state: FSMContext):
     await state.update_data(preferred=message.text.strip())
     await wm_ask_excluded(message, state)
@@ -1358,7 +1405,7 @@ async def wm_ask_excluded(message: Message, state: FSMContext):
     await state.set_state(WeekMenuForm.excluded)
 
 
-@dp.message(WeekMenuForm.excluded)
+@dp.message(WeekMenuForm.excluded, F.text)
 async def wm_step_excluded_text(message: Message, state: FSMContext):
     await state.update_data(excluded=message.text.strip())
     await wm_ask_time(message, state)
@@ -1443,7 +1490,7 @@ async def wm_show_summary(message: Message, state: FSMContext):
         f"Порций: {data.get('servings')}\n"
         f"Размер порции: {PORTION_LABELS[data.get('portion') or portion]}\n"
         f"Техника: {', '.join(data.get('appliance_labels', []))}\n"
-    )
+    ) + _left_line(message.chat.id, "week")
     await message.answer(text, reply_markup=kb.confirm_kb(data.get('portion') or portion))
     await state.set_state(WeekMenuForm.confirm)
 
@@ -1661,7 +1708,7 @@ async def favorites_search_start(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
 
 
-@dp.message(FavoritesForm.search)
+@dp.message(FavoritesForm.search, F.text)
 async def favorites_search_run(message: Message, state: FSMContext):
     results = search_favorites(message.chat.id, message.text.strip())
     if results:
@@ -1727,11 +1774,14 @@ def _orig_kb(message: Message, ctx: str):
 
 bot_shop.hooks.update(terms=resolve_shopping_terms, amounts=resolve_shopping_amounts, orig_kb=_orig_kb,
                       run_missing=run_missing)
+bot_vision.hooks.update(start_recipe=start_recipe_with, set_preferred=set_preferred_from,
+                        shelf_view=bot_profile.shelf_view)
 
 fallback_router = Router(name="fallback")
 dp.include_router(bot_profile.router)
 dp.include_router(bot_cook.router)
 dp.include_router(bot_shop.router)
+dp.include_router(bot_vision.router)
 dp.include_router(fallback_router)
 
 

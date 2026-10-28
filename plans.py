@@ -30,6 +30,8 @@ EDITABLE = {
     "TRIAL_DAYS": ("all", int),
     "PREMIUM_PLANS": ("all", str),
     "PROMO_CODES": ("all", str),
+    "FEATURE_ROLLOUT": ("all", dict),
+    "TESTER_IDS": ("all", list),
 }
 SETTINGS_TTL = 15
 _cache: dict = {"ts": 0.0, "data": {}}
@@ -71,14 +73,27 @@ def _parse_limits(spec: str) -> dict[str, tuple[int, int]]:
     return out
 
 
+# виды, которых может не быть в старых строках лимитов (.env или админка) — без них фото было бы без ограничений
+KIND_DEFAULTS = {"photo": {"open": (5, 1), "free": (1, 1), "premium": (5, 1), "anon": (0, 1)}}
+
+
 def limits_of(plan: str) -> dict[str, tuple[int, int]]:
     spec = {"open": config.LIMITS_OPEN, "free": cfg("LIMITS_FREE"), "premium": cfg("LIMITS_PREMIUM"),
             "anon": cfg("LIMITS_ANON")}.get(plan, "")
-    return _parse_limits(spec)
+    out = _parse_limits(spec)
+    for kind, by_plan in KIND_DEFAULTS.items():
+        out.setdefault(kind, by_plan.get(plan, (0, 1)))
+    return out
 
 
 PLAN_TITLES = {"open": "Полный доступ", "free": "Бесплатный", "premium": "Подписка", "anon": "Без входа"}
-KIND_TITLES = {"recipe": "блюд в день", "daymenu": "меню на день", "week": "планов на 3 дня", "missing": "замен продуктов"}
+KIND_TITLES = {"recipe": "блюд в день", "daymenu": "меню на день", "week": "планов на 3 дня", "missing": "замен продуктов",
+               "photo": "фото (рецепт или полка)"}
+# новые функции: включаются по шагам — сначала тестировщикам, потом подписке или всем
+NEW_FEATURES = {"voice": "🎙 Голосовой ввод (продукты, пожелания, полка)",
+                "photo_recipe": "📷 Рецепт по фото холодильника",
+                "photo_shelf": "📷 Полка по фото"}
+ROLLOUT_LEVELS = {"off": "выключено", "testers": "тестировщики", "premium": "подписка", "all": "все"}
 FEATURE_TITLES = {"memory": "Память: профиль (аллергии, «не использовать») и полка",
                   "pdf": "PDF для чтения без интернета", "cart": "Корзина ВкусВилла с ценами",
                   "noads": "Сайт без рекламы"}
@@ -92,12 +107,42 @@ def is_anon(uid) -> bool:
     return str(uid).startswith("w")
 
 
+def testers() -> set[str]:
+    return {str(x).strip() for x in (cfg("TESTER_IDS") or []) if str(x).strip()}
+
+
+def is_tester(uid) -> bool:
+    return str(uid) in testers()
+
+
 def plan_of(uid) -> str:
     if not paywall():
         return "open"
     if is_anon(uid):
         return "anon"
-    return "premium" if accounts.is_premium(uid) else "free"
+    return "premium" if is_tester(uid) or accounts.is_premium(uid) else "free"
+
+
+def rollout() -> dict[str, str]:
+    raw = cfg("FEATURE_ROLLOUT") or {}
+    if isinstance(raw, str):
+        raw = dict(p.split("=", 1) for p in raw.split(",") if "=" in p)
+    out = {k: "off" for k in NEW_FEATURES}
+    out.update({k.strip(): str(v).strip() for k, v in raw.items()
+                if k.strip() in NEW_FEATURES and str(v).strip() in ROLLOUT_LEVELS})
+    return out
+
+
+def feature_on(uid, name: str) -> bool:
+    """Новая функция (NEW_FEATURES) включена для этого человека: off / testers / premium / all."""
+    level = rollout().get(name, "off")
+    if level == "all":
+        return True
+    if level == "off" or is_anon(uid):
+        return False
+    if is_tester(uid):
+        return True
+    return level == "premium" and plan_of(uid) in ("premium", "open")
 
 
 def limit(uid, kind: str) -> tuple[int, int] | None:

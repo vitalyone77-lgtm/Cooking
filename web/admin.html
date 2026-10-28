@@ -74,6 +74,12 @@ code{background:var(--soft);padding:2px 6px;border-radius:6px;font-size:13px}
     <p class="note">«Сколько / за сколько дней». Например 1 / 7 — одно меню на день в неделю; 0 — недоступно в этом тарифе.</p>
     <div class="tbl"><table><thead><tr><th></th><th>Без входа (сайт)</th><th>Бесплатный</th><th>Подписка</th></tr></thead><tbody id="s-limits"></tbody></table></div>
     <h2>Что только в подписке</h2><div class="box" id="s-features"></div>
+    <h2>Новые функции — кому включены</h2>
+    <p class="note">Сначала включаем тестировщикам, проверяем — потом подписке или всем. «Подписка» до включения оплаты означает «все, кто вошёл через Telegram».</p>
+    <div class="tbl"><table><tbody id="s-rollout"></tbody></table></div>
+    <h2>Тестировщики</h2>
+    <p class="note">Telegram id через запятую или с новой строки (свой id можно узнать у @userinfobot). Тестировщикам видны функции в режиме «тестировщики», а когда подписка включена — у них полный доступ бесплатно.</p>
+    <textarea id="s-testers" rows="3" style="width:100%;max-width:520px" placeholder="123456789, 987654321"></textarea>
     <h2>Цены</h2>
     <div class="tbl"><table><thead><tr><th>Код</th><th>Дней</th><th>₽</th><th>⭐ звёзд</th><th></th></tr></thead><tbody id="s-offers"></tbody></table></div>
     <div class="row" style="margin-top:8px"><button id="add-offer">+ тариф</button><span class="note">Пробный период: <input type="number" id="s-trial" min="0" max="60"> дней (включается сам при первом упоре в лимит, 0 — без пробного)</span></div>
@@ -117,11 +123,11 @@ function card(v,k){return '<div class="c"><div class="n">'+v+'</div><div class="
 function bars(id,labels,vals){var max=Math.max.apply(null,vals.concat([1]));
   $("b-"+id).innerHTML=vals.map(function(n){return '<div class="bar" style="height:'+Math.round(n/max*100)+'%"><span>'+n+'</span></div>';}).join("");
   $("l-"+id).innerHTML=labels.map(function(d){return '<div>'+esc(d)+'</div>';}).join("");}
-var FEAT={cook_start:"👨‍🍳 Готовить по шагам — начали",cook_finish:"🎉 Приготовили до конца",timer:"⏱ Таймеры",list_open:"🛒 Список покупок",
+var FEAT={voice:"🎙 Голосовые",photo_recipe:"📷 Рецепт по фото",photo_shelf:"📷 Полка по фото",cook_start:"👨‍🍳 Готовить по шагам — начали",cook_finish:"🎉 Приготовили до конца",timer:"⏱ Таймеры",list_open:"🛒 Список покупок",
   store_links:"🏪 Ссылки на магазин",list_replace:"🔄 Замена из списка",list_share:"📤 Список текстом",pdf:"📄 PDF",fav_save:"⭐ В избранное",
   site_link:"🌐 Вход на сайт через Telegram",profile_edit:"👤 Профиль: аллергии / не использовать",promo:"🎟 Промокод",sub_view:"💎 Открыли «Подписку»",
   trial_start:"🎁 Начали пробный период",payment:"💰 Оплата"};
-var KINDS={recipe:"Рецепт",daymenu:"Меню на день",week:"План на 3 дня",weekday:"День плана",missing:"Замена продуктов",reminder:"Напоминание"};
+var KINDS={recipe:"Рецепт",daymenu:"Меню на день",week:"План на 3 дня",weekday:"День плана",missing:"Замена продуктов",photo:"Фото",reminder:"Напоминание"};
 var S=null, ROLE="";
 
 function load(){
@@ -169,11 +175,14 @@ function renderSettings(st){
   $("p-role").textContent=owner?"Вы владелец — можно менять всё. Изменения доходят до бота и сайта примерно за 15 секунд.":
     "Вы партнёр: можно менять цены, лимиты, функции подписки, пробный период и промокоды. Включение подписки, потолок расходов и доли меняет владелец. Изменения доходят до бота и сайта примерно за 15 секунд.";
   $("s-paywall").checked=st.paywall;$("s-paywall").disabled=!owner;
-  var kinds=["recipe","daymenu","week","missing"];
+  var kinds=["recipe","daymenu","week","missing","photo"];
   $("s-limits").innerHTML=kinds.map(function(k){return '<tr><td>'+esc(st.kind_titles[k]||k)+'</td>'+["anon","free","premium"].map(function(p){var v=(st.limits[p]||{})[k]||[0,1];
     return '<td><input type="number" min="0" max="100" data-lim="'+p+':'+k+':n" value="'+v[0]+'"> / <input type="number" min="1" max="30" data-lim="'+p+':'+k+':d" value="'+v[1]+'"> дн.</td>';}).join("")+'</tr>';}).join("");
   $("s-features").innerHTML=Object.keys(st.feature_titles).map(function(f){return '<label class="row"><input type="checkbox" data-feat="'+f+'"'+(st.features.indexOf(f)>=0?" checked":"")+'> '+esc(st.feature_titles[f])+'</label>';}).join("")+
     '<p class="note">Неотмеченное доступно всем бесплатно. Режим готовки, список покупок и таймеры — всегда бесплатно.</p>';
+  $("s-rollout").innerHTML=Object.keys(st.new_features).map(function(f){return '<tr><td>'+esc(st.new_features[f])+'</td><td><select data-roll="'+f+'">'+
+    Object.keys(st.rollout_levels).map(function(l){return '<option value="'+l+'"'+(st.rollout[f]===l?" selected":"")+'>'+esc(st.rollout_levels[l])+'</option>';}).join("")+'</select></td></tr>';}).join("");
+  $("s-testers").value=(st.testers||[]).join(", ");
   $("s-offers").innerHTML=st.offers.map(offerRow).join("");
   $("s-trial").value=st.trial_days;
   $("s-promo").innerHTML=Object.keys(st.promo).map(function(c){return promoRow(c,st.promo[c]);}).join("");
@@ -188,7 +197,8 @@ function collect(){
     limits[p[0]]=limits[p[0]]||{};limits[p[0]][p[1]]=limits[p[0]][p[1]]||[0,1];limits[p[0]][p[1]][p[2]==="n"?0:1]=parseInt(i.value||"0",10);});
   var offers=Array.prototype.map.call(document.querySelectorAll("[data-offer]"),function(r){var o={};Array.prototype.forEach.call(r.querySelectorAll("[data-o]"),function(i){o[i.getAttribute("data-o")]=i.getAttribute("data-o")==="key"?i.value:parseInt(i.value||"0",10);});return o;});
   var promo={};Array.prototype.forEach.call(document.querySelectorAll("[data-promo]"),function(r){var c=r.querySelector('[data-p="code"]').value.trim();if(c)promo[c]=parseInt(r.querySelector('[data-p="days"]').value||"0",10);});
-  var body={limits:limits,offers:offers,promo:promo,trial_days:parseInt($("s-trial").value||"0",10),
+  var rollout={};Array.prototype.forEach.call(document.querySelectorAll("[data-roll]"),function(s){rollout[s.getAttribute("data-roll")]=s.value;});
+  var body={limits:limits,offers:offers,promo:promo,rollout:rollout,testers:$("s-testers").value,trial_days:parseInt($("s-trial").value||"0",10),
     features:Array.prototype.filter.call(document.querySelectorAll("[data-feat]"),function(i){return i.checked;}).map(function(i){return i.getAttribute("data-feat");})};
   if(ROLE==="owner"){body.paywall=$("s-paywall").checked;body.daily_cap=parseInt($("s-cap").value,10);body.anon_cap=parseInt($("s-anon").value,10);body.ip_cap=parseInt($("s-ip").value,10);body.partner_share=parseInt($("s-share").value,10);}
   return body;

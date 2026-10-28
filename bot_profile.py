@@ -212,7 +212,8 @@ def shelf_view(uid: int) -> tuple[str, InlineKeyboardMarkup]:
                 "когда ты отмечаешь их в списке покупок «✅ купил» или «🏠 есть дома». Тогда в следующих "
                 "рецептах они будут отдельным списком — не придётся покупать второй раз.")
     b.adjust(2)
-    b.row(InlineKeyboardButton(text="➕ Добавить продукт", callback_data="pf:shadd"))
+    b.row(InlineKeyboardButton(text="➕ Добавить (текстом или фото)" if plans.feature_on(uid, "photo_shelf")
+                               else "➕ Добавить продукт", callback_data="pf:shadd"))
     b.row(InlineKeyboardButton(text="⬅️ Профиль", callback_data="pf:back"))
     return text, b.as_markup()
 
@@ -248,8 +249,13 @@ async def shelf_add_start(callback: CallbackQuery, state: FSMContext):
         return
     await state.set_state(ProfileForm.shelf_add)
     await callback.answer()
-    await callback.message.edit_text("➕ Напиши продукты через запятую — например: «оливковое масло, куркума, рис».",
-                                     reply_markup=_cancel_kb(), parse_mode=None)
+    uid = callback.message.chat.id
+    text = "➕ Напиши продукты через запятую — например: «оливковое масло, куркума, рис»."
+    if plans.feature_on(uid, "photo_shelf"):
+        text += "\n\n📷 Или пришли фото полки или холодильника — найду продукты, ты отметишь нужные."
+    if plans.feature_on(uid, "voice"):
+        text += "\n🎙 Можно и голосом."
+    await callback.message.edit_text(text, reply_markup=_cancel_kb(), parse_mode=None)
 
 
 @router.message(ProfileForm.shelf_add, F.text)

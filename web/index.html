@@ -418,6 +418,8 @@ textarea{width:100%;min-height:64px;padding:10px 14px;border:1.5px solid var(--l
     h+='<label class="f">В чём готовим</label>'+chips(m.appliances,F.appliance,"appliance",true);
     var lr=null;try{lr=JSON.parse(ls("lastrecipe")||"null");}catch(e){}
     if(lr&&lr.title)h+='<button class="btn ghost" data-last-recipe="1">📖 Последний рецепт: '+esc(lr.title)+'</button>';
+    var lk={recipe:"recipe",day:"daymenu",week:"week"}[F.mode], lf=(ME.left||{})[lk];
+    if(lf&&lf[1])h+='<p class="sub" style="margin:14px 0 0;text-align:center">🔢 Осталось '+(lf[2]>1?"на "+lf[2]+" дн.":"сегодня")+': <strong>'+lf[0]+' из '+lf[1]+'</strong></p>';
     h+='<button class="btn" id="go">🔍 Подобрать</button><div class="install-bottom" id="install-bottom"></div>'+
       '<p class="sub" style="margin-top:18px;font-size:14px">Как это работает: <a href="/pitanie/menu-na-den">меню на день</a> · <a href="/pitanie/plan-pitaniya-na-3-dnya">план на 3 дня</a> · <a href="/pitanie/podbor-po-kbzhu">подбор по КБЖУ</a> · <a href="/pitanie/spisok-pokupok-i-korzina">список покупок</a></p>';
     main.innerHTML=h;
@@ -432,6 +434,7 @@ textarea{width:100%;min-height:64px;padding:10px 14px;border:1.5px solid var(--l
     var path={recipe:"/api/recipe",day:"/api/daymenu",week:"/api/week"}[F.mode];
     var label={recipe:"Ищу рецепты и подбираю лучший…",day:"Собираю меню на день…",week:"Считаю корзину и план…"}[F.mode];
     runJob(call("POST",path,body),label).then(function(res){
+      loadMe();      // обновить счётчик «осталось сегодня»
       if(F.mode==="recipe"){
         showRecipe(res);
       } else { ls("sub",F.mode); show("menus"); }

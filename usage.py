@@ -122,11 +122,35 @@ def used(uid, kind: str, days: int = 1) -> int:
     return _count("SELECT COUNT(*) FROM gens WHERE uid=? AND kind=? AND ts >= ?", (str(uid), kind, msk_midnight(days - 1)))
 
 
+def left(uid, kind: str) -> tuple[int, int, int] | None:
+    """(осталось, всего, за сколько дней) — для счётчика «осталось сегодня»; None — без ограничения."""
+    import plans
+    lim = plans.limit(uid, kind)
+    if not lim:
+        return None
+    n, days = lim
+    return max(0, n - used(uid, kind, days)), n, days
+
+
+def left_text(uid, kind: str) -> str:
+    """«Осталось сегодня: 2 из 3» или "" — если лимита нет или функция недоступна (n=0)."""
+    got = left(uid, kind)
+    if not got or not got[1]:
+        return ""
+    rest, n, days = got
+    when = "сегодня" if days == 1 else f"на {days} дн."
+    return f"Осталось {when}: {rest} из {n}"
+
+
+def events_today(name: str, uid) -> int:
+    return _count("SELECT COUNT(*) FROM events WHERE name=? AND uid=? AND ts >= ?", (name, str(uid), msk_midnight()))
+
+
 def _refusal(uid, kind: str, n: int, days: int) -> str:
     import plans
     anon = plans.is_anon(uid)
     if n == 0:
-        what = {"daymenu": "Меню на день", "week": "План на 3 дня"}.get(kind, "Эта функция")
+        what = {"daymenu": "Меню на день", "week": "План на 3 дня", "photo": "Распознавание фото"}.get(kind, "Эта функция")
         return (f"{what} — после входа через Telegram (кнопка «Профиль») 🙂" if anon
                 else f"{what} — в подписке 💎")
     if days == 1:
@@ -235,7 +259,7 @@ def event(name: str, uid) -> None:
 
 
 # примерная стоимость одного подбора ИИ, ₽ (замеры токенов DeepSeek, с запасом)
-GEN_COST_RUB = {"recipe": 0.3, "daymenu": 0.7, "week": 0.6, "weekday": 0.7, "missing": 0.3, "reminder": 0.3}
+GEN_COST_RUB = {"recipe": 0.3, "daymenu": 0.7, "week": 0.6, "weekday": 0.7, "missing": 0.3, "reminder": 0.3, "photo": 0.1}
 
 
 def _rows(sql: str, args=()) -> list:

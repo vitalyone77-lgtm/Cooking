@@ -483,7 +483,8 @@ def me(x_device: str | None = Header(default=None)):
     tg = accounts.tg_of_device(dev_id)
     uid = _uid(dev_id)
     memory = bool(tg) and plans.has_feature(uid, "memory")
-    out = {"linked": bool(tg), "plan": plans.plan_of(uid), "status": plans.status_text(uid),
+    left = {k: list(v) for k in ("recipe", "daymenu", "week") if (v := usage.left(uid, k))}
+    out = {"linked": bool(tg), "plan": plans.plan_of(uid), "status": plans.status_text(uid), "left": left,
            "paywall": plans.paywall(), "memory": memory, "bot": config.BOT_USERNAME,
            "favorites": len(fav_mod.get_favorites(uid))}
     if memory:
@@ -709,6 +710,10 @@ def _settings_view() -> dict:
         "features": list(plans.cfg("PREMIUM_FEATURES") or []),
         "feature_titles": plans.FEATURE_TITLES,
         "kind_titles": plans.KIND_TITLES,
+        "rollout": plans.rollout(),
+        "new_features": plans.NEW_FEATURES,
+        "rollout_levels": plans.ROLLOUT_LEVELS,
+        "testers": sorted(plans.testers()),
         "trial_days": int(plans.cfg("TRIAL_DAYS") or 0),
         "offers": plans.offers(),
         "promo": plans.promo_codes(),
@@ -739,7 +744,7 @@ async def admin_stats(request: Request):
 
 def _limits_spec(d: dict) -> str:
     parts = []
-    for kind in ("recipe", "daymenu", "week", "missing"):
+    for kind in ("recipe", "daymenu", "week", "missing", "photo"):
         n, days = (d.get(kind) or [0, 1])[:2]
         parts.append(f"{kind}={max(0, min(int(n), 100))}/{max(1, min(int(days), 30))}")
     return ",".join(parts)
@@ -769,6 +774,13 @@ async def admin_settings(request: Request):
                 new[name] = _limits_spec(body["limits"][plan])
         if "features" in body:
             new["PREMIUM_FEATURES"] = [f for f in body["features"] if f in plans.FEATURE_TITLES]
+        if "rollout" in body:
+            new["FEATURE_ROLLOUT"] = {k: v for k, v in (body["rollout"] or {}).items()
+                                      if k in plans.NEW_FEATURES and v in plans.ROLLOUT_LEVELS}
+        if "testers" in body:
+            raw = body["testers"]
+            ids = re.findall(r"-?\d{3,15}", raw if isinstance(raw, str) else " ".join(map(str, raw or [])))
+            new["TESTER_IDS"] = sorted(set(ids))[:200]
         if "offers" in body:
             rows = []
             for o in body["offers"][:6]:
