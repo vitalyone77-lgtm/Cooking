@@ -38,15 +38,15 @@ def _clean(items) -> list[str]:
     return out[:30]
 
 
-async def photo_items(image: bytes, mime: str = "image/jpeg") -> list[str]:
-    """Список продуктов на фото. VisionError — если модель недоступна или ответ не разобрать."""
+async def photo_items(images: list[tuple[bytes, str]]) -> list[str]:
+    """Продукты на фото (несколько фото — один общий список). VisionError — модель недоступна или ответ не разобрать."""
     if not config.DEEPSEEK_API_KEY:
         raise VisionError("нет ключа DeepSeek")
+    parts = [{"type": "image_url", "image_url": {"url": f"data:{mime};base64," + base64.b64encode(img).decode()}}
+             for img, mime in images[:5]]
     payload = {
         "model": config.VISION_MODEL,
-        "messages": [{"role": "user", "content": [
-            {"type": "image_url", "image_url": {"url": f"data:{mime};base64," + base64.b64encode(image).decode()}},
-            {"type": "text", "text": PHOTO_PROMPT}]}],
+        "messages": [{"role": "user", "content": parts + [{"type": "text", "text": PHOTO_PROMPT}]}],
         "max_tokens": 400,
         "temperature": 0.2,
         "thinking": {"type": "disabled"},

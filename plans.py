@@ -108,7 +108,8 @@ def is_anon(uid) -> bool:
 
 
 def testers() -> set[str]:
-    return {str(x).strip() for x in (cfg("TESTER_IDS") or []) if str(x).strip()}
+    """Тестировщики из админки + администраторы из ADMIN_TG_IDS (им тоже нужно проверять новое)."""
+    return {str(x).strip() for x in list(cfg("TESTER_IDS") or []) + list(config.ADMIN_TG_IDS) if str(x).strip()}
 
 
 def is_tester(uid) -> bool:
