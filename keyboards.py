@@ -90,10 +90,14 @@ def ready_hub_kb(has_day: bool, has_week: bool, week_days: int) -> InlineKeyboar
     return b.as_markup()
 
 
-def skip_kb(step: str) -> InlineKeyboardMarkup:
-    """Кнопка «пропустить» для шагов со свободным вводом текста."""
+def skip_kb(step: str, last: str = "") -> InlineKeyboardMarkup:
+    """Кнопка «пропустить» для шагов со свободным вводом текста; last — что вводили в прошлый раз."""
     b = InlineKeyboardBuilder()
+    if last:
+        short = last if len(last) <= 28 else last[:27] + "…"
+        b.button(text=f"↩️ Как в прошлый раз: {short}", callback_data=f"reuse:{step}")
     b.button(text="➡️ Пропустить", callback_data=f"skip:{step}")
+    b.adjust(1)
     return b.as_markup()
 
 

@@ -51,8 +51,6 @@ class WeekMenuForm(StatesGroup):
 
 
 class ProfileForm(StatesGroup):
-    """Личный кабинет: ввод текста для профиля."""
-    allergies = State()         # аллергии
-    never = State()             # «никогда не использовать»
+    """Личный кабинет: ввод текста (полка, промокод)."""
     shelf_add = State()         # добавить продукт на полку
     promo = State()             # промокод

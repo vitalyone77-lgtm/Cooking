@@ -6,6 +6,7 @@
 import json
 import logging
 import threading
+import time
 from pathlib import Path
 
 from jsonio import write_json_atomic
@@ -14,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 STORAGE_FILE = Path(__file__).parent / "user_data.json"
 _lock = threading.Lock()
-_KEEP = ("reminders_off", "reminder_recipe", "reminder_history", "portion")   # выключенная рассылка и рецепт из последнего напоминания
+_KEEP = ("reminders_off", "reminder_recipe", "reminder_history", "portion", "inputs")   # выключенная рассылка и рецепт из последнего напоминания
 
 
 def _read_all() -> dict:
@@ -52,6 +53,42 @@ def save_last_request(chat_id: int, form_data: dict, dish_title: str = "") -> No
             "dish_title": dish_title,
         }
         _write_all(all_data)
+
+
+INPUT_KEYS = ("preferred", "excluded", "macro_goal")
+INPUTS_TTL = 90 * 86400      # не заходил 90 дней — забываем
+
+
+def save_last_inputs(chat_id: int, data: dict) -> None:
+    """Запоминаем последние непустые ответы анкеты (что готовить, что исключить, цель КБЖУ) — для кнопки «как в прошлый раз»."""
+    vals = {k: (data.get(k) or "").strip()[:300] for k in INPUT_KEYS}
+    vals = {k: v for k, v in vals.items() if v}
+    if not vals:
+        return
+    old = (get_last_request(chat_id) or {}).get("inputs") or {}
+    _update(chat_id, inputs={**{k: old[k] for k in INPUT_KEYS if k in old}, **vals, "ts": time.time()})
+
+
+def get_last_inputs(chat_id: int) -> dict:
+    inputs = (get_last_request(chat_id) or {}).get("inputs") or {}
+    if time.time() - inputs.get("ts", 0) > INPUTS_TTL:
+        return {}
+    return {k: inputs[k] for k in INPUT_KEYS if inputs.get(k)}
+
+
+def purge_old_inputs() -> int:
+    """При старте бота стираем прошлые вводы тех, кто не заходил дольше срока хранения."""
+    with _lock:
+        all_data = _read_all()
+        n = 0
+        for entry in all_data.values():
+            inp = entry.get("inputs")
+            if inp and time.time() - inp.get("ts", 0) > INPUTS_TTL:
+                entry.pop("inputs", None)
+                n += 1
+        if n:
+            _write_all(all_data)
+        return n
 
 
 def get_last_request(chat_id: int) -> dict | None:

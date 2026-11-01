@@ -375,7 +375,7 @@ textarea{width:100%;min-height:64px;padding:10px 14px;border:1.5px solid var(--l
     var ex=box.querySelector("[data-miss-extra]");
     if(ex&&ex.value)ex.value.split(",").forEach(function(x){x=x.trim();if(x)names.push(x);});
     if(!names.length){alert("Отметь хотя бы один продукт");return;}
-    runJob(call("POST","/api/missing",{ctx:ctx,items:names,text:ctx==="recipe"?LAST_RECIPE:""}),"Подбираю замену…").then(function(res){
+    runJob(call("POST","/api/missing",{ctx:ctx,items:names,text:ctx==="recipe"?LAST_RECIPE:"",excluded:F.exc||""}),"Подбираю замену…").then(function(res){
       if(ctx==="recipe")showRecipe(res);else{show("menus");}
     }).catch(function(e){fail(e,cur);});
   }
@@ -400,6 +400,9 @@ textarea{width:100%;min-height:64px;padding:10px 14px;border:1.5px solid var(--l
 
   // ---- вкладка «Создать» ----
   var F={mode:"recipe",cuisine:"classic",meals:["breakfast","lunch","dinner"],time:"Не важно",servings:2,portion:(ls("portion")||"normal"),appliance:["stove"]};
+  // последний ввод анкеты помним на этом устройстве (на сервер не уходит): продукты, исключения, кухня, время и т.д.
+  (function(){try{var o=JSON.parse(ls("form")||"{}");["mode","cuisine","meals","time","servings","portion","appliance","pref","exc","macro"].forEach(function(k){if(o[k]!==undefined&&o[k]!==null)F[k]=o[k];});}catch(e){}})();
+  function saveForm(){try{ls("form",JSON.stringify(F));}catch(e){}}
   function chips(list,sel,name,multi){return '<div class="chips" data-name="'+name+'" data-multi="'+(multi?1:0)+'">'+list.map(function(x){var on=multi?sel.indexOf(x.key)>=0:sel===x.key;return '<button class="chip" data-key="'+esc(x.key)+'" aria-pressed="'+on+'">'+esc(x.label)+'</button>';}).join("")+'</div>';}
   function viewNew(){
     var m=META, times=["15 мин","30 мин","45 мин","60 мин","Не важно"].map(function(x){return {key:x,label:x};}), sv=[1,2,3,4,5,6].map(function(x){return {key:String(x),label:String(x)};});
@@ -410,8 +413,6 @@ textarea{width:100%;min-height:64px;padding:10px 14px;border:1.5px solid var(--l
     if(F.mode!=="recipe") h+='<label class="f">Приёмы пищи</label>'+chips(m.meals,F.meals,"meals",true);
     h+='<label class="f" for="pref">Что использовать или какое блюдо хочется</label><input type="text" id="pref" maxlength="300" placeholder="курица, рис или «хочу плов»" value="'+esc(F.pref||"")+'">';
     h+='<label class="f" for="exc">Что исключить</label><input type="text" id="exc" maxlength="300" placeholder="орехи, грибы, лук" value="'+esc(F.exc||"")+'">';
-    var pf=ME.profile||{};
-    if(ME.memory&&(pf.allergies||pf.never))h+='<p class="sub" style="margin:6px 0 0">👤 Из профиля всегда исключаю: '+esc([pf.allergies,pf.never].filter(Boolean).join(", "))+'</p>';
     h+='<label class="f">Время на готовку</label>'+chips(times,F.time,"time",false);
     h+='<label class="f">Порций</label>'+chips(sv,String(F.servings),"servings",false);
     h+='<label class="f">Размер порции</label>'+chips(m.portions,F.portion,"portion",false);
@@ -428,6 +429,7 @@ textarea{width:100%;min-height:64px;padding:10px 14px;border:1.5px solid var(--l
   function saveText(){var g=function(i){var e=document.getElementById(i);return e?e.value:"";};if(document.getElementById("pref")){F.pref=g("pref");F.exc=g("exc");F.macro=g("macro");}}
   function submitNew(){
     saveText();
+    saveForm();
     var body={cuisine:F.cuisine,macro_goal:F.cuisine==="macro_goal"?(F.macro||""):"",preferred:F.pref||"",excluded:F.exc||"",time:F.time,servings:F.servings,portion:F.portion,appliance:F.appliance,meals:F.meals};
     if(!body.appliance.length){alert("Выбери, в чём готовить");return;}
     if(F.mode!=="recipe"&&!body.meals.length){alert("Выбери хотя бы один приём пищи");return;}
@@ -512,7 +514,7 @@ textarea{width:100%;min-height:64px;padding:10px 14px;border:1.5px solid var(--l
       return h;});
   }
 
-  // ---- вкладка «Профиль»: вход через Telegram, аллергии, «не использовать», полка, подписка ----
+  // ---- вкладка «Профиль»: вход через Telegram, полка, подписка ----
   function loadMe(){return call("GET","/api/me").then(function(m){ME=m;return m;}).catch(function(){return ME;});}
   function botLink(start){return "https://t.me/"+esc((META&&META.bot)||ME.bot||"Cookingvkusno_bot")+(start?"?start="+start:"");}
   function viewProfile(){
@@ -529,12 +531,8 @@ textarea{width:100%;min-height:64px;padding:10px 14px;border:1.5px solid var(--l
       h+='<div class="card pcard">✅ Вход выполнен через Telegram<br><span class="sub">'+esc(m.status)+'</span>'+
         (m.paywall&&m.plan!=="premium"?'<a class="btn" href="'+botLink("pay")+'" target="_blank" rel="noopener">💎 Оформить подписку в Telegram</a>':'')+'</div>';
       if(!m.memory){
-        h+='<div class="card pcard"><h2>🔒 Память — в подписке</h2><p class="sub" style="margin:0">С подпиской помощник помнит твои аллергии и продукты, которые ты не ешь (их не будет ни в одном рецепте), и «полку» — масло, специи и крупы, которые уже есть дома.</p></div>';
+        h+='<div class="card pcard"><h2>🔒 Полка — в подписке</h2><p class="sub" style="margin:0">С подпиской помощник помнит «полку» — масло, специи и крупы, которые уже есть дома, чтобы не покупать их снова.</p></div>';
       } else {
-        var p=m.profile||{};
-        h+='<div class="card pcard"><h2>🚫 Аллергии</h2><textarea id="pf-all" maxlength="300" placeholder="орехи, мёд, креветки">'+esc(p.allergies||"")+'</textarea>'+
-          '<h2 style="margin-top:12px">🙅 Никогда не использовать</h2><textarea id="pf-never" maxlength="300" placeholder="кинза, печень, грибы">'+esc(p.never||"")+'</textarea>'+
-          '<p class="sub" style="margin:6px 0 0">Учитывается в каждом рецепте, меню и плане — на сайте и в боте.</p><button class="btn" data-pf-save="1">Сохранить</button></div>';
         h+='<div class="card pcard shelf"><h2>🏠 Моя полка</h2><p class="sub" style="margin:0 0 8px">Долгоживущие продукты, которые уже есть дома. В списках покупок они идут отдельно.</p><div class="chips">'+
           (m.shelf||[]).map(function(x){return '<button class="chip" data-shelf-del="'+esc(x)+'">'+esc(x)+' ✕</button>';}).join("")+'</div>'+
           '<div class="row" style="margin-top:8px"><input type="text" id="shelf-add" maxlength="60" placeholder="оливковое масло"><button class="btn" style="width:auto;margin:0" data-shelf-add="1">➕</button></div></div>';
@@ -583,7 +581,6 @@ textarea{width:100%;min-height:64px;padding:10px 14px;border:1.5px solid var(--l
     if(b=t.closest("[data-tab-go]")){show(b.getAttribute("data-tab-go"));return;}
     if(b=t.closest("[data-link-go]")){linkWait();return;}   // ссылка откроется сама, ждём подтверждения
     if(b=t.closest("[data-unlink]")){if(confirm("Выйти из профиля на этом устройстве? В Telegram всё останется."))call("POST","/api/unlink").then(function(){ocClear();return loadMe();}).then(function(){show("profile");}).catch(fail);return;}
-    if(b=t.closest("[data-pf-save]")){b.disabled=true;call("PUT","/api/profile",{allergies:document.getElementById("pf-all").value,never:document.getElementById("pf-never").value}).then(function(){toast("✅ Сохранил — учту в каждом рецепте");show("profile");}).catch(function(e){b.disabled=false;alert(e.message);});return;}
     if(b=t.closest("[data-shelf-del]")){call("DELETE","/api/shelf?item="+encodeURIComponent(b.getAttribute("data-shelf-del"))).then(function(){show("profile");}).catch(fail);return;}
     if(b=t.closest("[data-shelf-add]")){var si=document.getElementById("shelf-add");if(si&&si.value.trim())call("POST","/api/shelf",{item:si.value.trim()}).then(function(){show("profile");}).catch(function(e){alert(e.message);});return;}
     if(b=t.closest("[data-home]")){b.disabled=true;call("POST","/api/shelf",{item:b.getAttribute("data-home")}).then(function(){b.textContent="🏠 на полке";}).catch(function(e){b.disabled=false;alert(e.message);});return;}

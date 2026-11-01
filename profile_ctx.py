@@ -1,46 +1,42 @@
 """
-Профиль пользователя (аллергии, «никогда не использовать») для текущего запроса.
+Что исключить из блюд в ТЕКУЩЕМ запросе (поле «Исключить» анкеты) — для усиленной подсказки ИИ и проверки ответа.
 
-Бот (middleware) и сайт (перед запуском задачи) кладут профиль в contextvar, а ai.call_llm_with_fallback —
-единственная точка, через которую идут ВСЕ генерации (рецепт, меню на день, план, день плана, замены,
-напоминания), — дописывает его в запрос и проверяет ответ. Так ни один путь не забудет про аллергию.
-asyncio-задачи копируют контекст при создании, поэтому профиль доезжает и до фоновых задач.
+Ничего о человеке в базе не хранится: список приходит вместе с запросом. Сборщики промптов (prompts.py, missing.py)
+кладут его в contextvar перед обращением к ИИ, а ai.call_llm_with_fallback — единственная точка, через которую идут
+ВСЕ генерации, — дописывает его в запрос и проверяет ответ. asyncio-задачи копируют контекст при создании.
 """
 import contextvars
 import re
 
-current = contextvars.ContextVar("cooking_profile", default=None)
+current = contextvars.ContextVar("cooking_avoid", default=None)
 
 
-def set_for(uid) -> None:
-    """Профиль — функция подписки «memory» (пока подписка выключена — у всех)."""
-    import accounts
-    import plans
-    try:
-        p = accounts.get_profile(uid) if plans.has_feature(uid, "memory") else None
-    except Exception:  # noqa: BLE001 — сбой базы не должен ломать подбор
-        p = None
-    current.set(p if p and (p.get("allergies") or p.get("never")) else None)
+def _split(text: str) -> list[str]:
+    out = []
+    for x in re.split(r"[,;\n]+", (text or "").lower()):
+        x = x.strip(" .-")
+        if x and x not in out and x not in ("нет", "ничего"):
+            out.append(x[:40])
+    return out
+
+
+def set_avoid(text) -> None:
+    """Список из поля «Исключить» (через запятую). Пусто — проверка не нужна."""
+    items = _split(text)
+    current.set({"never": ", ".join(items)[:500]} if items else None)
 
 
 def _items(p: dict) -> list[str]:
-    out = []
-    for key in ("allergies", "never"):
-        out += [x.strip() for x in (p.get(key) or "").split(",") if x.strip()]
-    return out
+    return _split(p.get("never") or "")
 
 
 def prompt_block() -> str:
     p = current.get()
     if not p:
         return ""
-    lines = ["\n\nПРОФИЛЬ ПОЛЬЗОВАТЕЛЯ — ЭТО ВАЖНЕЕ ЛЮБЫХ ДРУГИХ ПРАВИЛ И ПОЖЕЛАНИЙ:"]
-    if p.get("allergies"):
-        lines.append(f"- АЛЛЕРГИЯ (опасно для здоровья!): {p['allergies']}. Не используй эти продукты и всё, что их "
-                     "содержит (соусы, заправки, посыпки, готовые смеси, замены «по вкусу»), ни в одном блюде.")
-    if p.get("never"):
-        lines.append(f"- Никогда не использовать (не ест): {p['never']}. Ни в одном блюде, даже как добавку.")
-    return "\n".join(lines)
+    return ("\n\nПРОДУКТЫ, КОТОРЫЕ ПОЛЬЗОВАТЕЛЬ ПРОСИЛ ИСКЛЮЧИТЬ — ЭТО ВАЖНЕЕ ЛЮБЫХ ДРУГИХ ПРАВИЛ И ПОЖЕЛАНИЙ: "
+            f"{p['never']}. Не используй их и всё, что их содержит (соусы, заправки, посыпки, готовые смеси, замены "
+            "«по вкусу»), ни в одном блюде, даже как добавку.")
 
 
 def _pattern(word: str) -> re.Pattern:
@@ -52,7 +48,7 @@ def _pattern(word: str) -> re.Pattern:
 
 
 def hits(text: str) -> list[str]:
-    """Продукты из профиля, которые всё же встретились в ответе (кроме «без орехов», «не добавляй молоко»
+    """Исключённые продукты, которые всё же встретились в ответе (кроме «без орехов», «не добавляй молоко»
     и строк вида «исключено: …»)."""
     p = current.get()
     if not p or not text:

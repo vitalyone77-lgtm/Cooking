@@ -52,7 +52,9 @@ code{background:var(--soft);padding:2px 6px;border-radius:6px;font-size:13px}
     <h2>По месяцам</h2><div class="tbl"><table><thead><tr><th>Месяц</th><th>Оплат</th><th>₽</th><th>⭐</th><th>Доля партнёра</th><th>Доля владельца</th></tr></thead><tbody id="m-months"></tbody></table></div>
     <h2>Последние оплаты</h2><div class="tbl"><table><thead><tr><th>Когда</th><th>Пользователь</th><th>Сумма</th><th>Тариф</th></tr></thead><tbody id="m-recent"></tbody></table></div>
     <h2>Ссылки для продвижения</h2><p class="note">Ссылка вида <code id="ref-example"></code> — все, кто пришёл по ней, видны здесь. Метку придумай любую (латиница, цифры, _ и -).</p>
-    <div class="tbl"><table><thead><tr><th>Метка</th><th>Пришли</th><th>Оплатили</th><th>Выручка</th></tr></thead><tbody id="m-refs"></tbody></table></div>
+    <p class="note">Своя ссылка для каждого блогера или площадки: впишите метку латиницей (например <code>anna</code>), нажмите «Создать» и скопируйте. Люди, пришедшие по ней, появятся в таблице ниже вместе с оплатами. Заводить метку заранее не нужно.</p>
+    <div class="row" style="margin-bottom:8px"><input id="ref-name" placeholder="метка: anna" style="width:200px" maxlength="32"> <button id="ref-make">Создать ссылку</button> <span id="ref-out"></span></div>
+    <div class="tbl"><table><thead><tr><th>Метка</th><th>Пришли</th><th>Оплатили</th><th>Выручка</th><th></th></tr></thead><tbody id="m-refs"></tbody></table></div>
     <h2>Промокоды — сколько раз использовали</h2><div class="tbl"><table><thead><tr><th>Код</th><th>Использовали</th></tr></thead><tbody id="m-promos"></tbody></table></div>
     <h2>Выдать подписку вручную</h2>
     <form class="f" id="gf"><div class="row"><input name="uid" type="number" placeholder="id в Telegram" style="width:180px" required><input name="days" type="number" value="30" min="1" max="365"> дней <button class="pri">Выдать</button></div><div id="ge" class="note"></div></form>
@@ -75,8 +77,9 @@ code{background:var(--soft);padding:2px 6px;border-radius:6px;font-size:13px}
     <div class="tbl"><table><thead><tr><th></th><th>Без входа (сайт)</th><th>Бесплатный</th><th>Подписка</th></tr></thead><tbody id="s-limits"></tbody></table></div>
     <h2>Что только в подписке</h2><div class="box" id="s-features"></div>
     <h2>Новые функции — кому включены</h2>
-    <p class="note">Сначала включаем тестировщикам, проверяем — потом подписке или всем. «Подписка» до включения оплаты означает «все, кто вошёл через Telegram».</p>
+    <p class="note">Сначала включаем тестировщикам, проверяем — потом подписке или всем. «Подписка» до включения оплаты означает «все, кто вошёл через Telegram». Изменение доходит до бота и сайта примерно за 15 секунд.</p>
     <div class="tbl"><table><tbody id="s-rollout"></tbody></table></div>
+    <div class="row" style="margin-top:8px"><button class="pri" data-save2>Сохранить</button> <button data-all-on>Включить все для всех</button> <button data-all-test>Все — только тестировщикам</button></div>
     <h2>Тестировщики</h2>
     <p class="note">Telegram id через запятую или с новой строки (свой id можно узнать у @userinfobot). Тестировщикам видны функции в режиме «тестировщики», а когда подписка включена — у них полный доступ бесплатно.</p>
     <textarea id="s-testers" rows="3" style="width:100%;max-width:520px" placeholder="123456789, 987654321"></textarea>
@@ -125,7 +128,7 @@ function bars(id,labels,vals){var max=Math.max.apply(null,vals.concat([1]));
   $("l-"+id).innerHTML=labels.map(function(d){return '<div>'+esc(d)+'</div>';}).join("");}
 var FEAT={voice:"🎙 Голосовые",photo_recipe:"📷 Рецепт по фото",photo_shelf:"📷 Полка по фото",cook_start:"👨‍🍳 Готовить по шагам — начали",cook_finish:"🎉 Приготовили до конца",timer:"⏱ Таймеры",list_open:"🛒 Список покупок",
   store_links:"🏪 Ссылки на магазин",list_replace:"🔄 Замена из списка",list_share:"📤 Список текстом",pdf:"📄 PDF",fav_save:"⭐ В избранное",
-  site_link:"🌐 Вход на сайт через Telegram",profile_edit:"👤 Профиль: аллергии / не использовать",promo:"🎟 Промокод",sub_view:"💎 Открыли «Подписку»",
+  site_link:"🌐 Вход на сайт через Telegram",profile_edit:"👤 Профиль (убран)",promo:"🎟 Промокод",sub_view:"💎 Открыли «Подписку»",
   trial_start:"🎁 Начали пробный период",payment:"💰 Оплата"};
 var KINDS={recipe:"Рецепт",daymenu:"Меню на день",week:"План на 3 дня",weekday:"День плана",missing:"Замена продуктов",photo:"Фото",reminder:"Напоминание"};
 var S=null, ROLE="";
@@ -158,9 +161,9 @@ function render(){
   $("m-months").innerHTML=m.months.length?m.months.map(function(x){return '<tr><td>'+x.month+'</td><td>'+x.count+'</td><td>'+num(x.rub)+'</td><td>'+x.stars+'</td><td>'+num(x.rub*share/100)+' ₽ · '+Math.floor(x.stars*share/100)+' ⭐</td><td>'+num(x.rub*(100-share)/100)+' ₽ · '+Math.ceil(x.stars*(100-share)/100)+' ⭐</td></tr>';}).join(""):'<tr><td colspan="6">Оплат пока нет</td></tr>';
   $("m-recent").innerHTML=m.recent.length?m.recent.map(function(p){return '<tr><td>'+dt(p.ts)+'</td><td>'+esc(p.uid)+'</td><td>'+num(p.amount)+' '+(p.currency==="XTR"?"⭐":esc(p.currency))+'</td><td>'+esc(p.plan)+'</td></tr>';}).join(""):'<tr><td colspan="4">Оплат пока нет</td></tr>';
   $("ref-example").textContent="https://t.me/"+s.bot+"?start=ref_blogger";
-  $("m-refs").innerHTML=s.refs.length?s.refs.map(function(r){return '<tr><td><code>ref_'+esc(r.ref)+'</code></td><td>'+r.users+'</td><td>'+r.paid_users+'</td><td>'+num(r.amount)+'</td></tr>';}).join(""):'<tr><td colspan="4">Пока никто не пришёл по ссылкам</td></tr>';
+  $("m-refs").innerHTML=s.refs.length?s.refs.map(function(r){return '<tr><td><code>ref_'+esc(r.ref)+'</code></td><td>'+r.users+'</td><td>'+r.paid_users+'</td><td>'+num(r.amount)+'</td><td><button data-copy="'+esc(refLink(r.ref))+'">Копировать ссылку</button></td></tr>';}).join(""):'<tr><td colspan="5">Пока никто не пришёл по ссылкам</td></tr>';
   $("m-promos").innerHTML=s.promos.length?s.promos.map(function(p){return '<tr><td><code>'+esc(p.code)+'</code></td><td>'+p.used+'</td></tr>';}).join(""):'<tr><td colspan="2">Промокоды пока не использовали</td></tr>';
-  $("u-cards").innerHTML=[card(a.profiles,"Заполнили профиль (аллергии и т.п.)"),card(a.shelf_users,"Ведут полку"),card(a.favorites,"Рецептов в избранном"),
+  $("u-cards").innerHTML=[card(a.shelf_users,"Ведут полку"),card(a.favorites,"Рецептов в избранном"),
     card(a.fav_users,"Людей с избранным"),card(a.linked_devices,"Устройств сайта привязано к Telegram"),
     card(Object.keys(u.gens_today_by_src).map(function(k){return ({bot:"бот",web:"сайт",reminder:"напомин."}[k]||k)+" "+u.gens_today_by_src[k];}).join(" · ")||"0","Подборы сегодня: откуда")].join("");
   var fk=Object.keys(u.features_7d).sort(function(x,y){return u.features_7d[y].times-u.features_7d[x].times;});
@@ -173,7 +176,7 @@ function render(){
 function renderSettings(st){
   var owner=ROLE==="owner";
   $("p-role").textContent=owner?"Вы владелец — можно менять всё. Изменения доходят до бота и сайта примерно за 15 секунд.":
-    "Вы партнёр: можно менять цены, лимиты, функции подписки, пробный период и промокоды. Включение подписки, потолок расходов и доли меняет владелец. Изменения доходят до бота и сайта примерно за 15 секунд.";
+    "Вы партнёр: доступ только для просмотра. Менять настройки, цены и функции может владелец.";
   $("s-paywall").checked=st.paywall;$("s-paywall").disabled=!owner;
   var kinds=["recipe","daymenu","week","missing","photo"];
   $("s-limits").innerHTML=kinds.map(function(k){return '<tr><td>'+esc(st.kind_titles[k]||k)+'</td>'+["anon","free","premium"].map(function(p){var v=(st.limits[p]||{})[k]||[0,1];
@@ -189,7 +192,39 @@ function renderSettings(st){
   $("s-cap").value=st.daily_cap;$("s-anon").value=st.anon_cap;$("s-ip").value=st.ip_cap;$("s-share").value=st.partner_share;
   ["s-cap","s-anon","s-ip","s-share"].forEach(function(i){$(i).disabled=!owner;});
   $("s-cap-rub").textContent=num(st.daily_cap*0.5);
+  lockForPartner();
 }
+// партнёр только смотрит: все поля и кнопки изменения отключены (сервер тоже отвечает 403)
+function refLink(name){return "https://t.me/"+((S&&S.bot)||"Cookingvkusno_bot")+"?start=ref_"+name;}
+function copyText(t,btn){
+  var done=function(){if(btn){var o=btn.textContent;btn.textContent="Скопировано";setTimeout(function(){btn.textContent=o;},1500);}};
+  if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(t).then(done,function(){prompt("Скопируйте ссылку:",t);});}else{prompt("Скопируйте ссылку:",t);}
+}
+document.addEventListener("click",function(e){
+  var t=e.target; if(!t||!t.closest)return;
+  var c=t.closest("[data-copy]"); if(c){copyText(c.getAttribute("data-copy"),c);return;}
+  if(t.closest("#ref-make")){
+    var name=($("ref-name").value||"").toLowerCase().replace(/[^a-z0-9_-]/g,"").slice(0,32);
+    if(!name){$("ref-out").textContent="Метка: латинские буквы и цифры";return;}
+    var link=refLink(name);
+    $("ref-out").innerHTML='<code>'+esc(link)+'</code> <button data-copy="'+esc(link)+'">Копировать</button>';
+  }
+});
+function lockForPartner(){
+  if(ROLE==="owner")return;
+  Array.prototype.forEach.call(document.querySelectorAll('[data-s="plans"] input,[data-s="plans"] select,[data-s="plans"] textarea,[data-s="plans"] button,#gf input,#gf button,[data-s="ads"] input,[data-s="ads"] select,[data-s="ads"] textarea,[data-s="ads"] button'),function(e){e.disabled=true;});
+  Array.prototype.forEach.call(document.querySelectorAll('#save,#add-offer,#add-promo,[data-save2],[data-all-on],[data-all-test],[data-rm],#gf,[data-s="ads"] form'),function(e){e.className+=" hide";});
+}
+function setAllRollout(level){
+  Array.prototype.forEach.call(document.querySelectorAll("[data-roll]"),function(s){s.value=level;});
+  $("save").click();
+}
+document.addEventListener("click",function(e){
+  var t=e.target&&e.target.closest?e.target:null; if(!t)return;
+  if(t.closest("[data-save2]")){$("save").click();}
+  else if(t.closest("[data-all-on]")){if(confirm("Включить голос и фото для всех пользователей?"))setAllRollout("all");}
+  else if(t.closest("[data-all-test]")){setAllRollout("testers");}
+});
 function offerRow(o){return '<tr data-offer><td><input data-o="key" value="'+esc(o.key)+'" style="width:100px"></td><td><input type="number" data-o="days" value="'+o.days+'"></td><td><input type="number" data-o="rub" value="'+o.rub+'"></td><td><input type="number" data-o="stars" value="'+o.stars+'"></td><td><button class="dng" data-rm>✕</button></td></tr>';}
 function promoRow(c,d){return '<tr data-promo><td><input data-p="code" value="'+esc(c)+'" style="width:160px"></td><td><input type="number" data-p="days" value="'+d+'"></td><td><button class="dng" data-rm>✕</button></td></tr>';}
 function collect(){

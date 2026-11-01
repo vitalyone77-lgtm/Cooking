@@ -6,7 +6,7 @@ ai.py, search.py, prompts.py, day_menu.py, week_menu.py, favorites.py, shopping.
 
 Пользователь = устройство: при первом визите браузер получает случайный код и хранит его у себя
 (без регистрации). Меню и планы веба лежат отдельно от бота (папка web_data/). После «Войти через Telegram»
-устройство привязано к аккаунту (accounts.py): лимиты, подписка, профиль, полка и избранное — общие с ботом.
+устройство привязано к аккаунту (accounts.py): лимиты, подписка, полка и избранное — общие с ботом.
 """
 import asyncio
 import contextvars
@@ -170,7 +170,6 @@ def _spend(dev_id: int, kind: str) -> dict:
         raise HTTPException(429, why)
     web_db.log_event(dev_id, "gen")
     web_db.log_event(dev_id, kind)
-    profile_ctx.set_for(uid)      # аллергии и «не использовать» — в генерацию (задача копирует контекст)
     return {"id": spent, "kind": kind, "notice": why}
 
 
@@ -472,7 +471,7 @@ def favorites_delete(fav_id: str, x_device: str | None = Header(default=None)):
     return {"ok": fav_mod.remove_favorite(_uid(_dev(x_device)), fav_id)}
 
 
-# ---------------- личный кабинет: вход через Telegram, профиль, полка ----------------
+# ---------------- личный кабинет: вход через Telegram, полка ----------------
 
 _link_log: dict[int, list[float]] = {}
 
@@ -488,7 +487,6 @@ def me(x_device: str | None = Header(default=None)):
            "paywall": plans.paywall(), "memory": memory, "bot": config.BOT_USERNAME,
            "favorites": len(fav_mod.get_favorites(uid))}
     if memory:
-        out["profile"] = accounts.get_profile(uid)
         out["shelf"] = [x["item"] for x in accounts.shelf_list(uid)]
     return out
 
@@ -544,12 +542,6 @@ def _need_memory(dev_id: int) -> str:
 class ProfileIn(BaseModel):
     allergies: str = Field("", max_length=300)
     never: str = Field("", max_length=300)
-
-
-@app.put("/api/profile")
-def profile_save(body: ProfileIn, x_device: str | None = Header(default=None)):
-    uid = _need_memory(_dev(x_device))
-    return accounts.set_profile(uid, allergies=body.allergies, never=body.never)
 
 
 class ShelfIn(BaseModel):
@@ -656,13 +648,14 @@ def _admin_cookie(role: str) -> str:
 
 
 def _need_admin(request: Request, owner: bool = False) -> str:
-    """Роль вошедшего: owner (владелец — всё) или partner (партнёр — статистика, цены, лимиты, промокоды, реклама)."""
+    """Роль вошедшего: owner (владелец — смотрит и меняет всё) или partner (партнёр — только смотрит).
+    owner=True — действие меняет данные, партнёру недоступно."""
     raw = request.cookies.get("adm", "")
     role = raw.split(".", 1)[0]
     if (config.WEB_SECRET and _role_password(role) and role in ROLE_TITLES
             and hmac.compare_digest(raw.encode(), _admin_cookie(role).encode())):
         if owner and role != "owner":
-            raise HTTPException(403, "Это может менять только владелец")
+            raise HTTPException(403, "Партнёр может только смотреть. Менять настройки может владелец.")
         return role
     raise HTTPException(401, "admin")
 
@@ -752,8 +745,8 @@ def _limits_spec(d: dict) -> str:
 
 @app.post("/admin/api/settings")
 async def admin_settings(request: Request):
-    """Сохранить тарифы/лимиты/функции/промокоды. Потолки расходов, включение подписки и доля — только владелец."""
-    role = _need_admin(request)
+    """Сохранить тарифы/лимиты/функции/промокоды — только владелец (партнёр видит, но не меняет)."""
+    role = _need_admin(request, owner=True)
     try:
         body = await request.json()
         assert isinstance(body, dict)
@@ -798,15 +791,6 @@ async def admin_settings(request: Request):
             new["PROMO_CODES"] = ",".join(rows)
     except (TypeError, ValueError, AttributeError):
         raise HTTPException(400, "Проверь значения — где-то не число")
-    owner_only = [k for k in new if plans.EDITABLE[k][0] == "owner"]
-    if role != "owner":
-        # партнёр может прислать форму целиком — поля владельца молча не трогаем, если они не изменились
-        cur = {k: plans.cfg(k) for k in owner_only}
-        changed = [k for k in owner_only if new[k] != cur[k]]
-        if changed:
-            raise HTTPException(403, "Это может менять только владелец: " + ", ".join(changed))
-        for k in owner_only:
-            new.pop(k)
     before = {k: plans.cfg(k) for k in new}
     diff = {k: v for k, v in new.items() if v != before[k]}
     if diff:
@@ -824,7 +808,7 @@ class GrantIn(BaseModel):
 @app.post("/admin/api/grant")
 def admin_grant(body: GrantIn, request: Request):
     """Выдать подписку вручную (например, блогеру или в подарок) — по id в Telegram."""
-    role = _need_admin(request)
+    role = _need_admin(request, owner=True)
     until = accounts.grant_days(body.uid, body.days, f"admin:{role}")
     accounts.admin_log(role, "подписка вручную", f"{body.uid}: +{body.days} дн.")
     return {"until": until}
@@ -839,7 +823,7 @@ def admin_log_view(request: Request):
 @app.post("/admin/api/ads")
 async def admin_ad_add(request: Request, slot: str = FForm(...), title: str = FForm(""), url: str = FForm(...),
                        image: UploadFile = File(...)):
-    role = _need_admin(request)
+    role = _need_admin(request, owner=True)
     accounts.admin_log(role, "реклама: новый баннер", url[:200])
     if slot not in ("top", "inline"):
         raise HTTPException(400, "slot")
@@ -861,7 +845,7 @@ async def admin_ad_add(request: Request, slot: str = FForm(...), title: str = FF
 
 @app.post("/admin/api/ads/{ad_id}/toggle")
 def admin_ad_toggle(ad_id: int, request: Request):
-    _need_admin(request)
+    _need_admin(request, owner=True)
     with web_db.db() as c:
         c.execute("UPDATE ads SET active=1-active WHERE id=?", (ad_id,))
     return {"ok": True}
@@ -869,7 +853,7 @@ def admin_ad_toggle(ad_id: int, request: Request):
 
 @app.delete("/admin/api/ads/{ad_id}")
 def admin_ad_delete(ad_id: int, request: Request):
-    _need_admin(request)
+    _need_admin(request, owner=True)
     with web_db.db() as c:
         row = c.execute("SELECT image FROM ads WHERE id=?", (ad_id,)).fetchone()
         c.execute("DELETE FROM ads WHERE id=?", (ad_id,))
@@ -1032,6 +1016,7 @@ class MissingIn(BaseModel):
     ctx: str = Field(pattern="^(recipe|day|week)$")
     items: list[str] = Field(min_length=1, max_length=20)
     text: str = Field("", max_length=20000)     # для рецепта — его текст
+    excluded: str = Field("", max_length=500)    # что исключено в запросе (с устройства — на сервере не хранится)
 
 
 @app.post("/api/missing")
@@ -1052,7 +1037,7 @@ async def api_missing(body: MissingIn, x_device: str | None = Header(default=Non
 
     async def work():
         if body.ctx == "recipe":
-            text, terms = await missing_mod.adapt_recipe(body.text, names)
+            text, terms = await missing_mod.adapt_recipe(body.text, names, body.excluded)
             return {"title": extract_dish_title(text) or "Рецепт", "text": text,
                     "shopping": _mark_home(dev_id, with_amounts(links_for(terms), amounts_from_recipe_text(text)))}
         if body.ctx == "day":

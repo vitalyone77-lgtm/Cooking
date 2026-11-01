@@ -10,6 +10,7 @@ import week_menu
 from ai import call_llm_with_fallback
 from prompts import SYSTEM_PROMPT, season_line
 from shopping import extract_shopping_terms
+import profile_ctx
 
 logger = logging.getLogger(__name__)
 
@@ -52,10 +53,11 @@ REPLACE_RULES = (
 )
 
 
-async def adapt_recipe(recipe_text: str, missing: list[str]) -> tuple[str, list[str]]:
+async def adapt_recipe(recipe_text: str, missing: list[str], avoid: str = "") -> tuple[str, list[str]]:
     """Один рецепт: МИНИМАЛЬНАЯ замена недостающих (блюдо то же; другое — только если нет самой основы).
     -> (текст, продукты для поиска)."""
     missing = clean_missing(missing)
+    profile_ctx.set_avoid(avoid)
     user = (
         "Вот готовый рецепт. ЭТИХ ПРОДУКТОВ НЕТ у пользователя: " + ", ".join(missing) + ".\n\n"
         + REPLACE_RULES + "\n" + season_line() + "\nРЕЦЕПТ:\n" + recipe_text
@@ -91,7 +93,7 @@ async def rebuild_day(chat_id: int, missing: list[str]) -> str:
             and _mentions(entry["meals"][k].get("text", ""), missing)]
     if not keys:
         keys = [k for k in entry["order"] if entry["meals"].get(k, {}).get("ok")]
-    results = await asyncio.gather(*[adapt_recipe(entry["meals"][k]["text"], missing) for k in keys])
+    results = await asyncio.gather(*[adapt_recipe(entry["meals"][k]["text"], missing, entry["base_data"].get("excluded", "")) for k in keys])
     for k, (text, terms) in zip(keys, results):
         entry["meals"][k] = {"title": day_menu.extract_dish_title(text) or entry["meals"][k]["title"], "text": text, "ok": True}
     old = [t for t in (entry.get("shopping_terms") or []) if not _mentions(t, missing)]

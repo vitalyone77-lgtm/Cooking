@@ -1,7 +1,6 @@
 """
 Личный кабинет: один аккаунт = id в Telegram. Общий SQLite для бота и сайта (два процесса, режим WAL).
 
-- профиль: аллергии и продукты, которые никогда не использовать (подставляются в каждую генерацию);
 - «полка»: долгоживущие продукты, которые человек купил или отметил «есть дома»;
 - привязка устройства сайта к Telegram (одноразовый код, сайт → бот);
 - подписка: до какого времени действует, платежи (без повторного зачисления), промокоды, откуда пришёл (ref);
@@ -21,7 +20,6 @@ _lock = threading.Lock()
 _ready = False
 
 SCHEMA = """
-CREATE TABLE IF NOT EXISTS profiles(uid TEXT PRIMARY KEY, allergies TEXT DEFAULT '', never TEXT DEFAULT '', updated REAL);
 CREATE TABLE IF NOT EXISTS shelf(uid TEXT, item TEXT, ts REAL, PRIMARY KEY(uid, item));
 CREATE TABLE IF NOT EXISTS links(dev_id INTEGER PRIMARY KEY, tg_id INTEGER, ts REAL);
 CREATE INDEX IF NOT EXISTS links_tg ON links(tg_id);
@@ -59,6 +57,12 @@ def _conn():
     if not _ready:
         c.execute("PRAGMA journal_mode=WAL")
         c.executescript(SCHEMA)
+        if c.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='profiles'").fetchone():
+            # аллергии и «не использовать» больше не храним: удаляем таблицу и вычищаем её следы из файла
+            c.execute("DROP TABLE profiles")
+            c.commit()
+            c.execute("VACUUM")
+            c.execute("PRAGMA wal_checkpoint(TRUNCATE)")
         _ready = True
     _shared = c
     return c
@@ -79,23 +83,7 @@ def _q(sql: str, args=(), one=False, all_=False):
             c.close()
 
 
-# ---------- профиль ----------
-
-def get_profile(uid) -> dict:
-    row = _q("SELECT allergies, never FROM profiles WHERE uid=?", (str(uid),), one=True)
-    return {"allergies": row[0] or "", "never": row[1] or ""} if row else {"allergies": "", "never": ""}
-
-
-def set_profile(uid, allergies: str | None = None, never: str | None = None) -> dict:
-    cur = get_profile(uid)
-    if allergies is not None:
-        cur["allergies"] = _clean_list(allergies)
-    if never is not None:
-        cur["never"] = _clean_list(never)
-    _q("INSERT INTO profiles(uid, allergies, never, updated) VALUES(?,?,?,?) ON CONFLICT(uid) DO UPDATE SET "
-       "allergies=excluded.allergies, never=excluded.never, updated=excluded.updated",
-       (str(uid), cur["allergies"], cur["never"], time.time()))
-    return cur
+# ---------- общие помощники ----------
 
 
 def _clean_list(text: str) -> str:
@@ -560,7 +548,6 @@ def account_stats() -> dict:
     return {
         "linked_devices": one("SELECT COUNT(*) FROM links"),
         "linked_accounts": one("SELECT COUNT(DISTINCT tg_id) FROM links"),
-        "profiles": one("SELECT COUNT(*) FROM profiles WHERE allergies != '' OR never != ''"),
         "shelf_users": one("SELECT COUNT(DISTINCT uid) FROM shelf"),
         "favorites": one("SELECT COUNT(*) FROM favs"),
         "fav_users": one("SELECT COUNT(DISTINCT uid) FROM favs"),

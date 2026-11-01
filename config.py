@@ -112,8 +112,7 @@ LIMITS_OPEN = os.getenv("LIMITS_OPEN", f"recipe={WEB_LIMIT_RECIPE}/1,daymenu={WE
 LIMITS_FREE = os.getenv("LIMITS_FREE", "recipe=3/1,daymenu=1/7,week=0/3,missing=2/1,photo=1/1")
 LIMITS_PREMIUM = os.getenv("LIMITS_PREMIUM", "recipe=6/1,daymenu=2/1,week=1/2,missing=10/1,photo=5/1")
 LIMITS_ANON = os.getenv("LIMITS_ANON", "recipe=1/1,daymenu=0/1,week=0/3,missing=1/1,photo=0/1")   # сайт без входа
-# Функции только для подписки (при PAYWALL_ENABLED): memory (профиль — аллергии и «не использовать», и полка:
-# без подписки бот ничего не запоминает), pdf, cart (корзина ВкусВилла с ценами), noads (сайт без рекламы)
+# Функции только для подписки (при PAYWALL_ENABLED): memory (полка — продукты, которые уже есть дома), pdf, cart (корзина ВкусВилла с ценами), noads (сайт без рекламы)
 PREMIUM_FEATURES = [x.strip() for x in os.getenv("PREMIUM_FEATURES", "memory,pdf,cart,noads").split(",") if x.strip()]
 # Новые функции — кому включены: off (никому), testers (только тестировщикам), premium (подписке), all (всем).
 # voice — голосовой ввод, photo_recipe — рецепт по фото холодильника, photo_shelf — полка по фото

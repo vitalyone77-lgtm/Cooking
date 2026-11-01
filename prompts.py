@@ -3,6 +3,7 @@
 Вынесены отдельно, чтобы их можно было улучшать/тестировать без правки логики бота.
 """
 from cuisines import cuisine_label, cuisine_prompt_rule, MACRO_GOAL_KEY, portion_instruction
+import profile_ctx
 
 
 # Что реально есть в российских магазинах по месяцам (ориентир для ИИ): свежее сезонное + круглогодичное
@@ -240,6 +241,7 @@ def build_day_menu_user_prompt(meals_info: list[dict], base_data: dict) -> str:
     appliance_labels = ", ".join(base_data.get("appliance_labels", [])) or "любой доступный"
     preferred = base_data.get("preferred") or "нет особых пожеланий"
     excluded = base_data.get("excluded") or "нет исключений"
+    profile_ctx.set_avoid(base_data.get("excluded"))
     cuisine_key = base_data.get("cuisine")
 
     if cuisine_key == MACRO_GOAL_KEY:
@@ -327,6 +329,7 @@ WEEK_BASKET_SYSTEM_PROMPT = """Ты — опытный шеф-повар и ди
 def build_week_basket_user_prompt(meal_labels: list[str], days_total: int, base_data: dict) -> str:
     preferred = base_data.get("preferred") or "нет особых пожеланий"
     excluded = base_data.get("excluded") or "нет исключений"
+    profile_ctx.set_avoid(base_data.get("excluded"))
     cuisine_key = base_data.get("cuisine")
 
     if cuisine_key == MACRO_GOAL_KEY:
@@ -392,6 +395,7 @@ def build_user_prompt(data: dict, search_query: str, search_results_text: str) -
     appliance_labels = ", ".join(data.get("appliance_labels", [])) or "любой доступный"
     preferred = data.get("preferred") or "нет особых пожеланий"
     excluded = data.get("excluded") or "нет исключений"
+    profile_ctx.set_avoid(data.get("excluded"))
     cuisine_key = data.get("cuisine")
     macro_goal = data.get("macro_goal")
 

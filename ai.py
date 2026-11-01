@@ -106,15 +106,15 @@ async def call_llm_with_fallback(messages: list[dict], max_tokens: int = 3000) -
     """
     block = profile_ctx.prompt_block()
     if block:
-        # профиль — в конец запроса пользователя: системный промпт не меняется и остаётся в кэше DeepSeek
+        # исключения запроса — в конец запроса пользователя: системный промпт не меняется и остаётся в кэше DeepSeek
         messages = messages[:-1] + [{**messages[-1], "content": messages[-1]["content"] + block}]
     text = await _call_any(messages, max_tokens)
     bad = profile_ctx.hits(text)
     if bad:
-        # нашёлся продукт из профиля — одна повторная попытка с явным указанием, что не так
-        logger.warning("В ответе продукты из профиля %s — перегенерирую", bad)
+        # нашёлся исключённый продукт — одна повторная попытка с явным указанием, что не так
+        logger.warning("В ответе исключённые продукты %s — перегенерирую", bad)
         retry = messages + [{"role": "assistant", "content": text},
-                            {"role": "user", "content": "В ответе есть запрещённые продукты из профиля: " + ", ".join(bad)
+                            {"role": "user", "content": "В ответе есть продукты, которые просили исключить: " + ", ".join(bad)
                              + ". Перепиши ответ полностью в том же формате без них (и без всего, что их содержит)."}]
         try:
             text = await _call_any(retry, max_tokens)
@@ -147,7 +147,7 @@ async def generate_recipe(data: dict, search_query: str, search_results_text: st
         text = await call_llm_with_fallback(messages)
         bad = profile_ctx.hits(text)
         if bad:   # и после повторной попытки — предупреждаем, а не молчим
-            text = "⚠️ Проверь состав: возможно, есть " + ", ".join(bad) + " — у тебя это в профиле.\n\n" + text
+            text = "⚠️ Проверь состав: возможно, есть " + ", ".join(bad) + " — ты просил это исключить.\n\n" + text
         return text
     except RuntimeError as e:
         logger.error(f"Все LLM-провайдеры не сработали: {e}")

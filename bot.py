@@ -35,7 +35,7 @@ from shopping import (
 )
 from storage import (
     save_last_request, get_last_request, get_reminder_recipe, set_reminders_enabled, reminders_enabled,
-    get_portion, set_portion,
+    get_portion, set_portion, save_last_inputs, get_last_inputs, purge_old_inputs,
 )
 from reminders import setup_scheduler
 from favorites import add_favorite, get_favorites, get_favorite, remove_favorite, search_favorites
@@ -51,7 +51,6 @@ import bot_cook
 import bot_shop
 import bot_vision
 import accounts
-import profile_ctx
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -106,13 +105,14 @@ HELP_TEXT = (
     "🍳 *Создать* — выбрать тип питания и получить рецепт, собрать меню на день или на "
     f"{config.WEEK_MENU_DAYS} дня, открыть избранное или последний рецепт.\n"
     "🗂 *Готовые меню* — открыть уже собранное меню на день и план на несколько дней.\n"
-    "👤 *Профиль* — аллергии, полка, напоминания, вход на сайт и эта справка.\n\n"
+    "👤 *Профиль* — полка, напоминания, вход на сайт и эта справка.\n\n"
     "Под рецептом:\n"
     "👨‍🍳 *Готовить по шагам* — один шаг на экране, таймер прямо в шаге, галочки «готово».\n"
     "🛒 *Список покупок* — отмечай ✅ купил, ❌ нет в магазине (подберу замену), 🏠 есть дома; "
     "оттуда же ссылки на Пятёрочку, ВкусВилл, Перекрёсток, Лавку, Купер.\n\n"
-    "👤 *Профиль* (в меню) — аллергии и продукты, которые ты не ешь (их не будет ни в одном рецепте), "
-    "«полка» с тем, что уже есть дома, и вход на сайт.\n\n"
+    "🚫 *Исключить* — в анкете напиши аллергии и продукты, которые не нужны: их не будет ни в одном блюде. "
+    "Я не храню это как профиль, но помню последний ввод и предлагаю кнопку «Как в прошлый раз».\n"
+    "👤 *Профиль* (в меню) — «полка» с тем, что уже есть дома, и вход на сайт.\n\n"
     "*Команды:* /menu — меню, /ready — готовые меню, /profile — профиль, "
     "/app — веб-версия для телефона, /remind — вкл/выкл напоминания, /help — справка.\n\n"
     "Если ты пропадёшь на несколько дней, я разок-другой напомню о себе идеей блюда — не чаще. "
@@ -273,6 +273,12 @@ async def ensure_reply_kb(message: Message) -> None:
 def _kb_sent(chat_id: int) -> None:
     accounts.sess_set(f"kbv:{chat_id}", {"v": kb.KB_VERSION})
     accounts.sess_mark_forever(f"kbv:{chat_id}")
+
+
+def _skip(step: str, chat_id: int):
+    """«Пропустить» и, если в прошлый раз что-то вводили в это поле, «↩️ Как в прошлый раз»."""
+    field = step.split("_", 1)[1] if step[:3] in ("dm_", "wm_") else step
+    return kb.skip_kb(step, get_last_inputs(chat_id).get(field, ""))
 
 
 def _left_line(chat_id: int, kind: str) -> str:
@@ -484,7 +490,7 @@ async def step_cuisine(callback: CallbackQuery, state: FSMContext):
             "Укажи цель по КБЖУ на этот приём пищи, например:\n"
             "«500 ккал, белки 40 г» или «около 600 ккал, много белка, поменьше углеводов».\n"
             "Если без разницы — нажми «Пропустить», подберу сбалансированный вариант.",
-            reply_markup=kb.skip_kb("macro_goal"),
+            reply_markup=_skip("macro_goal", callback.message.chat.id),
         )
         await state.set_state(RecipeForm.macro_goal)
     else:
@@ -524,7 +530,7 @@ async def ask_preferred(message: Message, state: FSMContext):
         "(например: курица, рис, брокколи) — или сразу название блюда, "
         "которое хочешь приготовить (например: «хочу плов» или «хочу борщ»).\n"
         "Если без разницы — нажми «Пропустить»." + extra,
-        reply_markup=kb.skip_kb("preferred"),
+        reply_markup=_skip("preferred", message.chat.id),
     )
     await state.set_state(RecipeForm.preferred)
 
@@ -567,7 +573,7 @@ async def ask_excluded(message: Message, state: FSMContext):
         "Какие продукты нужно исключить? (аллергии, нелюбимые продукты)\n"
         "Например: орехи, грибы, лук.\n"
         "Если исключать нечего — нажми «Пропустить».",
-        reply_markup=kb.skip_kb("excluded"),
+        reply_markup=_skip("excluded", message.chat.id),
     )
     await state.set_state(RecipeForm.excluded)
 
@@ -652,6 +658,7 @@ async def step_appliance(callback: CallbackQuery, state: FSMContext):
 
 async def show_summary(message: Message, state: FSMContext):
     data = await state.get_data()
+    save_last_inputs(message.chat.id, data)
     portion = get_portion(message.chat.id)
     macro_goal = data.get("macro_goal")
     text = (
@@ -725,7 +732,6 @@ async def step_confirm_go(callback: CallbackQuery, state: FSMContext):
 async def _seen_message(handler, event, data):
     try:
         usage.touch(event.chat.id)
-        profile_ctx.set_for(event.chat.id)     # аллергии и «не использовать» — во все генерации этого обновления
     except Exception:  # noqa: BLE001 — учёт не должен мешать ответу
         logger.exception("usage.touch")
     return await handler(event, data)
@@ -739,7 +745,6 @@ async def _seen_callback(handler, event, data):
     try:
         if event.message:
             usage.touch(event.message.chat.id)
-            profile_ctx.set_for(event.message.chat.id)
     except Exception:  # noqa: BLE001
         logger.exception("usage.touch")
     return await handler(event, data)
@@ -1015,7 +1020,7 @@ async def run_missing(callback: CallbackQuery, anchor: Message, ctx: str, names:
     status = await msg.answer("🔄 Подбираю замену: " + ", ".join(names) + " …", parse_mode=None)
     try:
         if ctx == "r":
-            text, new_terms = await missing.adapt_recipe(anchor.text, names)
+            text, new_terms = await missing.adapt_recipe(anchor.text, names, get_last_inputs(chat_id).get("excluded", ""))
             await status.delete()
             set_last_recipe(chat_id, extract_dish_title(text), text, (get_last_request(chat_id) or {}).get("cuisine"))
             sent = await msg.answer(text, reply_markup=recipe_kb(text))
@@ -1098,7 +1103,7 @@ async def dm_step_cuisine(callback: CallbackQuery, state: FSMContext):
             "«1800 ккал» или «2000 ккал, белки 120 г».\n"
             "Раздам её по приёмам пищи пропорционально.\n"
             "Если без разницы — нажми «Пропустить».",
-            reply_markup=kb.skip_kb("dm_macro_goal"),
+            reply_markup=_skip("dm_macro_goal", callback.message.chat.id),
         )
         await state.set_state(DayMenuForm.macro_goal)
     else:
@@ -1124,7 +1129,7 @@ async def dm_ask_preferred(message: Message, state: FSMContext):
     await message.answer(
         "Какие продукты хочешь использовать на весь день, в общих чертах "
         "(например: курица, рис, овощи)? Если без разницы — «Пропустить».",
-        reply_markup=kb.skip_kb("dm_preferred"),
+        reply_markup=_skip("dm_preferred", message.chat.id),
     )
     await state.set_state(DayMenuForm.preferred)
 
@@ -1147,7 +1152,7 @@ async def dm_ask_excluded(message: Message, state: FSMContext):
     await message.answer(
         "Какие продукты исключить на весь день? (аллергии, нелюбимые продукты)\n"
         "Если исключать нечего — нажми «Пропустить».",
-        reply_markup=kb.skip_kb("dm_excluded"),
+        reply_markup=_skip("dm_excluded", message.chat.id),
     )
     await state.set_state(DayMenuForm.excluded)
 
@@ -1222,6 +1227,7 @@ async def dm_step_appliance(callback: CallbackQuery, state: FSMContext):
 
 async def dm_show_summary(message: Message, state: FSMContext):
     data = await state.get_data()
+    save_last_inputs(message.chat.id, data)
     portion = get_portion(message.chat.id)
     meals = data.get("meals", [])
     meals_text = ", ".join(kb.MEAL_LABELS[m] for m in meals)
@@ -1351,7 +1357,7 @@ async def wm_step_cuisine(callback: CallbackQuery, state: FSMContext):
             "Укажи ОБЩУЮ цель по КБЖУ на КАЖДЫЙ день плана, например:\n"
             "«1800 ккал» или «2000 ккал, белки 120 г».\n"
             "Если без разницы — нажми «Пропустить».",
-            reply_markup=kb.skip_kb("wm_macro_goal"),
+            reply_markup=_skip("wm_macro_goal", callback.message.chat.id),
         )
         await state.set_state(WeekMenuForm.macro_goal)
     else:
@@ -1377,7 +1383,7 @@ async def wm_ask_preferred(message: Message, state: FSMContext):
     await message.answer(
         "Какие продукты хочешь использовать на весь период, в общих чертах "
         "(например: курица, рис, овощи)? Если без разницы — «Пропустить».",
-        reply_markup=kb.skip_kb("wm_preferred"),
+        reply_markup=_skip("wm_preferred", message.chat.id),
     )
     await state.set_state(WeekMenuForm.preferred)
 
@@ -1400,7 +1406,7 @@ async def wm_ask_excluded(message: Message, state: FSMContext):
     await message.answer(
         "Какие продукты исключить на весь период? (аллергии, нелюбимые продукты)\n"
         "Если исключать нечего — нажми «Пропустить».",
-        reply_markup=kb.skip_kb("wm_excluded"),
+        reply_markup=_skip("wm_excluded", message.chat.id),
     )
     await state.set_state(WeekMenuForm.excluded)
 
@@ -1475,6 +1481,7 @@ async def wm_step_appliance(callback: CallbackQuery, state: FSMContext):
 
 async def wm_show_summary(message: Message, state: FSMContext):
     data = await state.get_data()
+    save_last_inputs(message.chat.id, data)
     portion = get_portion(message.chat.id)
     meals = data.get("meals", [])
     meals_text = ", ".join(kb.MEAL_LABELS[m] for m in meals)
@@ -1756,6 +1763,36 @@ async def favorite_save(callback: CallbackQuery):
     await callback.answer("Добавлено в избранное ⭐")
 
 
+# ---------- «Как в прошлый раз» для текстовых полей анкеты ----------
+
+def _reuse_handler(state_name: str, field: str):
+    return {
+        (RecipeForm.macro_goal.state, "macro_goal"): step_macro_goal_text,
+        (RecipeForm.preferred.state, "preferred"): step_preferred_text,
+        (RecipeForm.excluded.state, "excluded"): step_excluded_text,
+        (DayMenuForm.macro_goal.state, "macro_goal"): dm_step_macro_goal_text,
+        (DayMenuForm.preferred.state, "preferred"): dm_step_preferred_text,
+        (DayMenuForm.excluded.state, "excluded"): dm_step_excluded_text,
+        (WeekMenuForm.macro_goal.state, "macro_goal"): wm_step_macro_goal_text,
+        (WeekMenuForm.preferred.state, "preferred"): wm_step_preferred_text,
+        (WeekMenuForm.excluded.state, "excluded"): wm_step_excluded_text,
+    }.get((state_name, field))
+
+
+@dp.callback_query(F.data.startswith("reuse:"))
+async def reuse_last_input(callback: CallbackQuery, state: FSMContext):
+    step = callback.data.split(":", 1)[1]
+    field = step.split("_", 1)[1] if step[:3] in ("dm_", "wm_") else step
+    value = get_last_inputs(callback.message.chat.id).get(field, "")
+    handler = _reuse_handler(await state.get_state(), field)
+    if not value or not handler:
+        await callback.answer("Эта кнопка уже не нужна", show_alert=False)
+        return
+    await callback.answer()
+    await callback.message.edit_reply_markup()
+    await handler(callback.message.model_copy(update={"text": value}), state)    # как будто человек ввёл это сам
+
+
 # ---------- Любой другой текст вне анкеты ----------
 # Должен быть зарегистрирован ПОСЛЕДНИМ. Если человек пишет что-то вне анкеты, возвращаем ему
 # нижнее меню (оно могло пропасть) и главное меню — вместо тишины.
@@ -1801,6 +1838,7 @@ async def main():
     if config.REMINDER_ENABLED:
         setup_scheduler(bot, dp)
     accounts.sess_prune()
+    purge_old_inputs()
     n = bot_cook.resume_timers(bot)
     if n:
         logger.info("Возобновлено таймеров готовки: %d", n)
@@ -1809,7 +1847,7 @@ async def main():
         BotCommand(command="menu", description="Показать меню"),
         BotCommand(command="ready", description="Готовые меню"),
         BotCommand(command="app", description="Веб-версия для телефона"),
-        BotCommand(command="profile", description="Профиль: аллергии, полка, подписка"),
+        BotCommand(command="profile", description="Профиль: полка, подписка, вход на сайт"),
         BotCommand(command="remind", description="Вкл/выкл напоминания"),
         BotCommand(command="help", description="Справка"),
     ])

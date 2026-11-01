@@ -1,5 +1,5 @@
 """
-Личный кабинет в боте: профиль (аллергии, «никогда не использовать»), полка, вход на сайт,
+Личный кабинет в боте: полка, вход на сайт,
 подписка и оплата (Telegram Stars сразу; рубли — когда будет токен платёжного сервиса), промокоды,
 ссылки блогеров (/start ref_…), админская выдача подписки (/grant).
 """
@@ -46,52 +46,26 @@ async def spend_gate(callback: CallbackQuery, spent, why: str) -> bool:
 
 # ---------- экран профиля ----------
 
-def _locked_view(uid: int) -> tuple[str, InlineKeyboardMarkup]:
-    """Без подписки бот ничего не запоминает: профиль и полка — функция «memory»."""
-    text = ("👤 *Профиль*\n\n" + plans.status_text(uid) + "\n\n"
-            "🔒 С подпиской я запоминаю тебя: аллергии и продукты, которые ты не ешь (их не будет ни в одном "
-            "рецепте), и «полку» — масло, специи и крупы, которые у тебя уже есть, чтобы не покупать их снова.")
-    b = InlineKeyboardBuilder()
-    b.button(text="💎 Подписка", callback_data="pf:sub")
-    b.button(text="🎟 Промокод", callback_data="pf:promo")
-    b.button(text="🌐 Открыть сайт", callback_data="pf:site")
-    b.button(text="🔕 Напоминания" if reminders_enabled(uid) else "🔔 Напоминания", callback_data="pf:rem")
-    devs = accounts.devices_of(uid)
-    if devs:
-        b.button(text=f"🔓 Выйти на сайте ({devs})", callback_data="pf:unall")
-    b.button(text="❓ Справка", callback_data="help:open")
-    b.button(text="⬅️ Меню", callback_data="menu:open")
-    b.adjust(2, 1, 2 if devs else 1, 2)
-    return text, b.as_markup()
-
-
 async def _need_memory(callback: CallbackQuery) -> bool:
     if plans.has_feature(callback.message.chat.id, "memory"):
         return True
-    await callback.answer("Профиль и полка — в подписке 💎", show_alert=True)
+    await callback.answer("Полка — в подписке 💎", show_alert=True)
     return False
 
 
 def _profile_view(uid: int) -> tuple[str, InlineKeyboardMarkup]:
-    if not plans.has_feature(uid, "memory"):
-        return _locked_view(uid)
-    p = accounts.get_profile(uid)
-    shelf = accounts.shelf_list(uid)
-    lines = [
-        "👤 *Профиль*",
-        "",
-        f"🚫 Аллергии: {p['allergies'] or 'не указаны'}",
-        f"🙅 Никогда не использовать: {p['never'] or 'ничего'}",
-        "_Это учитывается в каждом рецепте, меню и плане — в боте и на сайте._",
-        "",
-        f"🏠 На полке: {len(shelf)} " + _plural(len(shelf), "продукт", "продукта", "продуктов"),
-        plans.status_text(uid),
-        f"🔔 Напоминания: {'включены' if reminders_enabled(uid) else 'выключены'}",
-    ]
+    shelf_on = plans.has_feature(uid, "memory")
+    shelf = accounts.shelf_list(uid) if shelf_on else []
+    lines = ["👤 *Профиль*", "", plans.status_text(uid)]
+    if shelf_on:
+        lines.append(f"🏠 На полке: {len(shelf)} " + _plural(len(shelf), "продукт", "продукта", "продуктов"))
+    else:
+        lines.append("🔒 С подпиской я помню «полку» — масло, специи и крупы, которые у тебя уже есть, чтобы не покупать их снова.")
+    lines.append(f"🔔 Напоминания: {'включены' if reminders_enabled(uid) else 'выключены'}")
+    lines += ["", "_Аллергии и продукты, которые не нужны, пиши в анкете в строке «Исключить». Я не храню их как профиль, "
+                  "а только последний ввод — его можно вернуть кнопкой «Как в прошлый раз»._"]
     b = InlineKeyboardBuilder()
-    b.button(text="✏️ Аллергии", callback_data="pf:edit:allergies")
-    b.button(text="✏️ Не использовать", callback_data="pf:edit:never")
-    b.button(text="🏠 Моя полка", callback_data="pf:shelf")
+    b.button(text="🏠 Моя полка" if shelf_on else "🔒 Моя полка", callback_data="pf:shelf")
     b.button(text="🌐 Открыть сайт", callback_data="pf:site")
     if plans.paywall():
         b.button(text="💎 Подписка", callback_data="pf:sub")
@@ -99,10 +73,10 @@ def _profile_view(uid: int) -> tuple[str, InlineKeyboardMarkup]:
     b.button(text="🔕 Напоминания" if reminders_enabled(uid) else "🔔 Напоминания", callback_data="pf:rem")
     devs = accounts.devices_of(uid)
     if devs:
-        b.button(text=f"🔓 Выйти на сайте ({devs})", callback_data="pf:unall")
+        b.button(text=f"🔓 Выйти на сайте ({devs})", callback_data=f"pf:unall")
     b.button(text="❓ Справка", callback_data="help:open")
     b.button(text="⬅️ Меню", callback_data="menu:open")
-    b.adjust(2, 2, *([2] if plans.paywall() else []), 2 if devs else 1, 2)
+    b.adjust(2, *([2] if plans.paywall() else []), 2 if devs else 1, 2)
     return "\n".join(lines), b.as_markup()
 
 
@@ -148,43 +122,6 @@ def _cancel_kb() -> InlineKeyboardMarkup:
     b = InlineKeyboardBuilder()
     b.button(text="⬅️ Отмена", callback_data="pf:back")
     return b.as_markup()
-
-
-_PROMPTS = {
-    "allergies": ("🚫 Напиши через запятую, на что у тебя аллергия — например: «орехи, мёд, креветки».\n"
-                  "Я не буду использовать эти продукты нигде, даже в соусах. Чтобы очистить — напиши «нет»."),
-    "never": ("🙅 Какие продукты ты не ешь и не хочешь видеть в рецептах? Через запятую — например: «кинза, печень, грибы».\n"
-              "Чтобы очистить — напиши «нет»."),
-}
-
-
-@router.callback_query(F.data.startswith("pf:edit:"))
-async def profile_edit(callback: CallbackQuery, state: FSMContext):
-    field = callback.data.split(":")[2]
-    if not await _need_memory(callback):
-        return
-    if field not in _PROMPTS:
-        await callback.answer()
-        return
-    await state.set_state(ProfileForm.allergies if field == "allergies" else ProfileForm.never)
-    await callback.answer()
-    await callback.message.edit_text(_PROMPTS[field], reply_markup=_cancel_kb(), parse_mode=None)
-
-
-@router.message(ProfileForm.allergies, F.text)
-async def profile_set_allergies(message: Message, state: FSMContext):
-    accounts.set_profile(message.chat.id, allergies=message.text)
-    usage.event("profile_edit", message.chat.id)
-    await message.answer("✅ Сохранил.", parse_mode=None)
-    await show_profile(message, state)
-
-
-@router.message(ProfileForm.never, F.text)
-async def profile_set_never(message: Message, state: FSMContext):
-    accounts.set_profile(message.chat.id, never=message.text)
-    usage.event("profile_edit", message.chat.id)
-    await message.answer("✅ Сохранил.", parse_mode=None)
-    await show_profile(message, state)
 
 
 @router.callback_query(F.data == "pf:rem")

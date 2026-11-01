@@ -166,12 +166,25 @@ def _refusal(uid, kind: str, n: int, days: int) -> str:
     return text
 
 
+_ips_purged = 0.0
+
+
+def _purge_old_ips() -> None:
+    """IP-адрес нужен только для дневного лимита с одного адреса: записи старше двух суток обезличиваем (раз в час)."""
+    global _ips_purged
+    if time.time() - _ips_purged < 3600:
+        return
+    _ips_purged = time.time()
+    _q("UPDATE gens SET ip=NULL WHERE ip IS NOT NULL AND ts < ?", (time.time() - 2 * 86400,))
+
+
 def try_spend(uid, kind: str, src: str, ip: str | None = None) -> tuple[int | None, str]:
     """
     Можно ли запустить подбор. -> (id записи, уведомление или "") если можно — id потом передаётся
     в unlog() при сбое; или (None, текст отказа).
     """
     import plans
+    _purge_old_ips()
     uid = str(uid)
     premium = plans.plan_of(uid) == "premium"
     cap = int(plans.cfg("DAILY_GEN_CAP"))
