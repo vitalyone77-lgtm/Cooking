@@ -37,6 +37,38 @@ HISTORY_KEY = "social:history"
 LAST_KEY = "social:last"
 
 
+_gid_cache: dict[str, int] = {}
+
+
+def normalize_group(raw) -> str:
+    """«-123», «club123», «https://vk.com/club123», «https://vk.com/kbzum», «kbzum» -> «123» или «kbzum»."""
+    s = re.sub(r"^https?://(?:www\.|m\.)?vk\.(?:com|ru)/", "", str(raw or "").strip()).split("?")[0].strip("/").lstrip("@-")
+    m = re.fullmatch(r"(?:club|public|event)(\d+)", s)
+    return m.group(1) if m else s
+
+
+async def group_numeric_id(client) -> int:
+    """Числовой номер сообщества. Если в настройке короткий адрес, узнаём номер у ВКонтакте (один раз)."""
+    g = normalize_group(config.VK_GROUP_ID)
+    if g.isdigit():
+        return int(g)
+    if g in _gid_cache:
+        return _gid_cache[g]
+    resp = await client.post(f"{config.VK_API_URL.rstrip('/')}/method/groups.getById", data={
+        "group_ids": g, "access_token": config.VK_GROUP_TOKEN, "v": config.VK_API_VERSION})
+    data = resp.json()
+    if "error" in data:
+        err = data["error"]
+        raise RuntimeError(f"Не удалось узнать номер сообщества «{g}»: код {err.get('error_code')}. "
+                           "Впишите номер цифрами в VK_GROUP_ID (его видно в ссылке на запись: wall-НОМЕР_...)")
+    res = data.get("response")
+    groups = res.get("groups") if isinstance(res, dict) else res
+    if not groups:
+        raise RuntimeError(f"Сообщество «{g}» не найдено: проверьте VK_GROUP_ID")
+    _gid_cache[g] = int(groups[0]["id"])
+    return _gid_cache[g]
+
+
 def configured_vk() -> bool:
     return bool(config.VK_GROUP_ID and config.VK_GROUP_TOKEN)
 
@@ -96,8 +128,9 @@ async def post_vk(text: str) -> int:
         raise RuntimeError("ВКонтакте не настроен: нет VK_GROUP_ID или VK_GROUP_TOKEN")
     try:
         async with httpx.AsyncClient(timeout=30) as client:
+            gid = await group_numeric_id(client)
             resp = await client.post(f"{config.VK_API_URL.rstrip('/')}/method/wall.post", data={
-                "owner_id": -abs(int(config.VK_GROUP_ID)), "from_group": 1, "message": text,
+                "owner_id": -gid, "from_group": 1, "message": text,
                 "access_token": config.VK_GROUP_TOKEN, "v": config.VK_API_VERSION})
             data = resp.json()
     except (httpx.HTTPError, ValueError) as e:

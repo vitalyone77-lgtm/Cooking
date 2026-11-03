@@ -136,7 +136,7 @@ ADMIN_TG_IDS = [int(x) for x in os.getenv("ADMIN_TG_IDS", "").replace(" ", "").s
 BOT_USERNAME = os.getenv("BOT_USERNAME", "Cookingvkusno_bot")
 # Вход партнёра (блогера) в админку: статистика, деньги, цены, лимиты, функции подписки, промокоды
 # «Рецепт дня» в сообщество ВКонтакте и Telegram-канал (social.py). Ключи только в .env на сервере.
-VK_GROUP_ID = int(os.getenv("VK_GROUP_ID", "0") or 0)            # число-ID сообщества, без минуса
+VK_GROUP_ID = (os.getenv("VK_GROUP_ID", "") or "").strip()       # число-ID или короткий адрес сообщества (kbzum), можно ссылкой
 VK_GROUP_TOKEN = os.getenv("VK_GROUP_TOKEN", "")                 # ключ доступа сообщества с правом на стену
 VK_API_VERSION = os.getenv("VK_API_VERSION", "5.199")
 VK_API_URL = os.getenv("VK_API_URL", "https://api.vk.com")
