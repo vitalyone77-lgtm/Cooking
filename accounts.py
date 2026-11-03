@@ -35,6 +35,7 @@ CREATE INDEX IF NOT EXISTS sess_ts ON sess(ts);
 CREATE TABLE IF NOT EXISTS favs(uid TEXT, id TEXT, title TEXT, text TEXT, cuisine TEXT, ts REAL, PRIMARY KEY(uid, id));
 CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY, value TEXT, ts REAL, who TEXT);
 CREATE TABLE IF NOT EXISTS admin_log(id INTEGER PRIMARY KEY AUTOINCREMENT, ts REAL, who TEXT, action TEXT, details TEXT);
+CREATE TABLE IF NOT EXISTS pub_recipes(slug TEXT PRIMARY KEY, ts REAL, title TEXT, body TEXT, image BLOB);
 CREATE TABLE IF NOT EXISTS feedback(id INTEGER PRIMARY KEY AUTOINCREMENT, ts REAL, uid TEXT, kind TEXT, text TEXT, contact TEXT,
   src TEXT, done INTEGER DEFAULT 0);
 CREATE TABLE IF NOT EXISTS consents(uid TEXT PRIMARY KEY, version INTEGER, ts REAL);
@@ -555,14 +556,15 @@ def promo_stats() -> list[dict]:
 
 CONSENT_VERSION = 1
 CONSENT_TEXT = (
-    "Для некоторых функций профиля нужны ваши данные. Если вы их включите, мы сохраним только то, что вы введёте сами: "
-    "список продуктов, которые вы не используете, цель по калориям и БЖУ, вес и цель по весу. "
+    "Для некоторых функций профиля нужны ваши данные. Ничего не включается само: вы выбираете функции галочками, и мы "
+    "сохраняем только то, что вы введёте сами для включённых функций: список продуктов, которые вы не используете, «полку» "
+    "(что уже есть дома), цель по калориям и БЖУ, дневник питания (что и сколько вы съели), вес и цель по весу. "
     "Они нужны только для работы этих функций, мы не показываем их другим людям и не передаём третьим лицам. "
     "Вы можете отключить любую функцию и удалить все данные одной кнопкой «Удалить мои данные». "
     "Диагнозы и сведения о здоровье вводить не нужно. Приложение не заменяет рекомендации врача, а список продуктов "
     "не гарантирует их отсутствие в готовом блюде: проверяйте состав."
 )
-PROFILE_FEATS = ("never", "macro", "weight")
+PROFILE_FEATS = ("never", "macro", "weight", "shelf", "diary")
 _RANGES = {"kcal": (800, 6000), "protein": (0, 600), "fat": (0, 600), "carb": (0, 1000)}
 
 
@@ -687,6 +689,23 @@ def spark(values: list[float]) -> str:
     if hi - lo < 1e-9:
         return "▄" * len(values)
     return "".join("▁▂▃▄▅▆▇█"[min(7, int((v - lo) / (hi - lo) * 7.999))] for v in values)
+
+
+# ---------- публичные страницы рецептов (/r/<адрес>) ----------
+
+def pub_recipe_add(slug: str, title: str, body: str, image: bytes | None) -> None:
+    _q("INSERT OR REPLACE INTO pub_recipes(slug, ts, title, body, image) VALUES(?,?,?,?,?)",
+       (slug, time.time(), (title or "")[:200], (body or "")[:15000], image))
+
+
+def pub_recipe_get(slug: str) -> dict | None:
+    row = _q("SELECT title, body, ts FROM pub_recipes WHERE slug=?", (slug,), one=True)
+    return {"title": row[0], "body": row[1], "ts": row[2]} if row else None
+
+
+def pub_recipe_image(slug: str) -> bytes | None:
+    row = _q("SELECT image FROM pub_recipes WHERE slug=?", (slug,), one=True)
+    return bytes(row[0]) if row and row[0] else None
 
 
 # ---------- сообщения разработчику ----------

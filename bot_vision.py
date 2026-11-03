@@ -191,7 +191,7 @@ async def any_photo(message: Message, state: FSMContext):
     uid = message.chat.id
     if plans.feature_on(uid, "photo_recipe"):
         await _recognize(message, state, "new")
-    elif plans.feature_on(uid, "photo_shelf") and plans.has_feature(uid, "memory"):
+    elif plans.feature_on(uid, "photo_shelf") and plans.shelf_on(uid):
         await _recognize(message, state, "shelf")
 
 

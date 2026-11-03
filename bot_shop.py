@@ -127,7 +127,7 @@ async def list_open(callback: CallbackQuery):
         s = old                            # уже отмечал — отметки сохраняются
     else:
         st = {}
-        if plans.has_feature(msg.chat.id, "memory"):
+        if plans.shelf_on(msg.chat.id):
             st = {str(i): "h" for i in accounts.shelf_match(msg.chat.id, terms)}
         s = {"ctx": ctx, "terms": terms, "st": st, "mode": "b", "page": 0}
     _save(msg, s)
@@ -164,7 +164,7 @@ async def list_item(callback: CallbackQuery):
     else:
         s["st"][i] = mode
         term = s["terms"][int(i)]
-        if mode in ("b", "h") and plans.has_feature(callback.message.chat.id, "memory") and accounts.shelf_life_days(term):
+        if mode in ("b", "h") and plans.shelf_on(callback.message.chat.id) and accounts.shelf_life_days(term):
             accounts.shelf_add(callback.message.chat.id, term)
     _save(callback.message, s)
     await callback.answer()

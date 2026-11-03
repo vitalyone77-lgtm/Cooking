@@ -57,8 +57,20 @@ async def _need_memory(callback: CallbackQuery) -> bool:
     return False
 
 
+async def _need_shelf(callback: CallbackQuery) -> bool:
+    uid = callback.message.chat.id
+    if not plans.has_feature(uid, "memory"):
+        await callback.answer("Эта функция — в тарифе «Повар» 💎", show_alert=True)
+        return False
+    if not plans.shelf_on(uid):
+        await callback.answer("Включите «Полку» в разделе «⚙️ Функции» профиля", show_alert=True)
+        return False
+    return True
+
+
 def _profile_view(uid: int) -> tuple[str, InlineKeyboardMarkup]:
-    shelf_on = plans.has_feature(uid, "memory")
+    mem = plans.has_feature(uid, "memory")
+    shelf_on = plans.shelf_on(uid)
     consent = accounts.consent_get(uid)
     g = accounts.goals_get(uid) if consent else None
     lines = ["👤 *Профиль*", "", plans.status_text(uid)]
@@ -68,7 +80,7 @@ def _profile_view(uid: int) -> tuple[str, InlineKeyboardMarkup]:
     lines.append(f"🔔 Напоминания: {'включены' if reminders_enabled(uid) else 'выключены'}")
     if consent:
         lines.append("")
-        lines.append(f"🚫 Не использовать: {g['never'] or 'не задано'}" + ("" if shelf_on else "  🔒 тариф «Повар»"))
+        lines.append(f"🚫 Не использовать: {g['never'] or 'не задано'}" + ("" if mem else "  🔒 тариф «Повар»"))
         lines.append(f"🎯 Цель на день: {accounts.goal_text(uid) or 'не задана'}")
         ws = accounts.weights_list(uid, 30)
         if ws:
@@ -81,29 +93,25 @@ def _profile_view(uid: int) -> tuple[str, InlineKeyboardMarkup]:
     else:
         lines += ["", "ℹ️ " + accounts.CONSENT_TEXT]
     lines += ["", "_Аллергии и продукты, которые не нужны на один раз, пиши в анкете в строке «Исключить» — я предложу их кнопкой «Как в прошлый раз»._"]
-    b = InlineKeyboardBuilder()
+    rows: list[list[tuple[str, str]]] = []
     if consent:
-        b.button(text="🚫 Не использовать" if shelf_on else "💎 Не использовать", callback_data="pf:never")
-        b.button(text="🎯 Цель КБЖУ", callback_data="pf:goal")
-        b.button(text="⚖️ Вес", callback_data="pf:weight")
-        b.button(text="🗑 Удалить мои данные", callback_data="pf:del")
+        rows.append([("🚫 Не использовать" if mem else "💎 Не использовать", "pf:never"), ("🎯 Цель КБЖУ", "pf:goal")])
+        rows.append([("⚖️ Вес", "pf:weight")] + ([("🏠 Моя полка", "pf:shelf")] if shelf_on else []))
+        rows.append([("⚙️ Функции", "pf:fts"), ("🗑 Удалить мои данные", "pf:del")])
     else:
-        b.button(text="✅ Согласен", callback_data="pf:consent")
-    b.button(text="🏠 Моя полка" if shelf_on else "💎 Моя полка", callback_data="pf:shelf")
-    b.button(text="🌐 Открыть сайт", callback_data="pf:site")
+        rows.append([("✅ Согласен", "pf:consent")])
+    rows.append([("🌐 Открыть сайт", "pf:site")])
     if plans.paywall():
         if plans.trial_available(uid):
-            b.button(text="🎁 Попробовать бесплатно", callback_data="pf:trial")
-        b.button(text="💎 Подписка", callback_data="pf:sub")
-        b.button(text="🎟 Промокод", callback_data="pf:promo")
-    b.button(text="🔕 Напоминания" if reminders_enabled(uid) else "🔔 Напоминания", callback_data="pf:rem")
+            rows.append([("🎁 Попробовать бесплатно", "pf:trial")])
+        rows.append([("💎 Подписка", "pf:sub"), ("🎟 Промокод", "pf:promo")])
     devs = accounts.devices_of(uid)
-    if devs:
-        b.button(text=f"🔓 Выйти на сайте ({devs})", callback_data="pf:unall")
-    b.button(text="❓ Справка", callback_data="help:open")
-    b.button(text="⬅️ Меню", callback_data="menu:open")
-    sizes = ([2, 2] if consent else [1]) + [2] + ([2, 1] if plans.paywall() else []) + [2 if devs else 1, 2]
-    b.adjust(*sizes)
+    rows.append([("🔕 Напоминания" if reminders_enabled(uid) else "🔔 Напоминания", "pf:rem")]
+                + ([(f"🔓 Выйти на сайте ({devs})", "pf:unall")] if devs else []))
+    rows.append([("❓ Справка", "help:open"), ("⬅️ Меню", "menu:open")])
+    b = InlineKeyboardBuilder()
+    for row in rows:
+        b.row(*[InlineKeyboardButton(text=t, callback_data=d) for t, d in row])
     return "\n".join(lines), b.as_markup()
 
 
@@ -404,6 +412,53 @@ async def profile_delete_yes(callback: CallbackQuery, state: FSMContext):
     await show_profile(callback.message, state, edit=True)
 
 
+# ---------- функции профиля: включаются галочками ----------
+FEATURE_LABELS = {"shelf": "🏠 Полка (что есть дома)", "never": "🚫 Список «не использовать»",
+                  "macro": "🎯 Цель КБЖУ", "weight": "⚖️ Вес и график"}
+NEEDS_MEMORY = {"shelf", "never"}
+
+
+def _fts_view(uid: int) -> tuple[str, InlineKeyboardMarkup]:
+    g = accounts.goals_get(uid)
+    mem = plans.has_feature(uid, "memory")
+    b = InlineKeyboardBuilder()
+    for key, label in FEATURE_LABELS.items():
+        mark = "✅" if key in g["feats"] else ("💎" if key in NEEDS_MEMORY and not mem else "⬜")
+        b.button(text=f"{mark} {label}", callback_data=f"pf:ft:{key}")
+    b.button(text="⬅️ Профиль", callback_data="pf:back")
+    b.adjust(1)
+    return ("⚙️ Функции профиля\n\nНажмите, чтобы включить или выключить. Ничего не включается само: данные сохраняются "
+            "только для включённых функций.\n💎 значит, что функция входит в тариф «Повар»."), b.as_markup()
+
+
+@router.callback_query(F.data == "pf:fts")
+async def fts_open(callback: CallbackQuery, state: FSMContext):
+    await state.clear()
+    if not await _need_consent(callback):
+        return
+    await callback.answer()
+    text, markup = _fts_view(callback.message.chat.id)
+    await callback.message.edit_text(text, reply_markup=markup, parse_mode=None)
+
+
+@router.callback_query(F.data.startswith("pf:ft:"))
+async def fts_toggle(callback: CallbackQuery):
+    uid = callback.message.chat.id
+    key = callback.data.split(":", 2)[2]
+    if key not in FEATURE_LABELS or not await _need_consent(callback):
+        await callback.answer()
+        return
+    if key in NEEDS_MEMORY and not plans.has_feature(uid, "memory"):
+        await callback.answer("Эта функция — в тарифе «Повар» 💎", show_alert=True)
+        return
+    feats = set(accounts.goals_get(uid)["feats"])
+    feats ^= {key}
+    accounts.goals_set(uid, feats=sorted(feats))
+    await callback.answer("Включено" if key in feats else "Выключено")
+    text, markup = _fts_view(uid)
+    await callback.message.edit_text(text, reply_markup=markup, parse_mode=None)
+
+
 # ---------- полка ----------
 
 def shelf_view(uid: int) -> tuple[str, InlineKeyboardMarkup]:
@@ -430,7 +485,7 @@ def shelf_view(uid: int) -> tuple[str, InlineKeyboardMarkup]:
 @router.callback_query(F.data == "pf:shelf")
 async def shelf_open(callback: CallbackQuery, state: FSMContext):
     await state.clear()
-    if not await _need_memory(callback):
+    if not await _need_shelf(callback):
         return
     await callback.answer()
     text, markup = shelf_view(callback.message.chat.id)
@@ -454,7 +509,7 @@ async def shelf_delete(callback: CallbackQuery):
 
 @router.callback_query(F.data == "pf:shadd")
 async def shelf_add_start(callback: CallbackQuery, state: FSMContext):
-    if not await _need_memory(callback):
+    if not await _need_shelf(callback):
         return
     await state.set_state(ProfileForm.shelf_add)
     await callback.answer()

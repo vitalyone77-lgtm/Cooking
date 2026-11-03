@@ -125,6 +125,16 @@ def plan_of(uid) -> str:
     return "premium" if is_tester(uid) or accounts.is_premium(uid) else "free"
 
 
+def shelf_on(uid) -> bool:
+    """«Полка» работает, только если человек её сам включил в профиле (после согласия) и она входит в его тариф."""
+    if is_anon(uid) or not has_feature(uid, "memory"):
+        return False
+    try:
+        return accounts.consent_get(uid) and "shelf" in accounts.goals_get(uid)["feats"]
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def rollout() -> dict[str, str]:
     raw = cfg("FEATURE_ROLLOUT") or {}
     if isinstance(raw, str):

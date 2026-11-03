@@ -83,7 +83,7 @@ def _uid(dev_id: int) -> str:
 def _mark_home(dev_id: int, items: list[dict]) -> list[dict]:
     """Продукты, которые уже на полке аккаунта, помечаем home=True (на сайте они идут отдельным списком)."""
     uid = _uid(dev_id)
-    if items and not plans.is_anon(uid) and plans.has_feature(uid, "memory"):
+    if items and not plans.is_anon(uid) and plans.shelf_on(uid):
         for i in accounts.shelf_match(uid, [it.get("name", "") for it in items]):
             items[i]["home"] = True
     return items
@@ -483,10 +483,11 @@ def me(x_device: str | None = Header(default=None)):
     tg = accounts.tg_of_device(dev_id)
     uid = _uid(dev_id)
     memory = bool(tg) and plans.has_feature(uid, "memory")
+    shelf_on = bool(tg) and plans.shelf_on(uid)
     left = {k: list(v) for k in ("recipe", "daymenu", "week") if (v := usage.left(uid, k))}
     feat = {f: plans.has_feature(uid, f) for f in ("memory", "pdf", "cart", "noads")}
     out = {"linked": bool(tg), "plan": plans.plan_of(uid), "status": plans.status_text(uid), "left": left,
-           "paywall": plans.paywall(), "memory": memory, "bot": config.BOT_USERNAME, "feat": feat, "name": plans.PREMIUM_NAME,
+           "paywall": plans.paywall(), "memory": memory, "shelf_on": shelf_on, "bot": config.BOT_USERNAME, "feat": feat, "name": plans.PREMIUM_NAME,
            "trial": plans.trial_available(uid), "trial_days": int(plans.cfg("TRIAL_DAYS") or 0),
            "offers": [{"key": o["key"], "days": o["days"], "rub": o["rub"]} for o in plans.offers()],
            "favorites": len(fav_mod.get_favorites(uid))}
@@ -497,7 +498,7 @@ def me(x_device: str | None = Header(default=None)):
             out["feats"] = g["feats"]
             out["goal_text"] = accounts.goal_text(uid) if "macro" in g["feats"] else ""
             out["never"] = g["never"] if "never" in g["feats"] and plans.has_feature(uid, "memory") else ""
-    if memory:
+    if shelf_on:
         out["shelf"] = [x["item"] for x in accounts.shelf_list(uid)]
     return out
 
@@ -607,8 +608,8 @@ def profile_put(body: ProfileIn, x_device: str | None = Header(default=None)):
     fields = body.model_dump(exclude_unset=True)
     if "never" in fields and not plans.has_feature(uid, "memory"):
         raise HTTPException(402, "Список «никогда не использовать» — в тарифе «Повар» 💎")
-    if "feats" in fields and "never" in (fields["feats"] or []) and not plans.has_feature(uid, "memory"):
-        fields["feats"] = [f for f in fields["feats"] if f != "never"]
+    if "feats" in fields and not plans.has_feature(uid, "memory"):      # «не использовать» и «полка» входят в тариф
+        fields["feats"] = [f for f in (fields["feats"] or []) if f not in ("never", "shelf")]
     try:
         accounts.goals_set(uid, **fields)
     except ValueError as e:
@@ -662,6 +663,26 @@ class FeedbackIn(BaseModel):
     contact: str = Field("", max_length=100)
 
 
+@app.get("/r/{slug}", response_class=HTMLResponse)
+def recipe_page(slug: str):
+    """Публичная страница рецепта дня: превью для ВК и мессенджеров (og:image) и текст для поисковиков."""
+    import recipe_pages
+    rec = accounts.pub_recipe_get(slug) if recipe_pages.SLUG_RE.match(slug) else None
+    if not rec:
+        raise HTTPException(404, "Рецепт не найден")
+    base = (config.WEB_APP_URL or "https://menu.ymayaka.ru").rstrip("/")
+    return HTMLResponse(recipe_pages.render(rec, slug, base, config.BOT_USERNAME))
+
+
+@app.get("/rimg/{slug}.png")
+def recipe_image(slug: str):
+    import recipe_pages
+    img = accounts.pub_recipe_image(slug) if recipe_pages.SLUG_RE.match(slug) else None
+    if not img:
+        raise HTTPException(404, "Картинки нет")
+    return Response(content=img, media_type="image/png", headers={"Cache-Control": "public, max-age=86400"})
+
+
 @app.get("/api/help")
 def help_get():
     import helpdata
@@ -695,13 +716,20 @@ def gate_seen(body: dict, x_device: str | None = Header(default=None)):
     return {"ok": True}
 
 
+def _need_shelf(dev_id: int) -> str:
+    uid = _need_memory(dev_id)
+    if not plans.shelf_on(uid):
+        raise HTTPException(403, "Включите «Полку» в профиле, раздел «Мои функции»")
+    return uid
+
+
 class ShelfIn(BaseModel):
     item: str = Field(min_length=1, max_length=60)
 
 
 @app.post("/api/shelf")
 def shelf_add(body: ShelfIn, x_device: str | None = Header(default=None)):
-    uid = _need_memory(_dev(x_device))
+    uid = _need_shelf(_dev(x_device))
     if len(accounts.shelf_list(uid)) >= 100:
         raise HTTPException(400, "На полке уже 100 продуктов")
     accounts.shelf_add(uid, body.item)
@@ -710,7 +738,7 @@ def shelf_add(body: ShelfIn, x_device: str | None = Header(default=None)):
 
 @app.delete("/api/shelf")
 def shelf_del(item: str = "", x_device: str | None = Header(default=None)):
-    uid = _need_memory(_dev(x_device))
+    uid = _need_shelf(_dev(x_device))
     accounts.shelf_remove(uid, item[:60])
     return {"shelf": [x["item"] for x in accounts.shelf_list(uid)]}
 

@@ -99,6 +99,8 @@ textarea{width:100%;min-height:64px;padding:10px 14px;border:1.5px solid var(--l
 .item.done .bn{opacity:.5;text-decoration:line-through}
 .buyhead{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:4px 0 8px;color:var(--muted);font-size:15px}
 .opt{display:flex;gap:12px;align-items:flex-start;min-height:44px;padding:8px 0;cursor:pointer}.opt input{width:24px;height:24px;accent-color:var(--primary);flex:none}
+.buyline{display:flex;align-items:center;gap:8px}.buyline .buyrow{flex:1 1 auto;min-width:0}
+.chip.tiny{min-height:30px;padding:0 10px;font-size:13px;white-space:nowrap;flex:none}
 .goalgrid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.goalgrid label{font-size:14px;color:var(--muted);display:block;margin-bottom:4px}
 .wchart{width:100%;height:auto;display:block;margin-top:8px}
 select{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--line);border-radius:12px;background:var(--surface);color:var(--text);font:inherit}
@@ -402,11 +404,11 @@ select{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--lin
     var home=items.filter(function(i){return i.home;});
     return home.length?'<div class="home">🏠 Скорее всего есть дома: '+home.map(function(i){return esc(i.name);}).join(", ")+'</div>':"";
   }
-  function homeBtn(name){return ME.memory?' <button class="chip mini" data-home="'+esc(name)+'">🏠 есть дома</button>':'';}
+  function homeBtn(name){return ME.shelf_on?'<button class="chip tiny" data-home="'+esc(name)+'" title="Продукт уже есть дома: убрать из покупок">есть дома</button>':'';}
   function shoppingHTML(items,title,ctx){
     if(!items||!items.length) return "";
     var buy=items.filter(function(i){return !i.home;});
-    var h=homeBox(items)+'<div class="storebox">'+storeChips(buy.length?buy:items)+'<div data-cart data-items="'+esc(JSON.stringify(buy.map(function(i){return {name:i.name,amount:i.amount||""};})))+'" style="display:none"></div><div class="storeitems" style="display:none">'+buyHead(buy);buy.forEach(function(it){h+=buyRow(it.name,it.amount,homeBtn(it.name)+'<div class="links">'+it.links.map(storeLink).join("")+'</div>');});h+='</div></div>';
+    var h=homeBox(items)+'<div class="storebox">'+storeChips(buy.length?buy:items)+'<div data-cart data-items="'+esc(JSON.stringify(buy.map(function(i){return {name:i.name,amount:i.amount||""};})))+'" style="display:none"></div><div class="storeitems" style="display:none">'+buyHead(buy);buy.forEach(function(it){h+=buyRow(it.name,it.amount,homeBtn(it.name),'<div class="links">'+it.links.map(storeLink).join("")+'</div>');});h+='</div></div>';
     if(ctx)h+=missingBox(items,ctx);
     return accordion("🛒 "+(title||"Найти продукты в магазине"),"выбери магазин — ссылки на поиск","",h,false);
   }
@@ -510,7 +512,7 @@ select{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--lin
     });
     var b=w.basket,inner="",bb=b.items.filter(function(i){return !i.home;});
     if(b.items.length){inner=homeBox(b.items)+'<div class="storebox">'+storeChips(bb.length?bb:b.items)+'<div data-cart data-items="'+esc(JSON.stringify(bb.map(function(i){return {name:i.name,amount:i.amount||""};})))+'" style="display:none"></div><div class="storeitems" style="display:none">'+buyHead(bb);
-      bb.forEach(function(it){inner+=buyRow(it.name,it.amount,homeBtn(it.name)+'<div class="links">'+it.links.map(storeLink).join("")+'</div>');});
+      bb.forEach(function(it){inner+=buyRow(it.name,it.amount,homeBtn(it.name),'<div class="links">'+it.links.map(storeLink).join("")+'</div>');});
       inner+='</div>'+missingBox(b.items,"week")+'</div>';}
     var ti=adv.indexOf("💡"),tips=ti>=0?adv.slice(ti).replace(/\*/g,""):"";
     return h+accordion("🛒 Корзина на весь план","продукты и магазины","",inner,false)+
@@ -546,6 +548,7 @@ select{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--lin
         h+='<div class="card pcard"><h2>Войди через Telegram</h2><p class="sub" style="margin:0">Избранное и подписка станут общими с ботом и не пропадут при смене телефона. Пароль не нужен — подтверждаешь одной кнопкой в Telegram.</p>'+
           '<a class="btn" data-link-go="1" href="'+esc(L.url)+'" target="_blank" rel="noopener">Войти через Telegram</a><div id="link-wait"></div></div>';
         if(m.paywall)h+='<div class="card pcard">'+esc(m.status)+'</div>';
+        h+='<button class="btn ghost" data-tab-go="help">Справка</button>';
         return h;
         });
       }
@@ -553,14 +556,12 @@ select{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--lin
         (m.paywall&&m.plan!=="premium"?(m.trial?'<button class="btn" data-gate-trial="1">Попробовать тариф «'+esc(m.name||"Повар")+'» '+(m.trial_days||7)+' дней бесплатно</button>':'')+'<a class="btn ghost" href="'+botLink("pay")+'" target="_blank" rel="noopener">Оформить подписку в Telegram</a>':'')+'</div>';
       return profileCards(m).then(function(cards){
         h+=cards;
-        if(!m.memory){
-          h+='<button class="btn locked" data-gate="memory">'+lockIc()+'Полка и список «никогда не использовать»</button>';
-        } else {
+        if(m.shelf_on){
           h+='<div class="card pcard shelf"><h2>Моя полка</h2><p class="sub" style="margin:0 0 8px">Долгоживущие продукты, которые уже есть дома. В списках покупок они идут отдельно.</p><div class="chips">'+
             (m.shelf||[]).map(function(x){return '<button class="chip" data-shelf-del="'+esc(x)+'">'+esc(x)+' ✕</button>';}).join("")+'</div>'+
             '<div class="row" style="margin-top:8px"><input type="text" id="shelf-add" maxlength="60" placeholder="оливковое масло" aria-label="Добавить на полку"><button class="btn" style="width:auto;margin:0" data-shelf-add="1">Добавить</button></div></div>';
         }
-        h+='<button class="btn ghost" data-unlink="1">Выйти из профиля на этом устройстве</button>';
+        h+='<button class="btn ghost" data-tab-go="help">Справка</button><button class="btn ghost" data-unlink="1">Выйти из профиля на этом устройстве</button>';
         return h;
       });
     });
@@ -630,8 +631,8 @@ select{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--lin
   var BUY_TTL=12*3600*1000;
   function buyKey(n){return String(n||"").toLowerCase().replace(/\s+/g," ").trim().slice(0,60);}
   function buyState(){var o={};try{o=JSON.parse(ls("buy")||"{}")||{};}catch(e){}var now=Date.now(),r={};Object.keys(o).forEach(function(k){if(now-o[k]<BUY_TTL)r[k]=o[k];});return r;}
-  function buyRow(name,amount,extra){var k=buyKey(name),on=!!buyState()[k];
-    return '<div class="item'+(on?' done':'')+'"><label class="buyrow"><input type="checkbox" data-buy="'+esc(k)+'"'+(on?' checked':'')+'><span class="bn"><strong>'+esc(name)+'</strong>'+(amount?' — '+esc(amount):'')+'</span></label>'+extra+'</div>';}
+  function buyRow(name,amount,home,extra){var k=buyKey(name),on=!!buyState()[k];
+    return '<div class="item'+(on?' done':'')+'"><div class="buyline"><label class="buyrow"><input type="checkbox" data-buy="'+esc(k)+'"'+(on?' checked':'')+'><span class="bn"><strong>'+esc(name)+'</strong>'+(amount?' — '+esc(amount):'')+'</span></label>'+home+'</div>'+extra+'</div>';}
   function buyHead(items){var st=buyState(),n=items.filter(function(i){return st[buyKey(i.name)];}).length;
     return '<p class="sub storenote" style="margin:0 0 8px"></p><div class="buyhead"><span class="bcount">Куплено '+n+' из '+items.length+'</span><button class="chip mini" data-buy-reset="1">Сбросить</button></div>';}
   function buyRecount(box){if(!box)return;var all=box.querySelectorAll("[data-buy]"),n=0;Array.prototype.forEach.call(all,function(c){if(c.checked)n++;});var el=box.querySelector(".bcount");if(el)el.textContent="Куплено "+n+" из "+all.length;}
@@ -661,6 +662,7 @@ select{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--lin
       if(!p.consent) return '<div class="card pcard"><h2>Данные профиля</h2><p class="sub" style="margin:0">'+esc(p.text||"")+'</p><button class="btn" data-consent="1">Согласен</button></div>';
       var on=function(f){return p.feats.indexOf(f)>=0;}, h='';
       h+='<div class="card pcard"><h2>Мои функции</h2>'+
+        '<label class="opt"><input type="checkbox" data-feat="shelf"'+(on("shelf")?' checked':'')+'><span>Полка: что уже есть дома'+(p.never_allowed?'':' '+lockIc()+'тариф «'+esc(ME.name||"Повар")+'»')+'</span></label>'+
         '<label class="opt"><input type="checkbox" data-feat="never"'+(on("never")?' checked':'')+'><span>Список «никогда не использовать»'+(p.never_allowed?'':' '+lockIc()+'тариф «'+esc(ME.name||"Повар")+'»')+'</span></label>'+
         '<label class="opt"><input type="checkbox" data-feat="macro"'+(on("macro")?' checked':'')+'><span>Цель по калориям и БЖУ</span></label>'+
         '<label class="opt"><input type="checkbox" data-feat="weight"'+(on("weight")?' checked':'')+'><span>Вес и график</span></label></div>';
@@ -676,7 +678,7 @@ select{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--lin
   function featToggle(el){
     var f=el.getAttribute("data-feat");
     call("GET","/api/profile").then(function(p){
-      if(f==="never"&&el.checked&&!p.never_allowed){el.checked=false;gateOpen("memory");return;}
+      if((f==="never"||f==="shelf")&&el.checked&&!p.never_allowed){el.checked=false;gateOpen("memory");return;}
       var feats=p.feats.filter(function(x){return x!==f;}); if(el.checked)feats.push(f);
       return call("PUT","/api/profile",{feats:feats}).then(profileReload);
     }).catch(function(e){el.checked=!el.checked;alert(e.message);});
@@ -692,7 +694,11 @@ select{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--lin
   });
 
   // ---- справка (выпадающие разделы) и «написать разработчику» ----
+  // справка: после первого прочтения вкладка внизу прячется, справка остаётся в «Профиле»
+  function syncHelpTab(){var t=document.querySelector('.tab[data-tab="help"]');if(t)t.style.display=ls("helpRead")?"none":"";}
+  document.addEventListener("DOMContentLoaded",syncHelpTab);syncHelpTab();
   function viewHelp(){
+    ls("helpRead","1");
     return call("GET","/api/help").then(function(d){
       var h='<h1>Справка</h1><p class="sub">Нажмите на раздел, чтобы раскрыть его.</p>';
       d.sections.forEach(function(s,i){h+=accordion(esc(s.title),"","",'<div class="recipe">'+esc(s.text)+'</div>',i===0);});
