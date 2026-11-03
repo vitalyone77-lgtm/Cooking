@@ -1,13 +1,17 @@
 """
-Картинки блюд для «рецепта дня» через Leonardo.ai (оплаченный ключ владельца, LEONARDO_API_KEY в .env).
-
-Схема как в проекте storymetaverse: запрос на создание, потом опрос готовности, потом скачивание. Сначала ИИ
-коротко описывает по-английски, как выглядит готовое блюдо, затем это описание уходит в Leonardo.
-Любой сбой возвращает None: пост выходит без картинки, ничего не ломается. Ключ в логи не попадает.
+Картинки блюд для «рецепта дня». Чем рисовать, выбирает IMAGE_PROVIDER в .env:
+- free (по умолчанию): бесплатный pollinations.ai, как в проекте autobot; без ключа, но с логотипом сервиса на кадре и
+  лимитом «одна картинка в 45 секунд с адреса»;
+- leonardo: платный Leonardo.ai (LEONARDO_API_KEY, схема как в storymetaverse); если он не справился, пробуем free;
+- off: картинки отключены.
+Сначала ИИ коротко описывает по-английски, как выглядит готовое блюдо, затем описание уходит в выбранный сервис.
+Любой сбой возвращает None: пост выходит без картинки, ничего не ломается. Ключи в логи не попадают.
 """
 import asyncio
 import logging
+import random
 import re
+import urllib.parse
 
 import httpx
 
@@ -17,6 +21,8 @@ from ai import call_llm_with_fallback
 
 logger = logging.getLogger(__name__)
 
+POLLINATIONS_URL = "https://image.pollinations.ai/prompt/"
+NEGATIVE = "people, hands, text, watermark, logo, cartoon, illustration, drawing, blurry"
 LEONARDO_URL = "https://cloud.leonardo.ai/api/rest/v1/generations"
 POLL_ATTEMPTS = 24
 POLL_DELAY = 3.0
@@ -29,7 +35,8 @@ async def _sleep(seconds: float) -> None:
 
 
 def configured() -> bool:
-    return bool(config.LEONARDO_API_KEY)
+    """Картинки включены (IMAGE_PROVIDER не off). Бесплатный вариант ключа не требует."""
+    return config.IMAGE_PROVIDER != "off"
 
 
 def _ingredients(recipe_text: str, limit: int = 8) -> str:
@@ -65,11 +72,9 @@ async def dish_scene(title: str, recipe_text: str) -> str:
     return scene or f"{title}, served on a plate"
 
 
-async def make_dish_image(title: str, recipe_text: str) -> bytes | None:
-    """Картинка блюда (байты PNG/JPEG) или None, если ключа нет или Leonardo не справился."""
-    if not configured():
+async def _leonardo(prompt: str) -> bytes | None:
+    if not config.LEONARDO_API_KEY:
         return None
-    prompt = f"{await dish_scene(title, recipe_text)}, {STYLE}"
     headers = {"Authorization": f"Bearer {config.LEONARDO_API_KEY}", "Content-Type": "application/json"}
     payload = {"height": config.RECIPE_IMAGE_SIZE, "width": config.RECIPE_IMAGE_SIZE,
                "modelId": config.LEONARDO_MODEL_ID, "num_images": 1, "prompt": prompt[:1500]}
@@ -99,5 +104,41 @@ async def make_dish_image(title: str, recipe_text: str) -> bytes | None:
             img.raise_for_status()
             return img.content or None
     except (httpx.HTTPError, ValueError, KeyError, IndexError, TypeError) as e:
-        logger.warning("Картинка блюда не получилась: %s", type(e).__name__)
+        logger.warning("Leonardo: картинка не получилась (%s)", type(e).__name__)
         return None
+
+
+async def _free(prompt: str) -> bytes | None:
+    """Бесплатный pollinations.ai: обычный запрос, в ответ картинка. Лимит без ключа: одна в 45 секунд с адреса."""
+    url = (f"{POLLINATIONS_URL}{urllib.parse.quote(prompt[:900])}?width={config.RECIPE_IMAGE_SIZE}&height={config.RECIPE_IMAGE_SIZE}"
+           f"&nologo=true&model={config.FREE_IMAGE_MODEL}&seed={random.randint(1, 99999)}&negative={urllib.parse.quote(NEGATIVE)}")
+    headers = {"Authorization": f"Bearer {config.POLLINATIONS_KEY}"} if config.POLLINATIONS_KEY else {}
+    try:
+        async with httpx.AsyncClient(timeout=90, follow_redirects=True) as client:
+            for attempt in range(2):
+                resp = await client.get(url, headers=headers)
+                if resp.status_code == 402:                       # лимит: «Retry after 42s»
+                    m = re.search(r"Retry after (\d+)s", resp.text or "")
+                    if attempt == 0 and m and int(m.group(1)) <= 50:
+                        await _sleep(int(m.group(1)) + 1)
+                        continue
+                    return None
+                if resp.status_code != 200 or "image" not in resp.headers.get("content-type", ""):
+                    return None
+                return resp.content or None
+    except (httpx.HTTPError, ValueError) as e:
+        logger.warning("Бесплатная картинка не получилась: %s", type(e).__name__)
+    return None
+
+
+async def make_dish_image(title: str, recipe_text: str) -> bytes | None:
+    """Картинка блюда (байты) или None. IMAGE_PROVIDER=leonardo: сначала Leonardo, при сбое бесплатный; free: только он."""
+    if not configured():
+        return None
+    prompt = f"{await dish_scene(title, recipe_text)}, {STYLE}"
+    order = ["leonardo", "free"] if config.IMAGE_PROVIDER == "leonardo" else ["free"]
+    for provider in order:
+        img = await (_leonardo(prompt) if provider == "leonardo" else _free(prompt))
+        if img:
+            return img
+    return None

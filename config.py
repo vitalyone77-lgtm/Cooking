@@ -145,6 +145,10 @@ SOCIAL_AUTOPOST = os.getenv("SOCIAL_AUTOPOST", "false").lower() == "true"   # fa
 SOCIAL_POST_HOUR = int(os.getenv("SOCIAL_POST_HOUR", "9"))
 SOCIAL_POST_MINUTE = int(os.getenv("SOCIAL_POST_MINUTE", "30"))
 # Картинки блюд через Leonardo.ai (images.py): ключ владельца; SOCIAL_IMAGES=true — рисовать картинку к каждому рецепту дня
+# Чем рисовать: free (бесплатный pollinations.ai, как в autobot), leonardo (платный, с откатом на free) или off
+IMAGE_PROVIDER = os.getenv("IMAGE_PROVIDER", "free").strip().lower()
+FREE_IMAGE_MODEL = os.getenv("FREE_IMAGE_MODEL", "flux")
+POLLINATIONS_KEY = os.getenv("POLLINATIONS_KEY", "")           # необязательно: ключ аккаунта pollinations снимает лимиты
 LEONARDO_API_KEY = os.getenv("LEONARDO_API_KEY", "")
 LEONARDO_MODEL_ID = os.getenv("LEONARDO_MODEL_ID", "7b592283-e8a7-4c5a-9ba6-d18c31f258b9")
 RECIPE_IMAGE_SIZE = int(os.getenv("RECIPE_IMAGE_SIZE", "768"))
