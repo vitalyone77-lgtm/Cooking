@@ -101,6 +101,7 @@ textarea{width:100%;min-height:64px;padding:10px 14px;border:1.5px solid var(--l
 .opt{display:flex;gap:12px;align-items:flex-start;min-height:44px;padding:8px 0;cursor:pointer}.opt input{width:24px;height:24px;accent-color:var(--primary);flex:none}
 .goalgrid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.goalgrid label{font-size:14px;color:var(--muted);display:block;margin-bottom:4px}
 .wchart{width:100%;height:auto;display:block;margin-top:8px}
+select{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--line);border-radius:12px;background:var(--surface);color:var(--text);font:inherit}
 </style>
 <!-- Yandex.Metrika counter -->
 <script type="text/javascript">
@@ -122,6 +123,7 @@ textarea{width:100%;min-height:64px;padding:10px 14px;border:1.5px solid var(--l
   <button class="tab" role="tab" data-tab="new"><span class="ic">🍳</span>Создать</button>
   <button class="tab" role="tab" data-tab="menus"><span class="ic">🗂</span>Готовые меню</button>
   <button class="tab" role="tab" data-tab="profile"><span class="ic">👤</span>Профиль</button>
+  <button class="tab" role="tab" data-tab="help"><span class="ic">❓</span>Справка</button>
 </nav>
 <div id="print-area"></div>
 <p class="devnote" style="text-align:center;font-size:13px;color:var(--muted);margin:24px 16px 32px">Сайт разработан <a href="https://dev.pump-um.ru/" target="_blank" rel="noopener" style="color:inherit">dev.pump-um.ru</a></p>
@@ -362,6 +364,9 @@ textarea{width:100%;min-height:64px;padding:10px 14px;border:1.5px solid var(--l
     Array.prototype.forEach.call(box.querySelectorAll(".links a[data-store]"),function(a){a.style.display=a.getAttribute("data-store")===st?"":"none";});
     var hint=box.querySelector(".storehint");if(hint)hint.style.display="none";
     var sel=box.querySelector(".storeitems");if(sel)sel.style.display="";
+    var note=box.querySelector(".storenote");
+    if(note)note.textContent=(st==="ВкусВилл")?"ВкусВилл: корзина собирается одной кнопкой ниже. Ссылки у продуктов ведут на поиск магазина."
+      :"Для этого магазина корзина одной кнопкой пока в планах. Нажмите на продукт: откроется поиск магазина, где можно положить товар в корзину для доставки. Для удобства войдите в браузере в свой профиль магазина.";
     var cart=box.querySelector("[data-cart]");
     if(cart){cart.style.display=(st==="ВкусВилл")?"":"none";
       if(st==="ВкусВилл"){ if(isLocked("cart")){cart.innerHTML='<button class="btn locked" data-gate="cart">'+lockIc()+'Корзина ВкусВилла с ценами</button>';} else loadCart(cart);}}
@@ -577,7 +582,7 @@ textarea{width:100%;min-height:64px;padding:10px 14px;border:1.5px solid var(--l
     })();
   }
 
-  var VIEWS={menus:viewMenus,favs:viewFavs,profile:viewProfile};
+  var VIEWS={menus:viewMenus,favs:viewFavs,profile:viewProfile,help:viewHelp};
   function offlineBanner(){return '<div class="card" style="padding:12px 16px;margin:0 0 12px;border-left:4px solid var(--primary)"><strong>📴 Нет интернета.</strong> Показываю сохранённое с прошлого раза: меню, план, избранное, рецепты и таймеры работают. Новые подборы — когда появится сеть.</div>';}
   window.addEventListener("online",function(){if(OFFLINE&&(cur==="menus"||cur==="favs"))show(cur);});
   function show(tab){
@@ -628,7 +633,7 @@ textarea{width:100%;min-height:64px;padding:10px 14px;border:1.5px solid var(--l
   function buyRow(name,amount,extra){var k=buyKey(name),on=!!buyState()[k];
     return '<div class="item'+(on?' done':'')+'"><label class="buyrow"><input type="checkbox" data-buy="'+esc(k)+'"'+(on?' checked':'')+'><span class="bn"><strong>'+esc(name)+'</strong>'+(amount?' — '+esc(amount):'')+'</span></label>'+extra+'</div>';}
   function buyHead(items){var st=buyState(),n=items.filter(function(i){return st[buyKey(i.name)];}).length;
-    return '<div class="buyhead"><span class="bcount">Куплено '+n+' из '+items.length+'</span><button class="chip mini" data-buy-reset="1">Сбросить</button></div>';}
+    return '<p class="sub storenote" style="margin:0 0 8px"></p><div class="buyhead"><span class="bcount">Куплено '+n+' из '+items.length+'</span><button class="chip mini" data-buy-reset="1">Сбросить</button></div>';}
   function buyRecount(box){if(!box)return;var all=box.querySelectorAll("[data-buy]"),n=0;Array.prototype.forEach.call(all,function(c){if(c.checked)n++;});var el=box.querySelector(".bcount");if(el)el.textContent="Куплено "+n+" из "+all.length;}
 
   // ---- профиль: функции, цель КБЖУ, вес ----
@@ -686,10 +691,26 @@ textarea{width:100%;min-height:64px;padding:10px 14px;border:1.5px solid var(--l
     } else if(t.matches("[data-feat]")){ featToggle(t); }
   });
 
+  // ---- справка (выпадающие разделы) и «написать разработчику» ----
+  function viewHelp(){
+    return call("GET","/api/help").then(function(d){
+      var h='<h1>Справка</h1><p class="sub">Нажмите на раздел, чтобы раскрыть его.</p>';
+      d.sections.forEach(function(s,i){h+=accordion(esc(s.title),"","",'<div class="recipe">'+esc(s.text)+'</div>',i===0);});
+      h+='<div class="card pcard"><h2>Написать разработчику</h2>'+
+        '<label class="f" for="fb-kind">О чём</label><select id="fb-kind"><option value="idea">Идея</option><option value="bug">Ошибка</option><option value="q">Вопрос</option></select>'+
+        '<label class="f" for="fb-text">Сообщение</label><textarea id="fb-text" maxlength="1500" placeholder="Что случилось или что хотелось бы добавить"></textarea>'+
+        '<label class="f" for="fb-contact">Как с вами связаться (необязательно)</label><input type="text" id="fb-contact" maxlength="100" placeholder="Telegram или почта">'+
+        '<p class="sub" style="margin:6px 0 0">Пароли и платёжные данные не пишите.</p><button class="btn" data-fb-send="1">Отправить</button></div>';
+      return h;
+    });
+  }
+
   // ---- единый обработчик кликов ----
   document.addEventListener("click",function(ev){
     var t=ev.target; if(!t.closest) return; var b;
     if(t.id==="gate"){closeGate();return;}
+    if(b=t.closest("[data-fb-send]")){var ft=val("fb-text");if(ft.length<3){alert("Напишите хотя бы несколько слов");return;}b.disabled=true;
+      call("POST","/api/feedback",{kind:val("fb-kind"),text:ft,contact:val("fb-contact")}).then(function(){toast("Спасибо! Сообщение отправлено");document.getElementById("fb-text").value="";b.disabled=false;}).catch(function(e){b.disabled=false;alert(e.message);});return;}
     if(b=t.closest("[data-gate-close]")){closeGate();return;}
     if(b=t.closest("[data-gate-login]")){closeGate();show("profile");return;}
     if(b=t.closest("[data-gate-trial]")){b.disabled=true;call("POST","/api/trial").then(function(){closeGate();return loadMe();}).then(function(){toast("Тариф «"+((ME&&ME.name)||"Повар")+"» подключён");show(cur);}).catch(function(e){b.disabled=false;alert(e.message);});return;}

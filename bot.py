@@ -46,6 +46,7 @@ from stores.basket import build_priced_basket
 from tg_safety import SafeSendMiddleware, OneHeavyAtATime, FloodGuard, ChatSequential
 import usage
 import bot_profile
+import helpdata
 import profile_ctx
 import plans
 import bot_cook
@@ -98,27 +99,7 @@ async def on_error(event: ErrorEvent):
 
 # ---------- Вспомогательное ----------
 
-HELP_TEXT = (
-    "❓ *Справка*\n\n"
-    "Я помогаю решить, что приготовить: подбираю рецепт, считаю калории и продукты, "
-    "показываю, где их купить.\n\n"
-    "*Внизу три кнопки* (свернуть и открыть — значок ⊞ справа от смайлика):\n"
-    "🍳 *Создать* — выбрать тип питания и получить рецепт, собрать меню на день или на "
-    f"{config.WEEK_MENU_DAYS} дня, открыть избранное или последний рецепт.\n"
-    "🗂 *Готовые меню* — открыть уже собранное меню на день и план на несколько дней.\n"
-    "👤 *Профиль* — полка, напоминания, вход на сайт и эта справка.\n\n"
-    "Под рецептом:\n"
-    "👨‍🍳 *Готовить по шагам* — один шаг на экране, таймер прямо в шаге, галочки «готово».\n"
-    "🛒 *Список покупок* — отмечай ✅ купил, ❌ нет в магазине (подберу замену), 🏠 есть дома; "
-    "оттуда же ссылки на Пятёрочку, ВкусВилл, Перекрёсток, Лавку, Купер.\n\n"
-    "🚫 *Исключить* — в анкете напиши аллергии и продукты, которые не нужны: их не будет ни в одном блюде. "
-    "Я не храню это как профиль, но помню последний ввод и предлагаю кнопку «Как в прошлый раз».\n"
-    "👤 *Профиль* (в меню) — «полка» с тем, что уже есть дома, и вход на сайт.\n\n"
-    "*Команды:* /menu — меню, /ready — готовые меню, /profile — профиль, "
-    "/app — веб-версия для телефона, /remind — вкл/выкл напоминания, /help — справка.\n\n"
-    "Если ты пропадёшь на несколько дней, я разок-другой напомню о себе идеей блюда — не чаще. "
-    "Если что-то зависло — /start."
-)
+HELP_TEXT = helpdata.INTRO
 
 
 async def answer_long(message: Message, text: str, reply_markup=None, **kwargs):
@@ -390,7 +371,7 @@ async def cmd_ready(message: Message, state: FSMContext):
 @dp.message(Command("help"))
 async def cmd_help(message: Message, state: FSMContext):
     await state.clear()
-    await message.answer(HELP_TEXT, reply_markup=kb.main_reply_kb())
+    await message.answer(HELP_TEXT, reply_markup=kb.help_hub_kb(), parse_mode=None)
 
 
 @dp.message(Command("remind"))
@@ -431,7 +412,7 @@ async def menu_open(callback: CallbackQuery, state: FSMContext):
 
 @dp.callback_query(F.data == "help:open")
 async def help_open(callback: CallbackQuery):
-    await callback.message.answer(HELP_TEXT)
+    await callback.message.answer(HELP_TEXT, reply_markup=kb.help_hub_kb(), parse_mode=None)
     await callback.answer()
 
 
@@ -463,7 +444,7 @@ async def legacy_buttons(message: Message, state: FSMContext):
     _kb_sent(message.chat.id)
     if message.text == kb.LEGACY_BTN_HELP:
         await state.clear()
-        await message.answer(HELP_TEXT)
+        await message.answer(HELP_TEXT, reply_markup=kb.help_hub_kb(), parse_mode=None)
         return
     if message.text == kb.LEGACY_BTN_FAVORITES:
         favs = get_favorites(message.chat.id)
@@ -1873,6 +1854,7 @@ async def main():
         BotCommand(command="app", description="Веб-версия для телефона"),
         BotCommand(command="profile", description="Профиль: полка, подписка, вход на сайт"),
         BotCommand(command="remind", description="Вкл/выкл напоминания"),
+        BotCommand(command="feedback", description="Написать разработчику"),
         BotCommand(command="help", description="Справка"),
     ])
 

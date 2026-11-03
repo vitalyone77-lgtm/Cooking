@@ -35,6 +35,8 @@ CREATE INDEX IF NOT EXISTS sess_ts ON sess(ts);
 CREATE TABLE IF NOT EXISTS favs(uid TEXT, id TEXT, title TEXT, text TEXT, cuisine TEXT, ts REAL, PRIMARY KEY(uid, id));
 CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY, value TEXT, ts REAL, who TEXT);
 CREATE TABLE IF NOT EXISTS admin_log(id INTEGER PRIMARY KEY AUTOINCREMENT, ts REAL, who TEXT, action TEXT, details TEXT);
+CREATE TABLE IF NOT EXISTS feedback(id INTEGER PRIMARY KEY AUTOINCREMENT, ts REAL, uid TEXT, kind TEXT, text TEXT, contact TEXT,
+  src TEXT, done INTEGER DEFAULT 0);
 CREATE TABLE IF NOT EXISTS consents(uid TEXT PRIMARY KEY, version INTEGER, ts REAL);
 CREATE TABLE IF NOT EXISTS goals(uid TEXT PRIMARY KEY, feats TEXT DEFAULT '', never TEXT DEFAULT '', kcal INTEGER, protein INTEGER,
   fat INTEGER, carb INTEGER, weight_goal REAL, updated REAL);
@@ -685,6 +687,40 @@ def spark(values: list[float]) -> str:
     if hi - lo < 1e-9:
         return "▄" * len(values)
     return "".join("▁▂▃▄▅▆▇█"[min(7, int((v - lo) / (hi - lo) * 7.999))] for v in values)
+
+
+# ---------- сообщения разработчику ----------
+FEEDBACK_KINDS = {"idea": "Идея", "bug": "Ошибка", "q": "Вопрос"}
+FEEDBACK_DAILY = 5
+
+
+def feedback_add(uid, kind: str, text: str, contact: str = "", src: str = "web") -> int:
+    """Сохранить сообщение. ValueError с понятным текстом — если пусто или человек отправил слишком много за сутки."""
+    kind = kind if kind in FEEDBACK_KINDS else "idea"
+    text = (text or "").strip()[:1500]
+    if len(text) < 3:
+        raise ValueError("Напишите хотя бы несколько слов")
+    with _lock:
+        c = _conn()
+        try:
+            with c:
+                n = c.execute("SELECT COUNT(*) FROM feedback WHERE uid=? AND ts>?", (str(uid), time.time() - 86400)).fetchone()[0]
+                if n >= FEEDBACK_DAILY:
+                    raise ValueError("Сегодня вы уже отправили много сообщений. Напишите завтра")
+                cur = c.execute("INSERT INTO feedback(ts, uid, kind, text, contact, src) VALUES(?,?,?,?,?,?)",
+                                (time.time(), str(uid), kind, text, (contact or "").strip()[:100], src))
+                return cur.lastrowid
+        finally:
+            c.close()
+
+
+def feedback_list(limit: int = 200) -> list[dict]:
+    rows = _q("SELECT id, ts, uid, kind, text, contact, src, done FROM feedback ORDER BY done ASC, id DESC LIMIT ?", (limit,), all_=True)
+    return [{"id": r[0], "ts": r[1], "uid": r[2], "kind": r[3], "text": r[4], "contact": r[5], "src": r[6], "done": bool(r[7])} for r in rows]
+
+
+def feedback_done(fid: int) -> None:
+    _q("UPDATE feedback SET done=1 WHERE id=?", (int(fid),))
 
 
 def account_stats() -> dict:

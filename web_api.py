@@ -656,6 +656,32 @@ def trial_start(x_device: str | None = Header(default=None)):
     return {"ok": True, "until": until, "days": int(plans.cfg("TRIAL_DAYS") or 0)}
 
 
+class FeedbackIn(BaseModel):
+    kind: str = Field("idea", max_length=10)
+    text: str = Field(min_length=3, max_length=1500)
+    contact: str = Field("", max_length=100)
+
+
+@app.get("/api/help")
+def help_get():
+    import helpdata
+    return {"sections": [{"key": k, "title": t, "text": x} for k, t, x in helpdata.SECTIONS]}
+
+
+@app.post("/api/feedback")
+def feedback_send(body: FeedbackIn, x_device: str | None = Header(default=None)):
+    """«Написать разработчику»: идея, ошибка, вопрос. Не больше 5 в сутки с устройства или аккаунта."""
+    import feedback
+    uid = _uid(_dev(x_device))
+    try:
+        fid = accounts.feedback_add(uid, body.kind, body.text, body.contact, "web")
+    except ValueError as e:
+        raise HTTPException(429 if "много" in str(e) else 400, str(e))
+    usage.event("feedback", uid)
+    feedback.notify_sync(feedback.admin_text(fid, body.kind, "web", uid, body.text, body.contact))
+    return {"ok": True}
+
+
 GATE_NAMES = {"pdf", "cart", "memory", "daymenu", "week", "photo", "voice"}
 
 
@@ -937,6 +963,19 @@ def admin_grant(body: GrantIn, request: Request):
     until = accounts.grant_days(body.uid, body.days, f"admin:{role}")
     accounts.admin_log(role, "подписка вручную", f"{body.uid}: +{body.days} дн.")
     return {"until": until}
+
+
+@app.get("/admin/api/feedback")
+async def admin_feedback(request: Request):
+    _need_admin(request, owner=True)      # сообщения людей видит только владелец
+    return {"items": accounts.feedback_list(), "kinds": accounts.FEEDBACK_KINDS}
+
+
+@app.post("/admin/api/feedback/{fid}/done")
+async def admin_feedback_done(fid: int, request: Request):
+    _need_admin(request, owner=True)
+    accounts.feedback_done(fid)
+    return {"ok": True}
 
 
 @app.get("/admin/api/log")

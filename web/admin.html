@@ -36,7 +36,7 @@ code{background:var(--soft);padding:2px 6px;border-radius:6px;font-size:13px}
   <div class="top"><h1>Кухонный помощник — админка</h1><span class="who" id="who"></span><button id="logout">Выйти</button></div>
   <div class="tabs" id="tabs">
     <button data-t="sum" aria-pressed="true">Сводка</button><button data-t="money">Деньги</button><button data-t="users">Пользователи и функции</button>
-    <button data-t="plans">Тарифы и лимиты</button><button data-t="ads">Реклама</button><button data-t="log">Журнал</button>
+    <button data-t="plans">Тарифы и лимиты</button><button data-t="ads">Реклама</button><button data-t="msgs">Сообщения</button><button data-t="log">Журнал</button>
   </div>
 
   <section data-s="sum">
@@ -112,6 +112,11 @@ code{background:var(--soft);padding:2px 6px;border-radius:6px;font-size:13px}
     <p class="note">Если в месте несколько активных баннеров — показываются случайно. Подписчикам реклама не показывается, если «без рекламы» отмечено в подписке.</p>
   </section>
 
+  <section data-s="msgs" class="hide">
+    <p class="note">Идеи, ошибки и вопросы людей из бота и с сайта. Видит только владелец. Те же сообщения приходят вам в Telegram.</p>
+    <div class="tbl"><table><thead><tr><th>Когда</th><th>От кого</th><th>Тип</th><th>Сообщение</th><th></th></tr></thead><tbody id="msgs"></tbody></table></div>
+  </section>
+
   <section data-s="log" class="hide">
     <p class="note">Кто и когда входил и что менял — чтобы обоим партнёрам было видно все изменения.</p>
     <div class="tbl"><table><thead><tr><th>Когда</th><th>Кто</th><th>Что</th><th>Подробности</th></tr></thead><tbody id="log"></tbody></table></div>
@@ -137,7 +142,7 @@ function load(){
   fetch("/admin/api/stats").then(function(r){
     if(r.status===401){$("login").className="";$("app").className="hide";return null;}
     return r.json();
-  }).then(function(s){if(!s)return;S=s;ROLE=s.role;$("login").className="hide";$("app").className="";render();loadLog();});
+  }).then(function(s){if(!s)return;S=s;ROLE=s.role;$("login").className="hide";$("app").className="";render();loadLog();loadMsgs();});
 }
 function render(){
   var s=S,u=s.usage,m=s.money,a=s.accounts,st=s.settings,month=(m.months[0]||{rub:0,stars:0});
@@ -238,6 +243,11 @@ function collect(){
   if(ROLE==="owner"){body.paywall=$("s-paywall").checked;body.daily_cap=parseInt($("s-cap").value,10);body.anon_cap=parseInt($("s-anon").value,10);body.ip_cap=parseInt($("s-ip").value,10);body.partner_share=parseInt($("s-share").value,10);}
   return body;
 }
+function loadMsgs(){
+  if(ROLE!=="owner"){var tb=document.querySelector('[data-t="msgs"]');if(tb)tb.className+=" hide";return;}
+  fetch("/admin/api/feedback").then(function(r){return r.json();}).then(function(j){
+    $("msgs").innerHTML=j.items.length?j.items.map(function(x){return '<tr'+(x.done?' style="opacity:.55"':'')+'><td>'+dt(x.ts)+'</td><td>'+esc(x.uid)+(x.contact?'<br><small>'+esc(x.contact)+'</small>':'')+' <small>('+(x.src==="bot"?"бот":"сайт")+')</small></td><td>'+esc(j.kinds[x.kind]||x.kind)+'</td><td style="white-space:pre-wrap">'+esc(x.text)+'</td><td>'+(x.done?"":'<button data-msg-done="'+x.id+'">Прочитано</button>')+'</td></tr>';}).join(""):'<tr><td colspan="5">Сообщений пока нет</td></tr>';});}
+document.addEventListener("click",function(e){var b=e.target.closest&&e.target.closest("[data-msg-done]");if(b){fetch("/admin/api/feedback/"+b.getAttribute("data-msg-done")+"/done",{method:"POST"}).then(loadMsgs);}});
 function loadLog(){fetch("/admin/api/log").then(function(r){return r.json();}).then(function(j){
   $("log").innerHTML=j.items.length?j.items.map(function(x){return '<tr><td>'+dt(x.ts)+'</td><td>'+(x.who==="owner"?"владелец":x.who==="partner"?"партнёр":esc(x.who))+'</td><td>'+esc(x.action)+'</td><td>'+esc(x.details)+'</td></tr>';}).join(""):'<tr><td colspan="4">Пока пусто</td></tr>';});}
 

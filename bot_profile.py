@@ -17,7 +17,7 @@ import accounts
 import config
 import plans
 import usage
-from states import ProfileForm
+from states import FeedbackForm, ProfileForm
 from storage import reminders_enabled, set_reminders_enabled
 
 logger = logging.getLogger(__name__)
@@ -157,6 +157,104 @@ async def profile_reminders(callback: CallbackQuery, state: FSMContext):
     set_reminders_enabled(uid, not reminders_enabled(uid))
     await callback.answer("Готово")
     await show_profile(callback.message, state, edit=True)
+
+
+# ---------- справка по разделам и «написать разработчику» ----------
+
+def _help_back_kb() -> InlineKeyboardMarkup:
+    b = InlineKeyboardBuilder()
+    b.button(text="⬅️ К разделам справки", callback_data="help:hub")
+    b.button(text="✉️ Написать разработчику", callback_data="help:fb")
+    b.adjust(1)
+    return b.as_markup()
+
+
+@router.callback_query(F.data == "help:hub")
+async def help_hub(callback: CallbackQuery, state: FSMContext):
+    import helpdata
+    from keyboards import help_hub_kb
+    await state.clear()
+    await callback.answer()
+    try:
+        await callback.message.edit_text(helpdata.INTRO, reply_markup=help_hub_kb(), parse_mode=None)
+    except Exception:  # noqa: BLE001 — сообщение старое/не наше
+        await callback.message.answer(helpdata.INTRO, reply_markup=help_hub_kb(), parse_mode=None)
+
+
+@router.callback_query(F.data.startswith("help:s:"))
+async def help_section(callback: CallbackQuery):
+    import helpdata
+    item = helpdata.SECTION_BY_KEY.get(callback.data.split(":", 2)[2])
+    if not item:
+        await callback.answer("Раздел не найден")
+        return
+    await callback.answer()
+    usage.event("help_open", callback.message.chat.id)
+    await callback.message.edit_text(f"{item[0]}\n\n{item[1]}", reply_markup=_help_back_kb(), parse_mode=None)
+
+
+def _feedback_kind_kb() -> InlineKeyboardMarkup:
+    b = InlineKeyboardBuilder()
+    b.button(text="💡 Идея", callback_data="fb:k:idea")
+    b.button(text="🐞 Ошибка", callback_data="fb:k:bug")
+    b.button(text="❓ Вопрос", callback_data="fb:k:q")
+    b.button(text="⬅️ Отмена", callback_data="help:hub")
+    b.adjust(3, 1)
+    return b.as_markup()
+
+
+@router.callback_query(F.data == "help:fb")
+async def feedback_start(callback: CallbackQuery, state: FSMContext):
+    await state.clear()
+    await callback.answer()
+    await callback.message.answer("✉️ Что вы хотите отправить разработчику?", reply_markup=_feedback_kind_kb(), parse_mode=None)
+
+
+@router.message(Command("feedback"))
+async def cmd_feedback(message: Message, state: FSMContext):
+    await state.clear()
+    await message.answer("✉️ Что вы хотите отправить разработчику?", reply_markup=_feedback_kind_kb(), parse_mode=None)
+
+
+@router.callback_query(F.data.startswith("fb:k:"))
+async def feedback_kind(callback: CallbackQuery, state: FSMContext):
+    kind = callback.data.split(":", 2)[2]
+    if kind not in accounts.FEEDBACK_KINDS:
+        await callback.answer()
+        return
+    await state.set_state(FeedbackForm.text)
+    await state.update_data(fb_kind=kind)
+    await callback.answer()
+    hint = {"bug": "Опишите, что случилось и что вы нажимали.", "idea": "Опишите, что хотелось бы добавить или изменить.",
+            "q": "Напишите вопрос."}[kind]
+    await callback.message.edit_text(f"{hint}\n\nОтправьте одним сообщением (до 1500 символов). Пароли и платёжные данные не пишите.",
+                                     reply_markup=_cancel_kb_help(), parse_mode=None)
+
+
+def _cancel_kb_help() -> InlineKeyboardMarkup:
+    b = InlineKeyboardBuilder()
+    b.button(text="⬅️ Отмена", callback_data="help:hub")
+    return b.as_markup()
+
+
+@router.message(FeedbackForm.text, F.text)
+async def feedback_text(message: Message, state: FSMContext):
+    import feedback
+    data = await state.get_data()
+    kind = data.get("fb_kind", "idea")
+    uid = message.chat.id
+    try:
+        fid = accounts.feedback_add(uid, kind, message.text, "", "bot")
+    except ValueError as e:
+        await message.answer(f"😔 {e}", parse_mode=None)
+        if "много" in str(e):
+            await state.clear()
+        return
+    await state.clear()
+    usage.event("feedback", uid)
+    username = message.from_user.username if message.from_user else ""
+    await feedback.notify_bot(message.bot, feedback.admin_text(fid, kind, "bot", uid, message.text, "", username or ""))
+    await message.answer("✅ Спасибо! Сообщение отправлено разработчику.", parse_mode=None)
 
 
 # ---------- данные профиля: согласие, «не использовать», цель, вес ----------

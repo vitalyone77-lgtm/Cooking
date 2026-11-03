@@ -78,6 +78,18 @@ def cuisine_kb(with_extras: bool = True, last_title: str | None = None, fridge: 
     return b.as_markup()
 
 
+def help_hub_kb() -> InlineKeyboardMarkup:
+    """Справка: разделы кнопками (в Telegram это «выпадающий список»), внизу — написать разработчику."""
+    import helpdata
+    b = InlineKeyboardBuilder()
+    for key, title, _ in helpdata.SECTIONS:
+        b.button(text=title, callback_data=f"help:s:{key}")
+    b.adjust(2)
+    b.row(InlineKeyboardButton(text="✉️ Написать разработчику", callback_data="help:fb"))
+    b.row(InlineKeyboardButton(text="⬅️ Меню", callback_data="menu:open"))
+    return b.as_markup()
+
+
 def ready_hub_kb(has_day: bool, has_week: bool, week_days: int) -> InlineKeyboardMarkup:
     b = InlineKeyboardBuilder()
     if has_day:

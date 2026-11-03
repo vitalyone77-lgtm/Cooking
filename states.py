@@ -57,3 +57,8 @@ class ProfileForm(StatesGroup):
     weight = State()            # вес (и цель по весу)
     shelf_add = State()         # добавить продукт на полку
     promo = State()             # промокод
+
+
+class FeedbackForm(StatesGroup):
+    """«Написать разработчику»: ждём текст сообщения."""
+    text = State()

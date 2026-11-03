@@ -252,6 +252,7 @@ def format_store_links(terms: list[str], store: str, amounts: dict[str, int] | N
         lines.append("Ещё по рецептам понадобится: " + ", ".join(f"{k} — {_fmt_amount(k, v)}" for k, v in rest))
     lines.append("")
     lines.append("_Нажми на продукт — откроется поиск в магазине, там можно добавить его в корзину и оформить заказ. "
+                 "Для удобства войди в браузере в свой профиль магазина. "
                  "Справа от названия — сколько нужно купить. Другой магазин — кнопки ниже._")
     return "\n".join(lines)
 
