@@ -16,6 +16,7 @@ import httpx
 
 import accounts
 import config
+import images
 from ai import generate_recipe
 from search import format_results_for_prompt, search_recipes
 from shopping import extract_dish_title, extract_shopping_terms
@@ -122,16 +123,50 @@ async def build_post(variant: int = 0) -> tuple[str, str]:
     return title, text[:15000]
 
 
-async def post_vk(text: str) -> int:
+def _photo_error(data: dict) -> None:
+    if "error" in data:
+        raise RuntimeError(f"Картинка не загрузилась: ВКонтакте отказал, код {data['error'].get('error_code')}. "
+                           "Для картинок у ключа сообщества нужно право «Фотографии»")
+
+
+async def vk_photo_attachment(image: bytes) -> str:
+    """Загрузить картинку для записи на стену сообщества. -> «photo-НОМЕР_ID». RuntimeError без ключа в тексте."""
+    try:
+        async with httpx.AsyncClient(timeout=60) as client:
+            gid = await group_numeric_id(client)
+            base = config.VK_API_URL.rstrip("/") + "/method/"
+            common = {"access_token": config.VK_GROUP_TOKEN, "v": config.VK_API_VERSION}
+            server = (await client.post(base + "photos.getWallUploadServer", data={"group_id": gid, **common})).json()
+            _photo_error(server)
+            up = (await client.post(server["response"]["upload_url"], files={"photo": ("dish.png", image, "image/png")})).json()
+            if not up.get("photo") or up.get("photo") == "[]":
+                raise RuntimeError("Картинка не загрузилась: ВКонтакте не принял файл")
+            saved = (await client.post(base + "photos.saveWallPhoto", data={
+                "group_id": gid, "photo": up["photo"], "server": up["server"], "hash": up["hash"], **common})).json()
+            _photo_error(saved)
+            ph = saved["response"][0]
+            return f"photo{ph['owner_id']}_{ph['id']}"
+    except (httpx.HTTPError, ValueError, KeyError, IndexError, TypeError) as e:
+        raise RuntimeError(f"Картинка не загрузилась в ВКонтакте ({type(e).__name__})") from None
+
+
+async def build_image(title: str, text: str) -> bytes | None:
+    """Картинка блюда через Leonardo (None — нет ключа или не получилось)."""
+    return await images.make_dish_image(title, text)
+
+
+async def post_vk(text: str, attachment: str | None = None) -> int:
     """Запись на стену сообщества от имени сообщества. -> номер записи. RuntimeError — без ключа в тексте."""
     if not configured_vk():
         raise RuntimeError("ВКонтакте не настроен: нет VK_GROUP_ID или VK_GROUP_TOKEN")
     try:
         async with httpx.AsyncClient(timeout=30) as client:
             gid = await group_numeric_id(client)
-            resp = await client.post(f"{config.VK_API_URL.rstrip('/')}/method/wall.post", data={
-                "owner_id": -gid, "from_group": 1, "message": text,
-                "access_token": config.VK_GROUP_TOKEN, "v": config.VK_API_VERSION})
+            payload = {"owner_id": -gid, "from_group": 1, "message": text,
+                       "access_token": config.VK_GROUP_TOKEN, "v": config.VK_API_VERSION}
+            if attachment:
+                payload["attachments"] = attachment
+            resp = await client.post(f"{config.VK_API_URL.rstrip('/')}/method/wall.post", data=payload)
             data = resp.json()
     except (httpx.HTTPError, ValueError) as e:
         raise RuntimeError(f"ВКонтакте не ответил ({type(e).__name__})") from None
@@ -141,22 +176,31 @@ async def post_vk(text: str) -> int:
     return int(data["response"]["post_id"])
 
 
-async def post_tg(bot, text: str) -> int:
+async def post_tg(bot, text: str, image: bytes | None = None) -> int:
+    if image:
+        from aiogram.types import BufferedInputFile
+        await bot.send_photo(config.TG_CHANNEL_ID, BufferedInputFile(image, "dish.png"))
     msg = await bot.send_message(config.TG_CHANNEL_ID, text[:4000], parse_mode=None, disable_web_page_preview=False)
     return msg.message_id
 
 
-async def publish(bot, title: str, text: str) -> dict:
-    """Публикует везде, где настроено. -> {"vk": id|None, "tg": id|None, "errors": [...]}."""
+async def publish(bot, title: str, text: str, image: bytes | None = None) -> dict:
+    """Публикует везде, где настроено (с картинкой, если она есть). -> {"vk": id|None, "tg": id|None, "errors": [...]}."""
     out = {"vk": None, "tg": None, "errors": []}
     if configured_vk():
+        attachment = None
+        if image:
+            try:
+                attachment = await vk_photo_attachment(image)
+            except RuntimeError as e:
+                out["errors"].append(f"{e}. Запись опубликована без картинки")
         try:
-            out["vk"] = await post_vk(text)
+            out["vk"] = await post_vk(text, attachment)
         except RuntimeError as e:
             out["errors"].append(str(e))
     if configured_tg():
         try:
-            out["tg"] = await post_tg(bot, text)
+            out["tg"] = await post_tg(bot, text, image)
         except Exception as e:  # noqa: BLE001
             out["errors"].append(f"Telegram-канал: {type(e).__name__}")
     if out["vk"] or out["tg"]:
@@ -185,7 +229,8 @@ async def daily_job(bot) -> None:
         return
     try:
         title, text = await build_post()
-        res = await publish(bot, title, text)
+        image = await build_image(title, text) if (config.SOCIAL_IMAGES and images.configured()) else None
+        res = await publish(bot, title, text, image)
     except Exception as e:  # noqa: BLE001
         logger.exception("Рецепт дня не опубликован")
         await _tell_admins(bot, f"⚠️ Рецепт дня не опубликован: {e}")

@@ -144,6 +144,11 @@ TG_CHANNEL_ID = os.getenv("TG_CHANNEL_ID", "")                   # @имя_ка�
 SOCIAL_AUTOPOST = os.getenv("SOCIAL_AUTOPOST", "false").lower() == "true"   # false: только вручную через /postvk
 SOCIAL_POST_HOUR = int(os.getenv("SOCIAL_POST_HOUR", "9"))
 SOCIAL_POST_MINUTE = int(os.getenv("SOCIAL_POST_MINUTE", "30"))
+# Картинки блюд через Leonardo.ai (images.py): ключ владельца; SOCIAL_IMAGES=true — рисовать картинку к каждому рецепту дня
+LEONARDO_API_KEY = os.getenv("LEONARDO_API_KEY", "")
+LEONARDO_MODEL_ID = os.getenv("LEONARDO_MODEL_ID", "7b592283-e8a7-4c5a-9ba6-d18c31f258b9")
+RECIPE_IMAGE_SIZE = int(os.getenv("RECIPE_IMAGE_SIZE", "768"))
+SOCIAL_IMAGES = os.getenv("SOCIAL_IMAGES", "false").lower() == "true"
 PARTNER_PASSWORD = os.getenv("PARTNER_PASSWORD", "")
 PARTNER_SHARE_PCT = int(os.getenv("PARTNER_SHARE_PCT", "50"))     # доля партнёра от выручки, %
 DEEPSEEK_BALANCE_ALERT_USD = float(os.getenv("DEEPSEEK_BALANCE_ALERT_USD", "3"))

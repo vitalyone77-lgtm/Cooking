@@ -1,0 +1,9 @@
+/* Общий стиль картинок к записям: 1200×800, палитра как на сайте */
+html,body{margin:0;width:1200px;height:800px;overflow:hidden;background:#FBF7F2;color:#2B2622;font-family:"Segoe UI","Helvetica Neue",Arial,sans-serif}
+.wrap{position:relative;width:1200px;height:800px}
+.brand{position:absolute;left:80px;bottom:56px;font-size:28px;color:#6B625A;display:flex;align-items:center;gap:14px}
+.brand i{display:inline-block;width:18px;height:18px;border-radius:50%;background:#2F6B4F}
+h1{margin:0;font-size:88px;line-height:1.06;font-weight:600;letter-spacing:-1px}
+p.sub{margin:26px 0 0;font-size:38px;line-height:1.35;color:#6B625A}
+.chip{display:inline-block;padding:10px 24px;border-radius:999px;background:#E6F0EA;color:#24593F;font-size:28px;font-weight:500;margin-right:14px}
+svg{display:block}

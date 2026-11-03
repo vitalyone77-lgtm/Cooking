@@ -1,20 +1,22 @@
 """
-/postvk — черновик «рецепта дня» для владельца: смотрим текст и жмём «Опубликовать» (сообщество ВК и/или канал).
-Команда только для ADMIN_TG_IDS.
+/postvk — черновик «рецепта дня» для владельца: смотрим текст, при желании рисуем картинку и жмём «Опубликовать»
+(сообщество ВК и/или канал). Команда только для ADMIN_TG_IDS.
 """
 import logging
 
 from aiogram import F, Router
 from aiogram.filters import Command
-from aiogram.types import CallbackQuery, InlineKeyboardMarkup, Message
+from aiogram.types import BufferedInputFile, CallbackQuery, InlineKeyboardMarkup, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 import accounts
 import config
+import images
 import social
 
 logger = logging.getLogger(__name__)
 router = Router(name="social")
+_images: dict[int, bytes] = {}      # картинка к черновику владельца (только в памяти, пока не опубликована)
 
 
 def _is_admin(chat_id: int) -> bool:
@@ -24,7 +26,18 @@ def _is_admin(chat_id: int) -> bool:
 def _kb() -> InlineKeyboardMarkup:
     b = InlineKeyboardBuilder()
     b.button(text="✅ Опубликовать", callback_data="soc:go")
+    if images.configured():
+        b.button(text="🖼 С картинкой", callback_data="soc:img")
     b.button(text="🔄 Другой рецепт", callback_data="soc:next")
+    b.button(text="Отмена", callback_data="soc:no")
+    b.adjust(1, 2, 1)
+    return b.as_markup()
+
+
+def _image_kb() -> InlineKeyboardMarkup:
+    b = InlineKeyboardBuilder()
+    b.button(text="✅ Опубликовать с картинкой", callback_data="soc:goimg")
+    b.button(text="🔄 Другая картинка", callback_data="soc:img")
     b.button(text="Отмена", callback_data="soc:no")
     b.adjust(1, 2)
     return b.as_markup()
@@ -36,6 +49,7 @@ def _where() -> str:
 
 
 async def _draft(chat_id: int, send, variant: int = 0) -> None:
+    _images.pop(chat_id, None)
     try:
         title, text = await social.build_post(variant)
     except Exception as e:  # noqa: BLE001
@@ -71,23 +85,47 @@ async def next_recipe(callback: CallbackQuery):
 
 @router.callback_query(F.data == "soc:no")
 async def cancel(callback: CallbackQuery):
+    _images.pop(callback.message.chat.id, None)
     await callback.answer("Отменил")
     await callback.message.edit_reply_markup()
 
 
-@router.callback_query(F.data == "soc:go")
-async def go(callback: CallbackQuery):
-    if not _is_admin(callback.message.chat.id):
+@router.callback_query(F.data == "soc:img")
+async def draw(callback: CallbackQuery):
+    chat_id = callback.message.chat.id
+    if not _is_admin(chat_id):
         await callback.answer()
         return
-    draft = accounts.sess_get(f"soc:draft:{callback.message.chat.id}")
-    if not draft:
+    draft = accounts.sess_get(f"soc:draft:{chat_id}")
+    if not draft or not draft.get("text"):
+        await callback.answer("Черновик устарел, вызовите /postvk ещё раз", show_alert=True)
+        return
+    await callback.answer()
+    wait = await callback.message.answer("⏳ Рисую картинку, это может занять до минуты…", parse_mode=None)
+    img = await social.build_image(draft["title"], draft["text"])
+    await wait.delete()
+    if not img:
+        await callback.message.answer("😔 Картинка не получилась. Можно опубликовать без неё или попробовать ещё раз.", parse_mode=None)
+        return
+    _images[chat_id] = img
+    await callback.message.answer_photo(BufferedInputFile(img, "dish.png"), caption="Картинка к рецепту", reply_markup=_image_kb())
+
+
+async def _publish(callback: CallbackQuery, with_image: bool) -> None:
+    chat_id = callback.message.chat.id
+    if not _is_admin(chat_id):
+        await callback.answer()
+        return
+    draft = accounts.sess_get(f"soc:draft:{chat_id}")
+    img = _images.get(chat_id) if with_image else None
+    if not draft or not draft.get("text") or (with_image and not img):
         await callback.answer("Черновик устарел, вызовите /postvk ещё раз", show_alert=True)
         return
     await callback.answer()
     await callback.message.edit_reply_markup()
-    accounts.sess_set(f"soc:draft:{callback.message.chat.id}", {})          # второе нажатие ничего не опубликует
-    res = await social.publish(callback.bot, draft["title"], draft["text"])
+    accounts.sess_set(f"soc:draft:{chat_id}", {})          # второе нажатие ничего не опубликует
+    _images.pop(chat_id, None)
+    res = await social.publish(callback.bot, draft["title"], draft["text"], img)
     lines = []
     if res["vk"]:
         lines.append(f"✅ ВКонтакте: запись №{res['vk']} опубликована")
@@ -95,3 +133,13 @@ async def go(callback: CallbackQuery):
         lines.append("✅ Telegram-канал: опубликовано")
     lines += [f"⚠️ {e}" for e in res["errors"]]
     await callback.message.answer("\n".join(lines) or "Некуда публиковать", parse_mode=None)
+
+
+@router.callback_query(F.data == "soc:go")
+async def go(callback: CallbackQuery):
+    await _publish(callback, with_image=False)
+
+
+@router.callback_query(F.data == "soc:goimg")
+async def go_with_image(callback: CallbackQuery):
+    await _publish(callback, with_image=True)

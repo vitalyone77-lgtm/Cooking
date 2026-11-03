@@ -1,0 +1,20 @@
+<!doctype html><html lang="ru"><head><meta charset="utf-8"><link rel="stylesheet" href="base.css"><style>
+.t{position:absolute;left:80px;top:150px;width:520px}
+h1{font-size:76px}
+.card{position:absolute;right:90px;top:90px;width:470px;height:600px;border-radius:36px;background:#fff;border:3px solid #E7DED3;padding:34px 36px;box-sizing:border-box}
+.row{display:flex;align-items:center;gap:22px;height:92px;border-bottom:2px solid #EFE7DC;font-size:36px}
+.row:last-of-type{border-bottom:0}
+.box{flex:none;width:44px;height:44px;border-radius:12px;border:4px solid #CFC5B8;box-sizing:border-box}
+.done .box{background:#2F6B4F;border-color:#2F6B4F;position:relative}
+.done .box:after{content:"";position:absolute;left:12px;top:5px;width:11px;height:20px;border:solid #FBF7F2;border-width:0 5px 5px 0;transform:rotate(45deg)}
+.done span{opacity:.5;text-decoration:line-through}
+.cnt{margin-top:18px;font-size:30px;color:#6B625A}
+</style></head><body><div class="wrap">
+<div class="t"><h1>Список покупок с галочками</h1><p class="sub">Отмечайте купленное прямо в магазине</p></div>
+<div class="card"><div style="font-size:30px;color:#6B625A;margin-bottom:6px">Продукты</div>
+<div class="row done"><i class="box"></i><span>Куриное филе</span></div>
+<div class="row done"><i class="box"></i><span>Лапша</span></div>
+<div class="row"><i class="box"></i><span>Морковь</span></div>
+<div class="row"><i class="box"></i><span>Лук репчатый</span></div>
+<div class="cnt">Куплено 2 из 4</div></div>
+<div class="brand"><i></i>Кухонный помощник</div></div></body></html>
