@@ -54,7 +54,7 @@ CUISINE_BUTTONS = {
 }
 
 
-def cuisine_kb(with_extras: bool = True, last_title: str | None = None) -> InlineKeyboardMarkup:
+def cuisine_kb(with_extras: bool = True, last_title: str | None = None, fridge: bool = False) -> InlineKeyboardMarkup:
     """
     Главное меню («Создать») парами: классическая/сбалансированная, спорт кардио/сила, КБЖУ/перекус,
     аюрведа/избранное, меню на день/на N дней; внизу — «Последний рецепт», если он есть. Внутри анкет
@@ -66,13 +66,15 @@ def cuisine_kb(with_extras: bool = True, last_title: str | None = None) -> Inlin
     if not with_extras:
         b.adjust(2)
         return b.as_markup()
+    if fridge:      # последним пунктом после аюрведы: рецепт по фото продуктов
+        b.button(text="📷 По фото продуктов", callback_data="fridge:start")
     b.button(text="⭐ Избранное", callback_data="favorites:open")
     b.button(text="📅 Меню на день", callback_data="daymenu:start")
     b.button(text=f"📆 Меню на {config.WEEK_MENU_DAYS} дня", callback_data="weekmenu:start")
     if last_title:
         short = last_title if len(last_title) <= 28 else last_title[:26] + "…"
         b.button(text=f"📖 Последний: {short}", callback_data="last:open")
-    b.adjust(2, 2, 2, 2, 2, 1)
+    b.adjust(*((2, 2, 2, 2, 1, 2, 1) if fridge else (2, 2, 2, 2, 2, 1)))
     return b.as_markup()
 
 
@@ -90,12 +92,12 @@ def ready_hub_kb(has_day: bool, has_week: bool, week_days: int) -> InlineKeyboar
     return b.as_markup()
 
 
-def skip_kb(step: str, last: str = "") -> InlineKeyboardMarkup:
+def skip_kb(step: str, last: str = "", label: str = "Как в прошлый раз") -> InlineKeyboardMarkup:
     """Кнопка «пропустить» для шагов со свободным вводом текста; last — что вводили в прошлый раз."""
     b = InlineKeyboardBuilder()
     if last:
         short = last if len(last) <= 28 else last[:27] + "…"
-        b.button(text=f"↩️ Как в прошлый раз: {short}", callback_data=f"reuse:{step}")
+        b.button(text=f"↩️ {label}: {short}", callback_data=f"reuse:{step}")
     b.button(text="➡️ Пропустить", callback_data=f"skip:{step}")
     b.adjust(1)
     return b.as_markup()

@@ -46,6 +46,7 @@ from stores.basket import build_priced_basket
 from tg_safety import SafeSendMiddleware, OneHeavyAtATime, FloodGuard, ChatSequential
 import usage
 import bot_profile
+import profile_ctx
 import plans
 import bot_cook
 import bot_shop
@@ -275,16 +276,37 @@ def _kb_sent(chat_id: int) -> None:
     accounts.sess_mark_forever(f"kbv:{chat_id}")
 
 
+def _last_value(chat_id: int, field: str) -> tuple[str, str]:
+    """Что предложить кнопкой: для цели КБЖУ — цель из профиля (если включена), иначе прошлый ввод."""
+    if field == "macro_goal":
+        try:
+            if accounts.consent_get(chat_id) and "macro" in accounts.goals_get(chat_id)["feats"]:
+                text = accounts.goal_text(chat_id)
+                if text:
+                    return text, "Моя цель"
+        except Exception:  # noqa: BLE001 — сбой базы не должен ломать анкету
+            pass
+    return get_last_inputs(chat_id).get(field, ""), "Как в прошлый раз"
+
+
 def _skip(step: str, chat_id: int):
     """«Пропустить» и, если в прошлый раз что-то вводили в это поле, «↩️ Как в прошлый раз»."""
     field = step.split("_", 1)[1] if step[:3] in ("dm_", "wm_") else step
-    return kb.skip_kb(step, get_last_inputs(chat_id).get(field, ""))
+    value, label = _last_value(chat_id, field)
+    return kb.skip_kb(step, value, label)
 
 
 def _left_line(chat_id: int, kind: str) -> str:
-    """Счётчик под анкетой — чтобы лимит не заканчивался внезапно."""
+    """Хвост экрана «Проверим запрос»: что исключено по профилю и счётчик, чтобы лимит не заканчивался внезапно."""
+    out = ""
+    try:
+        g = accounts.goals_get(chat_id)
+        if g["never"] and "never" in g["feats"] and accounts.consent_get(chat_id) and plans.has_feature(chat_id, "memory"):
+            out += f"\n\n🚫 Всегда исключаю (из профиля): {g['never']}"
+    except Exception:  # noqa: BLE001
+        pass
     t = usage.left_text(chat_id, kind)
-    return f"\n\n🔢 {t}" if t else ""
+    return out + (f"\n\n🔢 {t}" if t else "")
 
 
 def _input_hints(chat_id: int) -> str:
@@ -301,7 +323,7 @@ async def show_main_menu(message: Message, state: FSMContext, intro: str = "Чт
     await ensure_reply_kb(message)
     last = get_last_recipe(message.chat.id)
     intro += _input_hints(message.chat.id) + _left_line(message.chat.id, "recipe")
-    await message.answer(intro, reply_markup=kb.cuisine_kb(last_title=(last or {}).get("title") or ("Рецепт" if last else None)))
+    await message.answer(intro, reply_markup=kb.cuisine_kb(fridge=plans.feature_on(message.chat.id, "photo_recipe"), last_title=(last or {}).get("title") or ("Рецепт" if last else None)))
     await state.set_state(RecipeForm.cuisine)
 
 
@@ -732,6 +754,7 @@ async def step_confirm_go(callback: CallbackQuery, state: FSMContext):
 async def _seen_message(handler, event, data):
     try:
         usage.touch(event.chat.id)
+        profile_ctx.set_user(event.chat.id)     # «никогда не использовать» из профиля — во все генерации этого обновления
     except Exception:  # noqa: BLE001 — учёт не должен мешать ответу
         logger.exception("usage.touch")
     return await handler(event, data)
@@ -745,6 +768,7 @@ async def _seen_callback(handler, event, data):
     try:
         if event.message:
             usage.touch(event.message.chat.id)
+            profile_ctx.set_user(event.message.chat.id)
     except Exception:  # noqa: BLE001
         logger.exception("usage.touch")
     return await handler(event, data)
@@ -1783,7 +1807,7 @@ def _reuse_handler(state_name: str, field: str):
 async def reuse_last_input(callback: CallbackQuery, state: FSMContext):
     step = callback.data.split(":", 1)[1]
     field = step.split("_", 1)[1] if step[:3] in ("dm_", "wm_") else step
-    value = get_last_inputs(callback.message.chat.id).get(field, "")
+    value = _last_value(callback.message.chat.id, field)[0]
     handler = _reuse_handler(await state.get_state(), field)
     if not value or not handler:
         await callback.answer("Эта кнопка уже не нужна", show_alert=False)

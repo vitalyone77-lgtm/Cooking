@@ -89,6 +89,18 @@ input[type=text]{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid
 .shelf .chip{display:inline-flex;align-items:center;gap:6px}
 textarea{width:100%;min-height:64px;padding:10px 14px;border:1.5px solid var(--line);border-radius:12px;background:var(--surface);color:var(--text);font:inherit}
 .toast{position:fixed;left:12px;right:12px;top:12px;z-index:50;background:var(--primary);color:var(--on-primary);padding:14px 16px;border-radius:14px;font-weight:600;box-shadow:0 6px 24px rgba(0,0,0,.25)}
+
+.lock{display:inline-flex;vertical-align:-3px;margin-right:6px}.lock svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round}
+.btn.locked{background:transparent;color:var(--muted);border:2px dashed var(--line)}.chip.locked{color:var(--muted);border-style:dashed}
+.sheet-bg{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:80;display:flex;align-items:flex-end;justify-content:center}
+.sheet{width:100%;max-width:640px;background:var(--surface);border-radius:20px 20px 0 0;padding:20px 16px calc(20px + env(safe-area-inset-bottom));max-height:85vh;overflow:auto}
+.sheet h2{margin:0 0 8px;font-size:20px}.sheet .sub{margin-bottom:8px}
+.buyrow{display:flex;gap:12px;align-items:flex-start;min-height:44px;cursor:pointer}.buyrow input{width:24px;height:24px;margin-top:2px;accent-color:var(--primary);flex:none}
+.item.done .bn{opacity:.5;text-decoration:line-through}
+.buyhead{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:4px 0 8px;color:var(--muted);font-size:15px}
+.opt{display:flex;gap:12px;align-items:flex-start;min-height:44px;padding:8px 0;cursor:pointer}.opt input{width:24px;height:24px;accent-color:var(--primary);flex:none}
+.goalgrid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.goalgrid label{font-size:14px;color:var(--muted);display:block;margin-bottom:4px}
+.wchart{width:100%;height:auto;display:block;margin-top:8px}
 </style>
 <!-- Yandex.Metrika counter -->
 <script type="text/javascript">
@@ -309,7 +321,7 @@ textarea{width:100%;min-height:64px;padding:10px 14px;border:1.5px solid var(--l
   window.__r={};
   function actions(title,text,noSave){
     var id="r"+Math.random().toString(36).slice(2,8); window.__r[id]={title:title,text:text};
-    return '<div class="row"><button class="btn" data-pdf="'+id+'">📄 Скачать PDF</button>'+(noSave?'':'<button class="btn ghost" data-save="'+id+'">⭐ Сохранить</button>')+'</div>'+
+    return '<div class="row">'+(isLocked("pdf")?'<button class="btn locked" data-gate="pdf">'+lockIc()+'Скачать PDF</button>':'<button class="btn" data-pdf="'+id+'">📄 Скачать PDF</button>')+(noSave?'':'<button class="btn ghost" data-save="'+id+'">⭐ Сохранить</button>')+'</div>'+
       ('wakeLock' in navigator?'<label class="toggle"><input type="checkbox" class="k-wake"> Не гасить экран, пока готовлю</label>':'');
   }
 
@@ -351,7 +363,8 @@ textarea{width:100%;min-height:64px;padding:10px 14px;border:1.5px solid var(--l
     var hint=box.querySelector(".storehint");if(hint)hint.style.display="none";
     var sel=box.querySelector(".storeitems");if(sel)sel.style.display="";
     var cart=box.querySelector("[data-cart]");
-    if(cart){cart.style.display=(st==="ВкусВилл")?"":"none";if(st==="ВкусВилл")loadCart(cart);}
+    if(cart){cart.style.display=(st==="ВкусВилл")?"":"none";
+      if(st==="ВкусВилл"){ if(isLocked("cart")){cart.innerHTML='<button class="btn locked" data-gate="cart">'+lockIc()+'Корзина ВкусВилла с ценами</button>';} else loadCart(cart);}}
   }
   function loadCart(el){
     if(el.getAttribute("data-loaded"))return;
@@ -388,7 +401,7 @@ textarea{width:100%;min-height:64px;padding:10px 14px;border:1.5px solid var(--l
   function shoppingHTML(items,title,ctx){
     if(!items||!items.length) return "";
     var buy=items.filter(function(i){return !i.home;});
-    var h=homeBox(items)+'<div class="storebox">'+storeChips(buy.length?buy:items)+'<div data-cart data-items="'+esc(JSON.stringify(buy.map(function(i){return {name:i.name,amount:i.amount||""};})))+'" style="display:none"></div><div class="storeitems" style="display:none">';buy.forEach(function(it){h+='<div class="item"><strong>'+esc(it.name)+'</strong>'+(it.amount?' — '+esc(it.amount):'')+homeBtn(it.name)+'<div class="links">'+it.links.map(storeLink).join("")+'</div></div>';});h+='</div></div>';
+    var h=homeBox(items)+'<div class="storebox">'+storeChips(buy.length?buy:items)+'<div data-cart data-items="'+esc(JSON.stringify(buy.map(function(i){return {name:i.name,amount:i.amount||""};})))+'" style="display:none"></div><div class="storeitems" style="display:none">'+buyHead(buy);buy.forEach(function(it){h+=buyRow(it.name,it.amount,homeBtn(it.name)+'<div class="links">'+it.links.map(storeLink).join("")+'</div>');});h+='</div></div>';
     if(ctx)h+=missingBox(items,ctx);
     return accordion("🛒 "+(title||"Найти продукты в магазине"),"выбери магазин — ссылки на поиск","",h,false);
   }
@@ -407,12 +420,15 @@ textarea{width:100%;min-height:64px;padding:10px 14px;border:1.5px solid var(--l
   function viewNew(){
     var m=META, times=["15 мин","30 мин","45 мин","60 мин","Не важно"].map(function(x){return {key:x,label:x};}), sv=[1,2,3,4,5,6].map(function(x){return {key:String(x),label:String(x)};});
     var h=favStrip()+'<h1>Что приготовим?</h1><p class="sub">Ответь на несколько вопросов — подберу рецепт, посчитаю калории и покажу, где купить продукты.</p><div id="install-top"></div>'+adSlot("top");
-    h+='<div class="seg" data-name="mode">'+[["recipe","Рецепт"],["day","Меню на день"],["week","План на "+m.week_days+" дня"]].map(function(x){return '<button class="chip" data-key="'+x[0]+'" aria-pressed="'+(F.mode===x[0])+'">'+x[1]+'</button>';}).join("")+'</div>';
+    h+='<div class="seg" data-name="mode">'+[["recipe","Рецепт"],["day","Меню на день"],["week","План на "+m.week_days+" дня"]].map(function(x){var kk={day:"daymenu",week:"week"}[x[0]];
+      if(kk&&kindLocked(kk))return '<button class="chip locked" data-gate="'+kk+'">'+lockIc()+x[1]+'</button>';
+      return '<button class="chip" data-key="'+x[0]+'" aria-pressed="'+(F.mode===x[0])+'">'+x[1]+'</button>';}).join("")+'</div>';
     h+='<label class="f">Тип питания</label>'+chips(m.cuisines,F.cuisine,"cuisine",false);
-    if(F.cuisine==="macro_goal") h+='<label class="f" for="macro">Цель по КБЖУ</label><input type="text" id="macro" maxlength="200" placeholder="500 ккал, белки 40 г" value="'+esc(F.macro||"")+'">';
+    if(F.cuisine==="macro_goal") h+='<label class="f" for="macro">Цель по КБЖУ</label><input type="text" id="macro" maxlength="200" placeholder="500 ккал, белки 40 г" value="'+esc(F.macro||ME.goal_text||"")+'">';
     if(F.mode!=="recipe") h+='<label class="f">Приёмы пищи</label>'+chips(m.meals,F.meals,"meals",true);
     h+='<label class="f" for="pref">Что использовать или какое блюдо хочется</label><input type="text" id="pref" maxlength="300" placeholder="курица, рис или «хочу плов»" value="'+esc(F.pref||"")+'">';
     h+='<label class="f" for="exc">Что исключить</label><input type="text" id="exc" maxlength="300" placeholder="орехи, грибы, лук" value="'+esc(F.exc||"")+'">';
+    if(ME.never)h+='<p class="sub" style="margin:6px 0 0">Всегда исключаю по вашему профилю: '+esc(ME.never)+'</p>';
     h+='<label class="f">Время на готовку</label>'+chips(times,F.time,"time",false);
     h+='<label class="f">Порций</label>'+chips(sv,String(F.servings),"servings",false);
     h+='<label class="f">Размер порции</label>'+chips(m.portions,F.portion,"portion",false);
@@ -465,7 +481,7 @@ textarea{width:100%;min-height:64px;padding:10px 14px;border:1.5px solid var(--l
   // кнопка «всё одним PDF»: items хранятся в window.__r, как и у одиночных рецептов
   function bulkButton(label,items,name){
     var id="a"+Math.random().toString(36).slice(2,8); window.__r[id]={items:items,name:name};
-    return '<button class="btn" data-pdfall="'+id+'">'+label+'</button>';
+    return isLocked("pdf")?'<button class="btn locked" data-gate="pdf">'+lockIc()+esc(label.replace(/^\S+\s/,""))+'</button>':'<button class="btn" data-pdfall="'+id+'">'+label+'</button>';
   }
   function viewDay(){return call("GET","/api/day").then(function(d){
     var items=d.meals.map(function(x){return {title:x.label+": "+x.title,text:x.text};});
@@ -488,8 +504,8 @@ textarea{width:100%;min-height:64px;padding:10px 14px;border:1.5px solid var(--l
       h+=accordion("День "+day.day,"",badge,body,day.is_next||(day.generated&&!all));
     });
     var b=w.basket,inner="",bb=b.items.filter(function(i){return !i.home;});
-    if(b.items.length){inner=homeBox(b.items)+'<div class="storebox">'+storeChips(bb.length?bb:b.items)+'<div data-cart data-items="'+esc(JSON.stringify(bb.map(function(i){return {name:i.name,amount:i.amount||""};})))+'" style="display:none"></div><div class="storeitems" style="display:none">';
-      bb.forEach(function(it){inner+='<div class="item"><strong>'+esc(it.name)+'</strong> — '+esc(it.amount)+homeBtn(it.name)+'<div class="links">'+it.links.map(storeLink).join("")+'</div></div>';});
+    if(b.items.length){inner=homeBox(b.items)+'<div class="storebox">'+storeChips(bb.length?bb:b.items)+'<div data-cart data-items="'+esc(JSON.stringify(bb.map(function(i){return {name:i.name,amount:i.amount||""};})))+'" style="display:none"></div><div class="storeitems" style="display:none">'+buyHead(bb);
+      bb.forEach(function(it){inner+=buyRow(it.name,it.amount,homeBtn(it.name)+'<div class="links">'+it.links.map(storeLink).join("")+'</div>');});
       inner+='</div>'+missingBox(b.items,"week")+'</div>';}
     var ti=adv.indexOf("💡"),tips=ti>=0?adv.slice(ti).replace(/\*/g,""):"";
     return h+accordion("🛒 Корзина на весь план","продукты и магазины","",inner,false)+
@@ -519,26 +535,29 @@ textarea{width:100%;min-height:64px;padding:10px 14px;border:1.5px solid var(--l
   function botLink(start){return "https://t.me/"+esc((META&&META.bot)||ME.bot||"Cookingvkusno_bot")+(start?"?start="+start:"");}
   function viewProfile(){
     return loadMe().then(function(m){
-      var h='<h1>👤 Профиль</h1>';
+      var h='<h1>Профиль</h1>';
       if(!m.linked){
         return linkCode().then(function(L){
-        h+='<div class="card pcard"><h2>Войди через Telegram</h2><p class="sub" style="margin:0">Профиль, любимые рецепты и подписка станут общими с ботом и не пропадут при смене телефона. Пароль не нужен — подтверждаешь одной кнопкой в Telegram.</p>'+
-          '<a class="btn" data-link-go="1" href="'+esc(L.url)+'" target="_blank" rel="noopener">✈️ Войти через Telegram</a><div id="link-wait"></div></div>';
+        h+='<div class="card pcard"><h2>Войди через Telegram</h2><p class="sub" style="margin:0">Избранное и подписка станут общими с ботом и не пропадут при смене телефона. Пароль не нужен — подтверждаешь одной кнопкой в Telegram.</p>'+
+          '<a class="btn" data-link-go="1" href="'+esc(L.url)+'" target="_blank" rel="noopener">Войти через Telegram</a><div id="link-wait"></div></div>';
         if(m.paywall)h+='<div class="card pcard">'+esc(m.status)+'</div>';
         return h;
         });
       }
-      h+='<div class="card pcard">✅ Вход выполнен через Telegram<br><span class="sub">'+esc(m.status)+'</span>'+
-        (m.paywall&&m.plan!=="premium"?'<a class="btn" href="'+botLink("pay")+'" target="_blank" rel="noopener">💎 Оформить подписку в Telegram</a>':'')+'</div>';
-      if(!m.memory){
-        h+='<div class="card pcard"><h2>🔒 Полка — в подписке</h2><p class="sub" style="margin:0">С подпиской помощник помнит «полку» — масло, специи и крупы, которые уже есть дома, чтобы не покупать их снова.</p></div>';
-      } else {
-        h+='<div class="card pcard shelf"><h2>🏠 Моя полка</h2><p class="sub" style="margin:0 0 8px">Долгоживущие продукты, которые уже есть дома. В списках покупок они идут отдельно.</p><div class="chips">'+
-          (m.shelf||[]).map(function(x){return '<button class="chip" data-shelf-del="'+esc(x)+'">'+esc(x)+' ✕</button>';}).join("")+'</div>'+
-          '<div class="row" style="margin-top:8px"><input type="text" id="shelf-add" maxlength="60" placeholder="оливковое масло"><button class="btn" style="width:auto;margin:0" data-shelf-add="1">➕</button></div></div>';
-      }
-      h+='<button class="btn ghost" data-unlink="1">Выйти из профиля на этом устройстве</button>';
-      return h;
+      h+='<div class="card pcard">Вход выполнен через Telegram<br><span class="sub">'+esc(m.status)+'</span>'+
+        (m.paywall&&m.plan!=="premium"?(m.trial?'<button class="btn" data-gate-trial="1">Попробовать тариф «'+esc(m.name||"Повар")+'» '+(m.trial_days||7)+' дней бесплатно</button>':'')+'<a class="btn ghost" href="'+botLink("pay")+'" target="_blank" rel="noopener">Оформить подписку в Telegram</a>':'')+'</div>';
+      return profileCards(m).then(function(cards){
+        h+=cards;
+        if(!m.memory){
+          h+='<button class="btn locked" data-gate="memory">'+lockIc()+'Полка и список «никогда не использовать»</button>';
+        } else {
+          h+='<div class="card pcard shelf"><h2>Моя полка</h2><p class="sub" style="margin:0 0 8px">Долгоживущие продукты, которые уже есть дома. В списках покупок они идут отдельно.</p><div class="chips">'+
+            (m.shelf||[]).map(function(x){return '<button class="chip" data-shelf-del="'+esc(x)+'">'+esc(x)+' ✕</button>';}).join("")+'</div>'+
+            '<div class="row" style="margin-top:8px"><input type="text" id="shelf-add" maxlength="60" placeholder="оливковое масло" aria-label="Добавить на полку"><button class="btn" style="width:auto;margin:0" data-shelf-add="1">Добавить</button></div></div>';
+        }
+        h+='<button class="btn ghost" data-unlink="1">Выйти из профиля на этом устройстве</button>';
+        return h;
+      });
     });
   }
   // код входа создаём заранее (кнопка — настоящая ссылка t.me, её не блокирует браузер), живёт 10 минут
@@ -570,9 +589,118 @@ textarea{width:100%;min-height:64px;padding:10px 14px;border:1.5px solid var(--l
     Promise.resolve(VIEWS[tab]()).then(function(h){if(OFFLINE)h=offlineBanner()+h;main.innerHTML=h;if(Object.keys(TM).length)tmEnsureTick();window.scrollTo(0,0);}).catch(fail);
   }
 
+  // ---- замки на функциях тарифа, окно «попробовать» ----
+  var GEM='<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h12l4 6-10 12L2 9Z"/><path d="M11 3 8 9l4 12 4-12-3-6"/><path d="M2 9h20"/></svg>';
+  function lockIc(){return '<span class="lock">'+GEM+'</span>';}
+  function isLocked(f){return !!(ME&&ME.paywall&&ME.feat&&ME.feat[f]===false);}
+  function kindLocked(k){var l=ME&&ME.paywall&&ME.left&&ME.left[k];return !!(l&&l[1]===0);}
+  function closeGate(){var g=document.getElementById("gate");if(g)g.remove();}
+  function gateOpen(feature){
+    closeGate();
+    try{call("POST","/api/gate",{feature:feature}).catch(function(){});}catch(e){}
+    var name=(ME&&ME.name)||"Повар", days=(ME&&ME.trial_days)||7, offers=(ME&&ME.offers)||[];
+    var price=offers.map(function(o){return o.rub+" ₽ за "+(o.days>=365?"год":"месяц");}).join(", ");
+    var title,text,btns;
+    if(!ME.linked){
+      title="Войдите, чтобы продолжить";
+      text="Вход бесплатный: он сохраняет избранное и лимиты на всех ваших устройствах. После входа можно попробовать тариф «"+esc(name)+"» "+days+" дней бесплатно.";
+      btns='<button class="btn" data-gate-login="1">Войти</button>';
+    } else if(ME.trial){
+      title="Попробуйте тариф «"+esc(name)+"» бесплатно";
+      text="Эта функция входит в тариф «"+esc(name)+"». Подключим его на "+days+" дней без оплаты, чтобы вы могли познакомиться со всеми функциями."+(price?" Потом: "+esc(price)+".":"");
+      btns='<button class="btn" data-gate-trial="1">Попробовать '+days+' дней бесплатно</button>';
+    } else {
+      title="Функция тарифа «"+esc(name)+"»";
+      text=(price?"Тариф «"+esc(name)+"»: "+esc(price)+". ":"")+"Он открывает все функции без дневных ограничений.";
+      btns='<a class="btn" href="'+botLink("pay")+'" target="_blank" rel="noopener">Оформить в Telegram</a>';
+    }
+    var d=document.createElement("div");d.id="gate";d.className="sheet-bg";
+    d.innerHTML='<div class="sheet" role="dialog" aria-modal="true" aria-labelledby="gate-t"><h2 id="gate-t">'+title+'</h2><p class="sub">'+text+'</p>'+btns+'<button class="btn ghost" data-gate-close="1">Не сейчас</button></div>';
+    document.body.appendChild(d);
+    var f=d.querySelector(".btn");if(f)f.focus();
+  }
+  document.addEventListener("keydown",function(e){if(e.key==="Escape")closeGate();});
+
+  // ---- список покупок: галочки «куплено» (помним на устройстве 12 часов) ----
+  var BUY_TTL=12*3600*1000;
+  function buyKey(n){return String(n||"").toLowerCase().replace(/\s+/g," ").trim().slice(0,60);}
+  function buyState(){var o={};try{o=JSON.parse(ls("buy")||"{}")||{};}catch(e){}var now=Date.now(),r={};Object.keys(o).forEach(function(k){if(now-o[k]<BUY_TTL)r[k]=o[k];});return r;}
+  function buyRow(name,amount,extra){var k=buyKey(name),on=!!buyState()[k];
+    return '<div class="item'+(on?' done':'')+'"><label class="buyrow"><input type="checkbox" data-buy="'+esc(k)+'"'+(on?' checked':'')+'><span class="bn"><strong>'+esc(name)+'</strong>'+(amount?' — '+esc(amount):'')+'</span></label>'+extra+'</div>';}
+  function buyHead(items){var st=buyState(),n=items.filter(function(i){return st[buyKey(i.name)];}).length;
+    return '<div class="buyhead"><span class="bcount">Куплено '+n+' из '+items.length+'</span><button class="chip mini" data-buy-reset="1">Сбросить</button></div>';}
+  function buyRecount(box){if(!box)return;var all=box.querySelectorAll("[data-buy]"),n=0;Array.prototype.forEach.call(all,function(c){if(c.checked)n++;});var el=box.querySelector(".bcount");if(el)el.textContent="Куплено "+n+" из "+all.length;}
+
+  // ---- профиль: функции, цель КБЖУ, вес ----
+  function val(id){var e=document.getElementById(id);return e?e.value.trim():"";}
+  function profileReload(){return loadMe().then(function(){show("profile");});}
+  function weightChart(ws,goal){
+    if(!ws||ws.length<2) return '<p class="sub" style="margin:8px 0 0">График появится, когда будет хотя бы две записи.</p>';
+    var W=320,H=150,pl=40,pr=10,pt=10,pb=22,vals=ws.map(function(w){return w.kg;});
+    var lo=Math.min.apply(null,vals.concat(goal?[goal]:[])),hi=Math.max.apply(null,vals.concat(goal?[goal]:[]));
+    if(hi-lo<1){lo-=0.5;hi+=0.5;}
+    var pad=(hi-lo)*0.1;lo-=pad;hi+=pad;
+    function X(i){return pl+(W-pl-pr)*(i/(ws.length-1));}
+    function Y(v){return pt+(H-pt-pb)*(1-(v-lo)/(hi-lo));}
+    var pts=ws.map(function(w,i){return X(i).toFixed(1)+","+Y(w.kg).toFixed(1);}).join(" ");
+    var s='<svg viewBox="0 0 '+W+' '+H+'" class="wchart" role="img" aria-label="График веса">';
+    [lo+pad,(lo+hi)/2,hi-pad].forEach(function(v){var y=Y(v).toFixed(1);s+='<line x1="'+pl+'" x2="'+(W-pr)+'" y1="'+y+'" y2="'+y+'" stroke="var(--line)"/><text x="'+(pl-6)+'" y="'+(Number(y)+4)+'" text-anchor="end" fill="var(--muted)" font-size="11">'+v.toFixed(1)+'</text>';});
+    if(goal){var gy=Y(goal).toFixed(1);s+='<line x1="'+pl+'" x2="'+(W-pr)+'" y1="'+gy+'" y2="'+gy+'" stroke="var(--primary)" stroke-dasharray="4 4"/>';}
+    var last=ws[ws.length-1];
+    s+='<polyline fill="none" stroke="var(--primary)" stroke-width="2" points="'+pts+'"/><circle cx="'+X(ws.length-1).toFixed(1)+'" cy="'+Y(last.kg).toFixed(1)+'" r="4" fill="var(--primary)"/>';
+    s+='<text x="'+pl+'" y="'+(H-4)+'" fill="var(--muted)" font-size="11">'+esc(ws[0].day.slice(5))+'</text><text x="'+(W-pr)+'" y="'+(H-4)+'" text-anchor="end" fill="var(--muted)" font-size="11">'+esc(last.day.slice(5))+'</text></svg>';
+    return s;
+  }
+  function profileCards(m){
+    return call("GET","/api/profile").then(function(p){
+      if(!p.consent) return '<div class="card pcard"><h2>Данные профиля</h2><p class="sub" style="margin:0">'+esc(p.text||"")+'</p><button class="btn" data-consent="1">Согласен</button></div>';
+      var on=function(f){return p.feats.indexOf(f)>=0;}, h='';
+      h+='<div class="card pcard"><h2>Мои функции</h2>'+
+        '<label class="opt"><input type="checkbox" data-feat="never"'+(on("never")?' checked':'')+'><span>Список «никогда не использовать»'+(p.never_allowed?'':' '+lockIc()+'тариф «'+esc(ME.name||"Повар")+'»')+'</span></label>'+
+        '<label class="opt"><input type="checkbox" data-feat="macro"'+(on("macro")?' checked':'')+'><span>Цель по калориям и БЖУ</span></label>'+
+        '<label class="opt"><input type="checkbox" data-feat="weight"'+(on("weight")?' checked':'')+'><span>Вес и график</span></label></div>';
+      if(on("never")&&p.never_allowed) h+='<div class="card pcard"><h2>Никогда не использовать</h2><textarea id="pf-never" maxlength="300" placeholder="кинза, грибы, печень">'+esc(p.never||"")+'</textarea><p class="sub" style="margin:6px 0 0">Бот и сайт исключат эти продукты из рецептов, меню и планов. Диагнозы писать не нужно.</p><button class="btn" data-pf-save="never">Сохранить</button></div>';
+      if(on("macro")) h+='<div class="card pcard"><h2>Цель на день</h2><div class="goalgrid"><div><label for="pf-kcal">Калории</label><input type="text" inputmode="numeric" id="pf-kcal" value="'+(p.kcal||"")+'"></div><div><label for="pf-protein">Белки, г</label><input type="text" inputmode="numeric" id="pf-protein" value="'+(p.protein||"")+'"></div><div><label for="pf-fat">Жиры, г</label><input type="text" inputmode="numeric" id="pf-fat" value="'+(p.fat||"")+'"></div><div><label for="pf-carb">Углеводы, г</label><input type="text" inputmode="numeric" id="pf-carb" value="'+(p.carb||"")+'"></div></div><p class="sub" style="margin:8px 0 0">Цель подставляется на шаге «Цель по КБЖУ».</p><button class="btn" data-pf-save="macro">Сохранить</button></div>';
+      if(on("weight")) h+='<div class="card pcard"><h2>Вес</h2>'+weightChart(p.weights,p.weight_goal)+
+        '<div class="row" style="margin-top:12px"><input type="text" inputmode="decimal" id="pf-kg" placeholder="Вес сегодня, кг" aria-label="Вес сегодня, кг"><button class="btn" style="width:auto;margin:0" data-weight-add="1">Записать</button></div>'+
+        '<div class="row" style="margin-top:8px"><input type="text" inputmode="decimal" id="pf-wgoal" placeholder="Цель, кг" aria-label="Цель по весу, кг" value="'+(p.weight_goal||"")+'"><button class="btn ghost" style="width:auto;margin:0" data-pf-save="wgoal">Цель</button></div>'+
+        p.weights.slice(-7).reverse().map(function(w){return '<div class="item" style="display:flex;justify-content:space-between;align-items:center"><span>'+esc(w.day)+' — '+w.kg+' кг</span><button class="chip mini" data-weight-del="'+esc(w.day)+'" aria-label="Удалить запись">✕</button></div>';}).join("")+'</div>';
+      return h+'<button class="btn ghost" data-del-all="1">Удалить мои данные</button>';
+    });
+  }
+  function featToggle(el){
+    var f=el.getAttribute("data-feat");
+    call("GET","/api/profile").then(function(p){
+      if(f==="never"&&el.checked&&!p.never_allowed){el.checked=false;gateOpen("memory");return;}
+      var feats=p.feats.filter(function(x){return x!==f;}); if(el.checked)feats.push(f);
+      return call("PUT","/api/profile",{feats:feats}).then(profileReload);
+    }).catch(function(e){el.checked=!el.checked;alert(e.message);});
+  }
+  document.addEventListener("change",function(ev){
+    var t=ev.target; if(!t||!t.matches)return;
+    if(t.matches("[data-buy]")){
+      var st=buyState(),k=t.getAttribute("data-buy"); if(t.checked)st[k]=Date.now(); else delete st[k];
+      ls("buy",JSON.stringify(st));
+      var item=t.closest(".item"); if(item)item.classList.toggle("done",t.checked);
+      buyRecount(t.closest(".storeitems"));
+    } else if(t.matches("[data-feat]")){ featToggle(t); }
+  });
+
   // ---- единый обработчик кликов ----
   document.addEventListener("click",function(ev){
     var t=ev.target; if(!t.closest) return; var b;
+    if(t.id==="gate"){closeGate();return;}
+    if(b=t.closest("[data-gate-close]")){closeGate();return;}
+    if(b=t.closest("[data-gate-login]")){closeGate();show("profile");return;}
+    if(b=t.closest("[data-gate-trial]")){b.disabled=true;call("POST","/api/trial").then(function(){closeGate();return loadMe();}).then(function(){toast("Тариф «"+((ME&&ME.name)||"Повар")+"» подключён");show(cur);}).catch(function(e){b.disabled=false;alert(e.message);});return;}
+    if(b=t.closest("[data-gate]")){gateOpen(b.getAttribute("data-gate"));return;}
+    if(b=t.closest("[data-buy-reset]")){var bx=b.closest(".storeitems");ls("buy","{}");Array.prototype.forEach.call(bx.querySelectorAll("[data-buy]"),function(c){c.checked=false;var it=c.closest(".item");if(it)it.classList.remove("done");});buyRecount(bx);return;}
+    if(b=t.closest("[data-consent]")){b.disabled=true;call("POST","/api/profile/consent").then(profileReload).catch(function(e){b.disabled=false;alert(e.message);});return;}
+    if(b=t.closest("[data-pf-save]")){var w=b.getAttribute("data-pf-save"),body=w==="never"?{never:val("pf-never")}:w==="macro"?{kcal:val("pf-kcal"),protein:val("pf-protein"),fat:val("pf-fat"),carb:val("pf-carb")}:{weight_goal:val("pf-wgoal")};
+      call("PUT","/api/profile",body).then(function(){toast("Сохранил");return profileReload();}).catch(function(e){alert(e.message);});return;}
+    if(b=t.closest("[data-weight-add]")){call("POST","/api/weight",{kg:val("pf-kg")}).then(profileReload).catch(function(e){alert(e.message);});return;}
+    if(b=t.closest("[data-weight-del]")){call("DELETE","/api/weight?day="+encodeURIComponent(b.getAttribute("data-weight-del"))).then(profileReload).catch(function(e){alert(e.message);});return;}
+    if(b=t.closest("[data-del-all]")){if(confirm("Удалить список «не использовать», цели, вес, полку и согласие? Избранное и подписка останутся."))call("DELETE","/api/profile/data").then(profileReload).catch(function(e){alert(e.message);});return;}
     if(b=t.closest(".acc-head")){var c=b.parentNode,o=c.classList.toggle("open");b.setAttribute("aria-expanded",o);return;}
     if(b=t.closest(".step")){b.classList.toggle("checked",b.querySelector("input").checked);return;}
     if(b=t.closest(".k-wake")){ if(b.checked){navigator.wakeLock.request("screen").then(function(l){wake=l;}).catch(function(){b.checked=false;});} else if(wake){wake.release();wake=null;} return;}

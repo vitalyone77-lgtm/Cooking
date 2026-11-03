@@ -168,6 +168,7 @@ def _spend(dev_id: int, kind: str) -> dict:
     spent, why = usage.try_spend(uid, kind, "web", ip=_ip_var.get())
     if not spent:
         raise HTTPException(429, why)
+    profile_ctx.set_user(uid)     # список «никогда не использовать» из профиля (задача копирует контекст)
     web_db.log_event(dev_id, "gen")
     web_db.log_event(dev_id, kind)
     return {"id": spent, "kind": kind, "notice": why}
@@ -483,9 +484,19 @@ def me(x_device: str | None = Header(default=None)):
     uid = _uid(dev_id)
     memory = bool(tg) and plans.has_feature(uid, "memory")
     left = {k: list(v) for k in ("recipe", "daymenu", "week") if (v := usage.left(uid, k))}
+    feat = {f: plans.has_feature(uid, f) for f in ("memory", "pdf", "cart", "noads")}
     out = {"linked": bool(tg), "plan": plans.plan_of(uid), "status": plans.status_text(uid), "left": left,
-           "paywall": plans.paywall(), "memory": memory, "bot": config.BOT_USERNAME,
+           "paywall": plans.paywall(), "memory": memory, "bot": config.BOT_USERNAME, "feat": feat, "name": plans.PREMIUM_NAME,
+           "trial": plans.trial_available(uid), "trial_days": int(plans.cfg("TRIAL_DAYS") or 0),
+           "offers": [{"key": o["key"], "days": o["days"], "rub": o["rub"]} for o in plans.offers()],
            "favorites": len(fav_mod.get_favorites(uid))}
+    if tg:
+        out["consent"] = accounts.consent_get(uid)
+        if out["consent"]:
+            g = accounts.goals_get(uid)
+            out["feats"] = g["feats"]
+            out["goal_text"] = accounts.goal_text(uid) if "macro" in g["feats"] else ""
+            out["never"] = g["never"] if "never" in g["feats"] and plans.has_feature(uid, "memory") else ""
     if memory:
         out["shelf"] = [x["item"] for x in accounts.shelf_list(uid)]
     return out
@@ -535,13 +546,127 @@ def _need_memory(dev_id: int) -> str:
     if plans.is_anon(uid):
         raise HTTPException(403, "Сначала войди через Telegram")
     if not plans.has_feature(uid, "memory"):
-        raise HTTPException(402, "Профиль и полка — в подписке 💎")
+        raise HTTPException(402, "Эта функция — в тарифе «Повар» 💎")
     return uid
 
 
 class ProfileIn(BaseModel):
-    allergies: str = Field("", max_length=300)
-    never: str = Field("", max_length=300)
+    feats: list[str] | None = None
+    never: str | None = Field(None, max_length=300)
+    kcal: int | float | str | None = None
+    protein: int | float | str | None = None
+    fat: int | float | str | None = None
+    carb: int | float | str | None = None
+    weight_goal: int | float | str | None = None
+
+
+class WeightIn(BaseModel):
+    kg: int | float | str
+    day: str | None = Field(None, max_length=10)
+
+
+def _need_account(dev_id: int) -> str:
+    uid = _uid(dev_id)
+    if plans.is_anon(uid):
+        raise HTTPException(403, "Сначала войди через Telegram")
+    return uid
+
+
+def _need_consent(dev_id: int) -> str:
+    uid = _need_account(dev_id)
+    if not accounts.consent_get(uid):
+        raise HTTPException(403, "Сначала нужно согласие на хранение данных профиля")
+    return uid
+
+
+def _profile_json(uid: str) -> dict:
+    g = accounts.goals_get(uid)
+    return {**g, "consent": True, "goal_text": accounts.goal_text(uid), "weights": accounts.weights_list(uid),
+            "never_allowed": plans.has_feature(uid, "memory")}
+
+
+@app.get("/api/profile")
+def profile_get(x_device: str | None = Header(default=None)):
+    uid = _need_account(_dev(x_device))
+    if not accounts.consent_get(uid):
+        return {"consent": False, "text": accounts.CONSENT_TEXT}
+    return _profile_json(uid)
+
+
+@app.post("/api/profile/consent")
+def profile_consent(x_device: str | None = Header(default=None)):
+    uid = _need_account(_dev(x_device))
+    accounts.consent_set(uid)
+    usage.event("profile_consent", uid)
+    return _profile_json(uid)
+
+
+@app.put("/api/profile")
+def profile_put(body: ProfileIn, x_device: str | None = Header(default=None)):
+    uid = _need_consent(_dev(x_device))
+    fields = body.model_dump(exclude_unset=True)
+    if "never" in fields and not plans.has_feature(uid, "memory"):
+        raise HTTPException(402, "Список «никогда не использовать» — в тарифе «Повар» 💎")
+    if "feats" in fields and "never" in (fields["feats"] or []) and not plans.has_feature(uid, "memory"):
+        fields["feats"] = [f for f in fields["feats"] if f != "never"]
+    try:
+        accounts.goals_set(uid, **fields)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    usage.event("profile_edit", uid)
+    return _profile_json(uid)
+
+
+@app.post("/api/weight")
+def weight_add(body: WeightIn, x_device: str | None = Header(default=None)):
+    uid = _need_consent(_dev(x_device))
+    try:
+        accounts.weight_set(uid, body.kg, body.day)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    usage.event("weight_add", uid)
+    return _profile_json(uid)
+
+
+@app.delete("/api/weight")
+def weight_del(day: str = "", x_device: str | None = Header(default=None)):
+    uid = _need_consent(_dev(x_device))
+    accounts.weight_delete(uid, day[:10])
+    return _profile_json(uid)
+
+
+@app.delete("/api/profile/data")
+def profile_delete(x_device: str | None = Header(default=None)):
+    uid = _need_account(_dev(x_device))
+    accounts.delete_my_data(uid)
+    usage.event("profile_delete", uid)
+    return {"ok": True}
+
+
+@app.post("/api/trial")
+def trial_start(x_device: str | None = Header(default=None)):
+    """«Попробовать тариф»: пробная неделя по кнопке на замке (один раз на аккаунт)."""
+    uid = _need_account(_dev(x_device))
+    if not plans.paywall():
+        raise HTTPException(409, "Сейчас все функции и так открыты")
+    until = plans.maybe_start_trial(uid)
+    if not until:
+        raise HTTPException(409, "Пробный период уже использован")
+    usage.event("trial_start", uid)
+    return {"ok": True, "until": until, "days": int(plans.cfg("TRIAL_DAYS") or 0)}
+
+
+GATE_NAMES = {"pdf", "cart", "memory", "daymenu", "week", "photo", "voice"}
+
+
+@app.post("/api/gate")
+def gate_seen(body: dict, x_device: str | None = Header(default=None)):
+    """Человек нажал на закрытую функцию — считаем, чтобы видеть, что его привлекает."""
+    dev = _dev(x_device)
+    name = str(body.get("feature", ""))[:20]
+    if name in GATE_NAMES:
+        usage.event("gate_" + name, _uid(dev))
+    return {"ok": True}
 
 
 class ShelfIn(BaseModel):

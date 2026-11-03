@@ -4,6 +4,7 @@
 ссылки блогеров (/start ref_…), админская выдача подписки (/grant).
 """
 import logging
+import re
 import time
 
 from aiogram import F, Router
@@ -29,7 +30,10 @@ def upsell_kb(uid) -> InlineKeyboardMarkup | None:
     if not plans.can_upsell(uid):
         return None
     b = InlineKeyboardBuilder()
+    if plans.trial_available(uid):
+        b.button(text=f"🎁 Попробовать {int(plans.cfg('TRIAL_DAYS') or 0)} дней бесплатно", callback_data="pf:trial")
     b.button(text="💎 Подписка", callback_data="pf:sub")
+    b.adjust(1)
     return b.as_markup()
 
 
@@ -49,34 +53,57 @@ async def spend_gate(callback: CallbackQuery, spent, why: str) -> bool:
 async def _need_memory(callback: CallbackQuery) -> bool:
     if plans.has_feature(callback.message.chat.id, "memory"):
         return True
-    await callback.answer("Полка — в подписке 💎", show_alert=True)
+    await callback.answer("Эта функция — в тарифе «Повар» 💎", show_alert=True)
     return False
 
 
 def _profile_view(uid: int) -> tuple[str, InlineKeyboardMarkup]:
     shelf_on = plans.has_feature(uid, "memory")
-    shelf = accounts.shelf_list(uid) if shelf_on else []
+    consent = accounts.consent_get(uid)
+    g = accounts.goals_get(uid) if consent else None
     lines = ["👤 *Профиль*", "", plans.status_text(uid)]
     if shelf_on:
+        shelf = accounts.shelf_list(uid)
         lines.append(f"🏠 На полке: {len(shelf)} " + _plural(len(shelf), "продукт", "продукта", "продуктов"))
-    else:
-        lines.append("🔒 С подпиской я помню «полку» — масло, специи и крупы, которые у тебя уже есть, чтобы не покупать их снова.")
     lines.append(f"🔔 Напоминания: {'включены' if reminders_enabled(uid) else 'выключены'}")
-    lines += ["", "_Аллергии и продукты, которые не нужны, пиши в анкете в строке «Исключить». Я не храню их как профиль, "
-                  "а только последний ввод — его можно вернуть кнопкой «Как в прошлый раз»._"]
+    if consent:
+        lines.append("")
+        lines.append(f"🚫 Не использовать: {g['never'] or 'не задано'}" + ("" if shelf_on else "  🔒 тариф «Повар»"))
+        lines.append(f"🎯 Цель на день: {accounts.goal_text(uid) or 'не задана'}")
+        ws = accounts.weights_list(uid, 30)
+        if ws:
+            vals = [w["kg"] for w in ws]
+            delta = vals[-1] - vals[0]
+            goal = f", цель {g['weight_goal']:g}" if g["weight_goal"] else ""
+            lines.append(f"⚖️ Вес: {vals[-1]:g} кг{goal}; за период {delta:+.1f} кг  {accounts.spark(vals[-20:])}")
+        else:
+            lines.append("⚖️ Вес: не записан")
+    else:
+        lines += ["", "ℹ️ " + accounts.CONSENT_TEXT]
+    lines += ["", "_Аллергии и продукты, которые не нужны на один раз, пиши в анкете в строке «Исключить» — я предложу их кнопкой «Как в прошлый раз»._"]
     b = InlineKeyboardBuilder()
-    b.button(text="🏠 Моя полка" if shelf_on else "🔒 Моя полка", callback_data="pf:shelf")
+    if consent:
+        b.button(text="🚫 Не использовать" if shelf_on else "💎 Не использовать", callback_data="pf:never")
+        b.button(text="🎯 Цель КБЖУ", callback_data="pf:goal")
+        b.button(text="⚖️ Вес", callback_data="pf:weight")
+        b.button(text="🗑 Удалить мои данные", callback_data="pf:del")
+    else:
+        b.button(text="✅ Согласен", callback_data="pf:consent")
+    b.button(text="🏠 Моя полка" if shelf_on else "💎 Моя полка", callback_data="pf:shelf")
     b.button(text="🌐 Открыть сайт", callback_data="pf:site")
     if plans.paywall():
+        if plans.trial_available(uid):
+            b.button(text="🎁 Попробовать бесплатно", callback_data="pf:trial")
         b.button(text="💎 Подписка", callback_data="pf:sub")
         b.button(text="🎟 Промокод", callback_data="pf:promo")
     b.button(text="🔕 Напоминания" if reminders_enabled(uid) else "🔔 Напоминания", callback_data="pf:rem")
     devs = accounts.devices_of(uid)
     if devs:
-        b.button(text=f"🔓 Выйти на сайте ({devs})", callback_data=f"pf:unall")
+        b.button(text=f"🔓 Выйти на сайте ({devs})", callback_data="pf:unall")
     b.button(text="❓ Справка", callback_data="help:open")
     b.button(text="⬅️ Меню", callback_data="menu:open")
-    b.adjust(2, *([2] if plans.paywall() else []), 2 if devs else 1, 2)
+    sizes = ([2, 2] if consent else [1]) + [2] + ([2, 1] if plans.paywall() else []) + [2 if devs else 1, 2]
+    b.adjust(*sizes)
     return "\n".join(lines), b.as_markup()
 
 
@@ -129,6 +156,153 @@ async def profile_reminders(callback: CallbackQuery, state: FSMContext):
     uid = callback.message.chat.id
     set_reminders_enabled(uid, not reminders_enabled(uid))
     await callback.answer("Готово")
+    await show_profile(callback.message, state, edit=True)
+
+
+# ---------- данные профиля: согласие, «не использовать», цель, вес ----------
+
+async def _need_consent(callback: CallbackQuery) -> bool:
+    if accounts.consent_get(callback.message.chat.id):
+        return True
+    await callback.answer("Сначала нажми «Согласен»", show_alert=True)
+    return False
+
+
+@router.callback_query(F.data == "pf:consent")
+async def profile_consent(callback: CallbackQuery, state: FSMContext):
+    accounts.consent_set(callback.message.chat.id)
+    usage.event("profile_consent", callback.message.chat.id)
+    await callback.answer("Спасибо!")
+    await show_profile(callback.message, state, edit=True)
+
+
+@router.callback_query(F.data == "pf:trial")
+async def profile_trial(callback: CallbackQuery, state: FSMContext):
+    uid = callback.message.chat.id
+    until = plans.maybe_start_trial(uid)
+    if not until:
+        await callback.answer("Пробный период уже использован", show_alert=True)
+        return
+    usage.event("trial_start", uid)
+    await callback.answer()
+    await callback.message.answer(f"🎁 Подключил тариф «{plans.PREMIUM_NAME}» на {int(plans.cfg('TRIAL_DAYS') or 0)} дней: "
+                                  "пробуй все функции приложения.", parse_mode=None)
+    await show_profile(callback.message, state)
+
+
+@router.callback_query(F.data == "pf:never")
+async def profile_never(callback: CallbackQuery, state: FSMContext):
+    if not await _need_consent(callback) or not await _need_memory(callback):
+        return
+    await state.set_state(ProfileForm.never)
+    await callback.answer()
+    await callback.message.edit_text(
+        "🚫 Напиши через запятую, какие продукты никогда не использовать, например: «кинза, грибы, печень». "
+        "Я исключу их из всех рецептов. Чтобы очистить список, напиши «нет». Диагнозы писать не нужно.",
+        reply_markup=_cancel_kb(), parse_mode=None)
+
+
+@router.message(ProfileForm.never, F.text)
+async def profile_set_never(message: Message, state: FSMContext):
+    uid = message.chat.id
+    if not accounts.consent_get(uid) or not plans.has_feature(uid, "memory"):
+        await state.clear()
+        return
+    g = accounts.goals_get(uid)
+    clear = message.text.strip().lower() in ("нет", "очистить", "убрать")
+    accounts.goals_set(uid, never="" if clear else message.text,
+                       feats=[f for f in g["feats"] if f != "never"] + ([] if clear else ["never"]))
+    usage.event("profile_edit", uid)
+    await message.answer("✅ Сохранил." if not clear else "✅ Список очищен.", parse_mode=None)
+    await show_profile(message, state)
+
+
+@router.callback_query(F.data == "pf:goal")
+async def profile_goal(callback: CallbackQuery, state: FSMContext):
+    if not await _need_consent(callback):
+        return
+    await state.set_state(ProfileForm.goal)
+    await callback.answer()
+    await callback.message.edit_text(
+        "🎯 Напиши цель на день: калории и, если хочешь, белки, жиры и углеводы в граммах. Например: "
+        "«2000 ккал, белки 120, жиры 70, углеводы 200» или просто «1800». Чтобы убрать цель, напиши «нет».",
+        reply_markup=_cancel_kb(), parse_mode=None)
+
+
+@router.message(ProfileForm.goal, F.text)
+async def profile_set_goal(message: Message, state: FSMContext):
+    uid = message.chat.id
+    if not accounts.consent_get(uid):
+        await state.clear()
+        return
+    try:
+        fields = accounts.parse_goal(message.text)
+        g = accounts.goals_get(uid)
+        cleared = all(v is None for v in fields.values())
+        accounts.goals_set(uid, **fields, feats=[f for f in g["feats"] if f != "macro"] + ([] if cleared else ["macro"]))
+    except ValueError as e:
+        await message.answer(f"😔 {e}", parse_mode=None)
+        return
+    usage.event("profile_edit", uid)
+    await message.answer("✅ Цель сохранена. Она предлагается на шаге «Цель по КБЖУ»." if not cleared else "✅ Цель убрана.", parse_mode=None)
+    await show_profile(message, state)
+
+
+@router.callback_query(F.data == "pf:weight")
+async def profile_weight(callback: CallbackQuery, state: FSMContext):
+    if not await _need_consent(callback):
+        return
+    await state.set_state(ProfileForm.weight)
+    await callback.answer()
+    await callback.message.edit_text(
+        "⚖️ Напиши свой вес в кг на сегодня, например «82.5». Цель по весу: «цель 78», убрать цель: «цель нет». "
+        "График за все дни есть на сайте, в разделе «Профиль».",
+        reply_markup=_cancel_kb(), parse_mode=None)
+
+
+@router.message(ProfileForm.weight, F.text)
+async def profile_set_weight(message: Message, state: FSMContext):
+    uid = message.chat.id
+    if not accounts.consent_get(uid):
+        await state.clear()
+        return
+    text = message.text.strip().lower()
+    try:
+        m = re.match(r"цел\w*\s*(нет|[\d.,]+)", text)
+        if m:
+            g = accounts.goals_get(uid)
+            accounts.goals_set(uid, weight_goal=None if m.group(1) == "нет" else m.group(1),
+                               feats=g["feats"] if "weight" in g["feats"] else g["feats"] + ["weight"])
+        else:
+            accounts.weight_set(uid, text.replace("кг", "").strip())
+            g = accounts.goals_get(uid)
+            if "weight" not in g["feats"]:
+                accounts.goals_set(uid, feats=g["feats"] + ["weight"])
+    except ValueError as e:
+        await message.answer(f"😔 {e}. Напиши число, например 82.5", parse_mode=None)
+        return
+    usage.event("weight_add", uid)
+    await message.answer("✅ Записал.", parse_mode=None)
+    await show_profile(message, state)
+
+
+@router.callback_query(F.data == "pf:del")
+async def profile_delete_ask(callback: CallbackQuery):
+    b = InlineKeyboardBuilder()
+    b.button(text="🗑 Да, удалить", callback_data="pf:delyes")
+    b.button(text="Отмена", callback_data="pf:back")
+    b.adjust(1)
+    await callback.answer()
+    await callback.message.edit_text(
+        "Удалить список «не использовать», цель КБЖУ, вес, полку и согласие? Избранное и подписка останутся.",
+        reply_markup=b.as_markup(), parse_mode=None)
+
+
+@router.callback_query(F.data == "pf:delyes")
+async def profile_delete_yes(callback: CallbackQuery, state: FSMContext):
+    accounts.delete_my_data(callback.message.chat.id)
+    usage.event("profile_delete", callback.message.chat.id)
+    await callback.answer("Удалено")
     await show_profile(callback.message, state, edit=True)
 
 

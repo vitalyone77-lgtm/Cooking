@@ -52,5 +52,8 @@ class WeekMenuForm(StatesGroup):
 
 class ProfileForm(StatesGroup):
     """Личный кабинет: ввод текста (полка, промокод)."""
+    never = State()             # продукты, которые никогда не использовать
+    goal = State()              # цель по калориям и БЖУ
+    weight = State()            # вес (и цель по весу)
     shelf_add = State()         # добавить продукт на полку
     promo = State()             # промокод

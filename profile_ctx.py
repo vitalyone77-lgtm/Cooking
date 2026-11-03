@@ -9,6 +9,7 @@ import contextvars
 import re
 
 current = contextvars.ContextVar("cooking_avoid", default=None)
+base = contextvars.ContextVar("cooking_avoid_base", default="")      # список «никогда не использовать» из профиля
 
 
 def _split(text: str) -> list[str]:
@@ -20,9 +21,25 @@ def _split(text: str) -> list[str]:
     return out
 
 
+def set_user(uid) -> None:
+    """Список «никогда не использовать» человека: только если он в тарифе (функция «память») и дал согласие."""
+    import accounts
+    import plans
+    txt = ""
+    try:
+        g = accounts.goals_get(uid)
+        if "never" in g["feats"] and accounts.consent_get(uid) and plans.has_feature(uid, "memory"):
+            txt = g["never"]
+    except Exception:  # noqa: BLE001 — сбой базы не должен ломать подбор
+        txt = ""
+    base.set(txt)
+    items = _split(txt)
+    current.set({"never": ", ".join(items)[:500]} if items else None)
+
+
 def set_avoid(text) -> None:
-    """Список из поля «Исключить» (через запятую). Пусто — проверка не нужна."""
-    items = _split(text)
+    """Список из поля «Исключить» запроса (через запятую) плюс список из профиля. Пусто — проверка не нужна."""
+    items = _split(base.get()) + [x for x in _split(text) if x not in _split(base.get())]
     current.set({"never": ", ".join(items)[:500]} if items else None)
 
 

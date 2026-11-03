@@ -195,6 +195,19 @@ async def any_photo(message: Message, state: FSMContext):
         await _recognize(message, state, "shelf")
 
 
+@router.callback_query(F.data == "fridge:start")
+async def fridge_start(callback: CallbackQuery, state: FSMContext):
+    if not plans.feature_on(callback.message.chat.id, "photo_recipe"):
+        await callback.answer("Эта функция пока недоступна", show_alert=True)
+        return
+    await state.clear()
+    await callback.answer()
+    await callback.message.answer(
+        "📷 Рецепт по фото продуктов\n\nВыложи продукты на стол или открой холодильник так, чтобы все они попали в кадр, "
+        "и пришли фото (можно несколько сразу). Я найду продукты, ты отметишь нужные, и я подберу рецепт.",
+        parse_mode=None)
+
+
 def _pick_of(callback: CallbackQuery) -> tuple[tuple[int, int], dict] | None:
     key = (callback.message.chat.id, callback.message.message_id)
     p = _picks.get(key)

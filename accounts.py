@@ -10,6 +10,7 @@ uid аккаунта: str(tg_id) для Telegram и привязанного с�
 """
 import json
 import os
+import re
 import secrets
 import sqlite3
 import threading
@@ -34,6 +35,10 @@ CREATE INDEX IF NOT EXISTS sess_ts ON sess(ts);
 CREATE TABLE IF NOT EXISTS favs(uid TEXT, id TEXT, title TEXT, text TEXT, cuisine TEXT, ts REAL, PRIMARY KEY(uid, id));
 CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY, value TEXT, ts REAL, who TEXT);
 CREATE TABLE IF NOT EXISTS admin_log(id INTEGER PRIMARY KEY AUTOINCREMENT, ts REAL, who TEXT, action TEXT, details TEXT);
+CREATE TABLE IF NOT EXISTS consents(uid TEXT PRIMARY KEY, version INTEGER, ts REAL);
+CREATE TABLE IF NOT EXISTS goals(uid TEXT PRIMARY KEY, feats TEXT DEFAULT '', never TEXT DEFAULT '', kcal INTEGER, protein INTEGER,
+  fat INTEGER, carb INTEGER, weight_goal REAL, updated REAL);
+CREATE TABLE IF NOT EXISTS weights(uid TEXT, day TEXT, kg REAL, PRIMARY KEY(uid, day));
 """
 
 
@@ -540,6 +545,146 @@ def money_stats() -> dict:
 def promo_stats() -> list[dict]:
     rows = _q("SELECT code, COUNT(*) FROM promo_used GROUP BY code ORDER BY 2 DESC", all_=True)
     return [{"code": r[0], "used": r[1]} for r in rows]
+
+
+# ---------- данные профиля: только с согласием человека ----------
+# Что хранится, если человек включил функции: список «не использовать», цель по калориям и БЖУ, вес и цель по весу.
+# Диагнозы и аллергии не спрашиваем. Удалить всё можно в один шаг (delete_my_data).
+
+CONSENT_VERSION = 1
+CONSENT_TEXT = (
+    "Для некоторых функций профиля нужны ваши данные. Если вы их включите, мы сохраним только то, что вы введёте сами: "
+    "список продуктов, которые вы не используете, цель по калориям и БЖУ, вес и цель по весу. "
+    "Они нужны только для работы этих функций, мы не показываем их другим людям и не передаём третьим лицам. "
+    "Вы можете отключить любую функцию и удалить все данные одной кнопкой «Удалить мои данные». "
+    "Диагнозы и сведения о здоровье вводить не нужно. Приложение не заменяет рекомендации врача, а список продуктов "
+    "не гарантирует их отсутствие в готовом блюде: проверяйте состав."
+)
+PROFILE_FEATS = ("never", "macro", "weight")
+_RANGES = {"kcal": (800, 6000), "protein": (0, 600), "fat": (0, 600), "carb": (0, 1000)}
+
+
+def consent_get(uid) -> bool:
+    row = _q("SELECT version FROM consents WHERE uid=?", (str(uid),), one=True)
+    return bool(row and row[0] >= CONSENT_VERSION)
+
+
+def consent_set(uid) -> None:
+    _q("INSERT INTO consents(uid, version, ts) VALUES(?,?,?) ON CONFLICT(uid) DO UPDATE SET version=excluded.version, ts=excluded.ts",
+       (str(uid), CONSENT_VERSION, time.time()))
+
+
+def goals_get(uid) -> dict:
+    row = _q("SELECT feats, never, kcal, protein, fat, carb, weight_goal FROM goals WHERE uid=?", (str(uid),), one=True)
+    if not row:
+        return {"feats": [], "never": "", "kcal": None, "protein": None, "fat": None, "carb": None, "weight_goal": None}
+    return {"feats": [f for f in (row[0] or "").split(",") if f in PROFILE_FEATS], "never": row[1] or "",
+            "kcal": row[2], "protein": row[3], "fat": row[4], "carb": row[5], "weight_goal": row[6]}
+
+
+def _num(value, lo, hi, as_float=False):
+    if value in (None, ""):
+        return None
+    try:
+        v = float(str(value).replace(",", "."))
+    except ValueError:
+        raise ValueError("Нужно число")
+    if not lo <= v <= hi:
+        raise ValueError(f"Допустимо от {lo} до {hi}")
+    return round(v, 1) if as_float else int(round(v))
+
+
+def goals_set(uid, **fields) -> dict:
+    """Частичное сохранение: меняются только переданные поля. ValueError — если значение недопустимо."""
+    cur = goals_get(uid)
+    if "feats" in fields:
+        cur["feats"] = [f for f in PROFILE_FEATS if f in (fields["feats"] or [])]
+    if "never" in fields:
+        cur["never"] = _clean_list(fields["never"] or "")
+    for k, (lo, hi) in _RANGES.items():
+        if k in fields:
+            cur[k] = _num(fields[k], lo, hi)
+    if "weight_goal" in fields:
+        cur["weight_goal"] = _num(fields["weight_goal"], 20, 400, as_float=True)
+    _q("INSERT INTO goals(uid, feats, never, kcal, protein, fat, carb, weight_goal, updated) VALUES(?,?,?,?,?,?,?,?,?) "
+       "ON CONFLICT(uid) DO UPDATE SET feats=excluded.feats, never=excluded.never, kcal=excluded.kcal, protein=excluded.protein, "
+       "fat=excluded.fat, carb=excluded.carb, weight_goal=excluded.weight_goal, updated=excluded.updated",
+       (str(uid), ",".join(cur["feats"]), cur["never"], cur["kcal"], cur["protein"], cur["fat"], cur["carb"],
+        cur["weight_goal"], time.time()))
+    return cur
+
+
+def goal_text(uid) -> str:
+    """«2000 ккал, белки 120 г, жиры 70 г, углеводы 200 г» — готовый ответ для поля «Цель по КБЖУ»; "" если цели нет."""
+    g = goals_get(uid)
+    if not g["kcal"] and not (g["protein"] or g["fat"] or g["carb"]):
+        return ""
+    parts = [f"{g['kcal']} ккал"] if g["kcal"] else []
+    for key, title in (("protein", "белки"), ("fat", "жиры"), ("carb", "углеводы")):
+        if g[key]:
+            parts.append(f"{title} {g[key]} г")
+    return ", ".join(parts)
+
+
+def weights_list(uid, limit: int = 400) -> list[dict]:
+    rows = _q("SELECT day, kg FROM weights WHERE uid=? ORDER BY day DESC LIMIT ?", (str(uid), limit), all_=True)
+    return [{"day": r[0], "kg": r[1]} for r in reversed(rows)]
+
+
+def weight_set(uid, kg, day: str | None = None) -> dict:
+    kg = _num(kg, 20, 400, as_float=True)
+    if kg is None:
+        raise ValueError("Нужно число")
+    day = day or time.strftime("%Y-%m-%d")
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", day):
+        raise ValueError("Дата в формате ГГГГ-ММ-ДД")
+    _q("INSERT INTO weights(uid, day, kg) VALUES(?,?,?) ON CONFLICT(uid, day) DO UPDATE SET kg=excluded.kg", (str(uid), day, kg))
+    return {"day": day, "kg": kg}
+
+
+def weight_delete(uid, day: str) -> None:
+    _q("DELETE FROM weights WHERE uid=? AND day=?", (str(uid), day))
+
+
+def delete_my_data(uid) -> dict:
+    """Стереть всё, что человек сам ввёл в профиле: список «не использовать», цели, вес, полку и согласие."""
+    uid = str(uid)
+    out = {"weights": _q("DELETE FROM weights WHERE uid=?", (uid,)), "goals": _q("DELETE FROM goals WHERE uid=?", (uid,)),
+           "shelf": _q("DELETE FROM shelf WHERE uid=?", (uid,)), "consent": _q("DELETE FROM consents WHERE uid=?", (uid,))}
+    return out
+
+
+def trial_available(uid) -> bool:
+    return not trial_used(uid)
+
+
+def parse_goal(text: str) -> dict:
+    """«2000 ккал, белки 120, жиры 70, углеводы 200» или «2000 120 70 200» или «1800» -> поля цели. «нет» -> всё очистить."""
+    t = (text or "").lower().replace(",", " ")
+    if re.fullmatch(r"\s*(нет|убрать|очистить)\s*", t):
+        return {"kcal": None, "protein": None, "fat": None, "carb": None}
+    out = {}
+    for key, pat in (("kcal", r"(\d{3,4})\s*(?:ккал|kcal|кал)"), ("protein", r"белк\w*\s*(\d+)"),
+                     ("fat", r"жир\w*\s*(\d+)"), ("carb", r"углев\w*\s*(\d+)")):
+        m = re.search(pat, t)
+        if m:
+            out[key] = int(m.group(1))
+    if not out:
+        nums = [int(x) for x in re.findall(r"\d+", t)][:4]
+        out = dict(zip(("kcal", "protein", "fat", "carb"), nums))
+    if not out:
+        raise ValueError("Не нашёл чисел. Напиши, например: 2000 ккал, белки 120, жиры 70, углеводы 200")
+    return out
+
+
+def spark(values: list[float]) -> str:
+    """Мини-график из символов для Telegram: ▁▂▃▄▅▆▇█."""
+    if not values:
+        return ""
+    lo, hi = min(values), max(values)
+    if hi - lo < 1e-9:
+        return "▄" * len(values)
+    return "".join("▁▂▃▄▅▆▇█"[min(7, int((v - lo) / (hi - lo) * 7.999))] for v in values)
 
 
 def account_stats() -> dict:

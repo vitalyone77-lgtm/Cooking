@@ -124,7 +124,7 @@ STT_MODEL = os.getenv("STT_MODEL", "whisper-large-v3-turbo")              # ра
 VOICE_DAILY = int(os.getenv("VOICE_DAILY", "30"))                          # голосовых в сутки на человека
 TRIAL_DAYS = int(os.getenv("TRIAL_DAYS", "7"))     # пробный полный доступ — включается сам при первом упоре в лимит
 # Тарифы: имя=дни:цена_в_рублях:цена_в_звёздах
-PREMIUM_PLANS = os.getenv("PREMIUM_PLANS", "month=30:199:150,year=365:1490:1100")
+PREMIUM_PLANS = os.getenv("PREMIUM_PLANS", "month=30:290:220,year=365:2900:2200")
 # Промокоды: КОД=дней (для блогера и акций), регистр не важен
 PROMO_CODES = os.getenv("PROMO_CODES", "")
 # Оплата: Telegram Stars работают без договора; рубли — через платёжный сервис (данные пришлют позже):

@@ -103,6 +103,7 @@ async def send_daily_reminders(bot: Bot, dp: Dispatcher):
             if usage.cap_reached():          # дневной запас генераций исчерпан — напоминание уйдёт завтра
                 return
             usage.log("reminder", chat_id, "reminder")
+            profile_ctx.set_user(chat_id)
             profile_ctx.set_avoid((data or {}).get("excluded"))     # исключения из последнего запроса (у каждой задачи gather свой контекст)
             try:
                 await asyncio.wait_for(_remind_one(bot, chat_id, data, n), timeout=_PER_USER_TIMEOUT)

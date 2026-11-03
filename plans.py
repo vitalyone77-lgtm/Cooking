@@ -86,7 +86,8 @@ def limits_of(plan: str) -> dict[str, tuple[int, int]]:
     return out
 
 
-PLAN_TITLES = {"open": "Полный доступ", "free": "Бесплатный", "premium": "Подписка", "anon": "Без входа"}
+PREMIUM_NAME = "Повар"
+PLAN_TITLES = {"open": "Полный доступ", "free": "Бесплатный", "premium": PREMIUM_NAME, "anon": "Без входа"}
 KIND_TITLES = {"recipe": "блюд в день", "daymenu": "меню на день", "week": "планов на 3 дня", "missing": "замен продуктов",
                "photo": "фото (рецепт или полка)"}
 # новые функции: включаются по шагам — сначала тестировщикам, потом подписке или всем
@@ -94,7 +95,7 @@ NEW_FEATURES = {"voice": "🎙 Голосовой ввод (продукты, п
                 "photo_recipe": "📷 Рецепт по фото холодильника",
                 "photo_shelf": "📷 Полка по фото"}
 ROLLOUT_LEVELS = {"off": "выключено", "testers": "тестировщики", "premium": "подписка", "all": "все"}
-FEATURE_TITLES = {"memory": "Полка: продукты, которые уже есть дома",
+FEATURE_TITLES = {"memory": "Список «никогда не использовать» и полка",
                   "pdf": "PDF для чтения без интернета", "cart": "Корзина ВкусВилла с ценами",
                   "noads": "Сайт без рекламы"}
 
@@ -208,13 +209,19 @@ def maybe_start_trial(uid) -> float | None:
     return accounts.start_trial(uid, days)
 
 
+def trial_available(uid) -> bool:
+    """Можно ли предложить «попробовать тариф»: подписка включена, человек вошёл, пробный ещё не использован."""
+    days = int(cfg("TRIAL_DAYS") or 0)
+    return bool(paywall() and not is_anon(uid) and days > 0 and plan_of(uid) != "premium" and accounts.trial_available(uid))
+
+
 def status_text(uid) -> str:
     plan = plan_of(uid)
     if plan == "open":
         return "💎 Сейчас все функции открыты для всех."
     if plan == "premium":
         until = accounts.premium_until(uid)
-        return f"💎 Подписка действует до {time.strftime('%d.%m.%Y', time.localtime(until))}."
+        return f"💎 Тариф «{PREMIUM_NAME}» действует до {time.strftime('%d.%m.%Y', time.localtime(until))}."
     lim = limits_of("free")
     parts = [f"{KIND_TITLES[k]}: {n}" + (f" за {d} дн." if d > 1 else "") for k, (n, d) in lim.items() if k in KIND_TITLES]
     return "🆓 Бесплатный план — " + "; ".join(parts) + "."
