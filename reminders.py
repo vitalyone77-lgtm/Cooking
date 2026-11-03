@@ -134,6 +134,10 @@ def setup_scheduler(bot: Bot, dp: Dispatcher) -> AsyncIOScheduler:
     import social
     scheduler.add_job(social.daily_job, trigger=CronTrigger(hour=config.SOCIAL_POST_HOUR, minute=config.SOCIAL_POST_MINUTE),
                       args=[bot], id="social_daily", replace_existing=True)
+    # недельные задания по продвижению владельцу (понедельник утром)
+    import bot_promo
+    scheduler.add_job(bot_promo.weekly_job, trigger=CronTrigger(day_of_week="mon", hour=10, minute=0),
+                      args=[bot], id="promo_weekly", replace_existing=True)
     scheduler.start()
     logger.info(
         f"Напоминания пропавшим (паузы {config.REMINDER_GAPS} дн.): проверка в {config.REMINDER_HOUR:02d}:{config.REMINDER_MINUTE:02d} "

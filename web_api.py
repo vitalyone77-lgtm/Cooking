@@ -265,9 +265,29 @@ def new_device(request: Request):
     return {"device": web_db.create_device()}
 
 
+_stat_log: dict[str, deque] = {}
+STAT_PER_HOUR = 60     # счётчики статистики (визит, «нажал на закрытое») с одного IP в час: чтобы нельзя было раздуть базу
+
+
+def _stat_ok(ip: str) -> bool:
+    now = time.time()
+    q = _stat_log.setdefault(ip, deque())
+    while q and now - q[0] > 3600:
+        q.popleft()
+    if len(q) >= STAT_PER_HOUR:
+        return False
+    q.append(now)
+    if len(_stat_log) > 5000:
+        for k in [k for k, v in _stat_log.items() if not v or now - v[-1] > 3600]:
+            _stat_log.pop(k, None)
+    return True
+
+
 @app.post("/api/visit")
-def visit(x_device: str | None = Header(default=None)):
-    web_db.log_event(_dev(x_device), "visit")
+def visit(request: Request, x_device: str | None = Header(default=None)):
+    dev = _dev(x_device)
+    if _stat_ok(_client_ip(request)):
+        web_db.log_event(dev, "visit")
     return {"ok": True}
 
 
@@ -707,11 +727,11 @@ GATE_NAMES = {"pdf", "cart", "memory", "daymenu", "week", "photo", "voice"}
 
 
 @app.post("/api/gate")
-def gate_seen(body: dict, x_device: str | None = Header(default=None)):
+def gate_seen(request: Request, body: dict, x_device: str | None = Header(default=None)):
     """Человек нажал на закрытую функцию — считаем, чтобы видеть, что его привлекает."""
     dev = _dev(x_device)
     name = str(body.get("feature", ""))[:20]
-    if name in GATE_NAMES:
+    if name in GATE_NAMES and _stat_ok(_client_ip(request)):
         usage.event("gate_" + name, _uid(dev))
     return {"ok": True}
 

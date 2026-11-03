@@ -53,6 +53,7 @@ import bot_cook
 import bot_shop
 import bot_social
 import bot_diary
+import bot_promo
 import bot_vision
 import accounts
 
@@ -1831,6 +1832,7 @@ dp.include_router(bot_shop.router)
 dp.include_router(bot_vision.router)
 dp.include_router(bot_social.router)
 dp.include_router(bot_diary.router)
+dp.include_router(bot_promo.router)
 dp.include_router(fallback_router)
 
 
