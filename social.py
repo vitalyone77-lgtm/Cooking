@@ -9,6 +9,7 @@
 import logging
 import random
 import re
+import secrets
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -70,6 +71,22 @@ async def group_numeric_id(client) -> int:
     return _gid_cache[g]
 
 
+_TR = dict(zip("абвгдежзийклмнопрстуфхцчшщыэюя",
+               ["a", "b", "v", "g", "d", "e", "zh", "z", "i", "y", "k", "l", "m", "n", "o", "p", "r", "s", "t", "u", "f", "h",
+                "c", "ch", "sh", "sch", "y", "e", "yu", "ya"]))
+
+
+def slugify(title: str) -> str:
+    """«Куриный суп» -> «kurinyy-sup-a3f9c1» (латиница и случайный хвост, чтобы адреса не повторялись)."""
+    s = "".join(_TR.get(ch, ch) for ch in (title or "").lower().replace("ё", "е"))
+    s = re.sub(r"[^a-z0-9]+", "-", s).strip("-")[:50] or "recipe"
+    return f"{s}-{secrets.token_hex(3)}"
+
+
+def page_url(slug: str) -> str:
+    return f"{(config.WEB_APP_URL or 'https://menu.ymayaka.ru').rstrip('/')}/r/{slug}"
+
+
 def configured_vk() -> bool:
     return bool(config.VK_GROUP_ID and config.VK_GROUP_TOKEN)
 
@@ -107,6 +124,12 @@ def _remember(title: str) -> None:
 
 async def build_post(variant: int = 0) -> tuple[str, str]:
     """-> (название блюда, готовый текст поста). RuntimeError, если ИИ не ответил."""
+    d = await build_post_full(variant)
+    return d["title"], d["text"]
+
+
+async def build_post_full(variant: int = 0) -> dict:
+    """-> {"title", "body" (рецепт без ссылок, для страницы), "text" (пост)}. RuntimeError, если ИИ не ответил."""
     weekday = datetime.now(ZoneInfo(config.REMINDER_TIMEZONE)).weekday()
     hint = WEEKDAY_HINTS[(weekday + variant) % len(WEEKDAY_HINTS)]
     data = {"cuisine": "classic", "macro_goal": "", "preferred": "", "excluded": "", "time": "30 мин", "servings": 2,
@@ -120,7 +143,7 @@ async def build_post(variant: int = 0) -> tuple[str, str]:
     title = extract_dish_title(recipe)
     body = plain(recipe)
     text = f"Рецепт дня\n\n{body}\n\n{links_block()}\n\n{HASHTAGS}"
-    return title, text[:15000]
+    return {"title": title, "body": body, "text": text[:15000]}
 
 
 def _photo_error(data: dict) -> None:
@@ -184,16 +207,25 @@ async def post_tg(bot, text: str, image: bytes | None = None) -> int:
     return msg.message_id
 
 
-async def publish(bot, title: str, text: str, image: bytes | None = None) -> dict:
-    """Публикует везде, где настроено (с картинкой, если она есть). -> {"vk": id|None, "tg": id|None, "errors": [...]}."""
+async def publish(bot, title: str, text: str, image: bytes | None = None, body: str | None = None) -> dict:
+    """Публикует везде, где настроено (с картинкой, если она есть). -> {"vk": id|None, "tg": id|None, "errors": [...]}.
+    В ВК картинка идёт ссылкой на страницу рецепта (VK_IMAGE_MODE=link): ключ сообщества фото не загружает (код 27)."""
     out = {"vk": None, "tg": None, "errors": []}
     if configured_vk():
         attachment = None
-        if image:
+        if image and config.VK_IMAGE_MODE == "upload":
             try:
                 attachment = await vk_photo_attachment(image)
             except RuntimeError as e:
                 out["errors"].append(f"{e}. Запись опубликована без картинки")
+        elif image:
+            try:
+                slug = slugify(title)
+                accounts.pub_recipe_add(slug, title, body or text, image)
+                attachment = page_url(slug)
+            except Exception:  # noqa: BLE001
+                logger.exception("Страница рецепта не создана")
+                out["errors"].append("Страница рецепта не создана. Запись опубликована без картинки")
         try:
             out["vk"] = await post_vk(text, attachment)
         except RuntimeError as e:
@@ -228,9 +260,10 @@ async def daily_job(bot) -> None:
     if (accounts.sess_get(LAST_KEY) or {}).get("day") == today():
         return
     try:
-        title, text = await build_post()
-        image = await build_image(title, text) if (config.SOCIAL_IMAGES and images.configured()) else None
-        res = await publish(bot, title, text, image)
+        d = await build_post_full()
+        title, text = d["title"], d["text"]
+        image = await build_image(title, d["body"]) if (config.SOCIAL_IMAGES and images.configured()) else None
+        res = await publish(bot, title, text, image, d["body"])
     except Exception as e:  # noqa: BLE001
         logger.exception("Рецепт дня не опубликован")
         await _tell_admins(bot, f"⚠️ Рецепт дня не опубликован: {e}")

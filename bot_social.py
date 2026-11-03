@@ -1,6 +1,7 @@
 """
-/postvk — черновик «рецепта дня» для владельца: смотрим текст, при желании рисуем картинку и жмём «Опубликовать»
-(сообщество ВК и/или канал). Команда только для ADMIN_TG_IDS.
+/postvk — черновик «рецепта дня» для владельца: смотрим текст и картинку и жмём «Опубликовать» (сообщество ВК и/или канал).
+Если картинки бесплатные (SOCIAL_IMAGES), карточка делается сразу вместе с черновиком; если платные (Leonardo), она рисуется
+по кнопке «С картинкой». Команда только для ADMIN_TG_IDS.
 """
 import logging
 
@@ -38,8 +39,9 @@ def _image_kb() -> InlineKeyboardMarkup:
     b = InlineKeyboardBuilder()
     b.button(text="✅ Опубликовать с картинкой", callback_data="soc:goimg")
     b.button(text="🔄 Другая картинка", callback_data="soc:img")
+    b.button(text="Без картинки", callback_data="soc:go")
     b.button(text="Отмена", callback_data="soc:no")
-    b.adjust(1, 2)
+    b.adjust(1, 2, 1)
     return b.as_markup()
 
 
@@ -48,15 +50,32 @@ def _where() -> str:
     return " и ".join(parts)
 
 
-async def _draft(chat_id: int, send, variant: int = 0) -> None:
+async def _send_image(bot, chat_id: int, draft: dict) -> None:
+    wait = await bot.send_message(chat_id, "⏳ Делаю картинку…", parse_mode=None)
+    img = await social.build_image(draft["title"], draft.get("body") or draft["text"])
+    await wait.delete()
+    if not img:
+        await bot.send_message(chat_id, "😔 Картинка не получилась. Опубликовать без неё или попробовать ещё раз?",
+                               parse_mode=None, reply_markup=_kb())
+        return
+    _images[chat_id] = img
+    await bot.send_photo(chat_id, BufferedInputFile(img, "dish.png"), caption="Картинка к рецепту", reply_markup=_image_kb())
+
+
+async def _draft(bot, chat_id: int, variant: int = 0) -> None:
     _images.pop(chat_id, None)
     try:
-        title, text = await social.build_post(variant)
+        d = await social.build_post_full(variant)
     except Exception as e:  # noqa: BLE001
-        await send(f"😔 Не получилось составить рецепт: {e}")
+        await bot.send_message(chat_id, f"😔 Не получилось составить рецепт: {e}", parse_mode=None)
         return
-    accounts.sess_set(f"soc:draft:{chat_id}", {"title": title, "text": text, "variant": variant})
-    await send(f"Черновик ({_where()}):\n\n{text[:3500]}", reply_markup=_kb())
+    draft = {"title": d["title"], "text": d["text"], "body": d["body"], "variant": variant}
+    accounts.sess_set(f"soc:draft:{chat_id}", draft)
+    auto = config.SOCIAL_IMAGES and images.configured()
+    await bot.send_message(chat_id, f"Черновик ({_where()}):\n\n{d['text'][:3500]}", parse_mode=None,
+                           reply_markup=None if auto else _kb())
+    if auto:
+        await _send_image(bot, chat_id, draft)
 
 
 @router.message(Command("postvk"))
@@ -68,7 +87,7 @@ async def cmd_postvk(message: Message):
                              "в .env на сервере, подробности в KEYS.md.", parse_mode=None)
         return
     wait = await message.answer("⏳ Придумываю рецепт дня…", parse_mode=None)
-    await _draft(message.chat.id, lambda t, **k: message.answer(t, parse_mode=None, **k))
+    await _draft(message.bot, message.chat.id)
     await wait.delete()
 
 
@@ -80,7 +99,7 @@ async def next_recipe(callback: CallbackQuery):
     draft = accounts.sess_get(f"soc:draft:{callback.message.chat.id}") or {}
     await callback.answer("Придумываю другой…")
     await callback.message.edit_reply_markup()
-    await _draft(callback.message.chat.id, lambda t, **k: callback.message.answer(t, parse_mode=None, **k), draft.get("variant", 0) + 1)
+    await _draft(callback.bot, callback.message.chat.id, draft.get("variant", 0) + 1)
 
 
 @router.callback_query(F.data == "soc:no")
@@ -101,14 +120,7 @@ async def draw(callback: CallbackQuery):
         await callback.answer("Черновик устарел, вызовите /postvk ещё раз", show_alert=True)
         return
     await callback.answer()
-    wait = await callback.message.answer("⏳ Рисую картинку, это может занять до минуты…", parse_mode=None)
-    img = await social.build_image(draft["title"], draft["text"])
-    await wait.delete()
-    if not img:
-        await callback.message.answer("😔 Картинка не получилась. Можно опубликовать без неё или попробовать ещё раз.", parse_mode=None)
-        return
-    _images[chat_id] = img
-    await callback.message.answer_photo(BufferedInputFile(img, "dish.png"), caption="Картинка к рецепту", reply_markup=_image_kb())
+    await _send_image(callback.bot, chat_id, draft)
 
 
 async def _publish(callback: CallbackQuery, with_image: bool) -> None:
@@ -125,7 +137,7 @@ async def _publish(callback: CallbackQuery, with_image: bool) -> None:
     await callback.message.edit_reply_markup()
     accounts.sess_set(f"soc:draft:{chat_id}", {})          # второе нажатие ничего не опубликует
     _images.pop(chat_id, None)
-    res = await social.publish(callback.bot, draft["title"], draft["text"], img)
+    res = await social.publish(callback.bot, draft["title"], draft["text"], img, draft.get("body"))
     lines = []
     if res["vk"]:
         lines.append(f"✅ ВКонтакте: запись №{res['vk']} опубликована")

@@ -1,8 +1,9 @@
 """
-Картинки блюд для «рецепта дня». Чем рисовать, выбирает IMAGE_PROVIDER в .env:
-- free (по умолчанию): бесплатный pollinations.ai, как в проекте autobot; без ключа, но с логотипом сервиса на кадре и
-  лимитом «одна картинка в 45 секунд с адреса»;
-- leonardo: платный Leonardo.ai (LEONARDO_API_KEY, схема как в storymetaverse); если он не справился, пробуем free;
+Картинки для «рецепта дня». Чем делать, выбирает IMAGE_PROVIDER в .env:
+- card (по умолчанию): фирменная карточка рецепта (cards.py): название, время, порции, КБЖУ; бесплатно, без сети;
+- free: бесплатный pollinations.ai, как в проекте autobot (с логотипом сервиса, лимит одна картинка в 45 секунд, еда
+  получается «странной»); если не вышло, берётся карточка;
+- leonardo: платный Leonardo.ai (LEONARDO_API_KEY, схема как в storymetaverse); если не вышло, берётся карточка;
 - off: картинки отключены.
 Сначала ИИ коротко описывает по-английски, как выглядит готовое блюдо, затем описание уходит в выбранный сервис.
 Любой сбой возвращает None: пост выходит без картинки, ничего не ломается. Ключи в логи не попадают.
@@ -15,6 +16,7 @@ import urllib.parse
 
 import httpx
 
+import cards
 import config
 import profile_ctx
 from ai import call_llm_with_fallback
@@ -132,12 +134,21 @@ async def _free(prompt: str) -> bytes | None:
 
 
 async def make_dish_image(title: str, recipe_text: str) -> bytes | None:
-    """Картинка блюда (байты) или None. IMAGE_PROVIDER=leonardo: сначала Leonardo, при сбое бесплатный; free: только он."""
+    """Картинка к рецепту (байты) или None. card: фирменная карточка; free: pollinations.ai, leonardo: платный; если они
+    не справились, берётся карточка (она не зависит от сети)."""
     if not configured():
         return None
-    prompt = f"{await dish_scene(title, recipe_text)}, {STYLE}"
-    order = ["leonardo", "free"] if config.IMAGE_PROVIDER == "leonardo" else ["free"]
+    order = {"leonardo": ["leonardo", "card"], "free": ["free", "card"]}.get(config.IMAGE_PROVIDER, ["card"])
+    prompt = None
     for provider in order:
+        if provider == "card":
+            try:
+                return cards.make_card(title, recipe_text)
+            except Exception as e:  # noqa: BLE001
+                logger.warning("Карточка рецепта не нарисовалась: %s", type(e).__name__)
+                return None
+        if prompt is None:
+            prompt = f"{await dish_scene(title, recipe_text)}, {STYLE}"
         img = await (_leonardo(prompt) if provider == "leonardo" else _free(prompt))
         if img:
             return img

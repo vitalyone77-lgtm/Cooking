@@ -19,5 +19,5 @@ echo "Оплата PayAnyWay (понадобится на следующем ш�
 show PAYANYWAY_MNT_ID PAYANYWAY_CODE
 echo "Вход через VK ID (понадобится на следующем шаге):"
 show VK_CLIENT_ID VK_CLIENT_SECRET
-echo "Картинки блюд (IMAGE_PROVIDER: free, leonardo или off):"
-show IMAGE_PROVIDER LEONARDO_API_KEY SOCIAL_IMAGES
+echo "Картинки (IMAGE_PROVIDER: card, free, leonardo или off):"
+show IMAGE_PROVIDER SOCIAL_IMAGES VK_IMAGE_MODE LEONARDO_API_KEY
