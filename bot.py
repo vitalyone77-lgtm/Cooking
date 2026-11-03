@@ -51,6 +51,7 @@ import profile_ctx
 import plans
 import bot_cook
 import bot_shop
+import bot_social
 import bot_vision
 import accounts
 
@@ -1824,6 +1825,7 @@ dp.include_router(bot_profile.router)
 dp.include_router(bot_cook.router)
 dp.include_router(bot_shop.router)
 dp.include_router(bot_vision.router)
+dp.include_router(bot_social.router)
 dp.include_router(fallback_router)
 
 

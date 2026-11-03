@@ -135,6 +135,15 @@ PAYMENT_PROVIDER_TOKEN = os.getenv("PAYMENT_PROVIDER_TOKEN", "")
 ADMIN_TG_IDS = [int(x) for x in os.getenv("ADMIN_TG_IDS", "").replace(" ", "").split(",") if x.strip().lstrip("-").isdigit()]
 BOT_USERNAME = os.getenv("BOT_USERNAME", "Cookingvkusno_bot")
 # Вход партнёра (блогера) в админку: статистика, деньги, цены, лимиты, функции подписки, промокоды
+# «Рецепт дня» в сообщество ВКонтакте и Telegram-канал (social.py). Ключи только в .env на сервере.
+VK_GROUP_ID = int(os.getenv("VK_GROUP_ID", "0") or 0)            # число-ID сообщества, без минуса
+VK_GROUP_TOKEN = os.getenv("VK_GROUP_TOKEN", "")                 # ключ доступа сообщества с правом на стену
+VK_API_VERSION = os.getenv("VK_API_VERSION", "5.199")
+VK_API_URL = os.getenv("VK_API_URL", "https://api.vk.com")
+TG_CHANNEL_ID = os.getenv("TG_CHANNEL_ID", "")                   # @имя_канала или число; бот должен быть админом канала
+SOCIAL_AUTOPOST = os.getenv("SOCIAL_AUTOPOST", "false").lower() == "true"   # false: только вручную через /postvk
+SOCIAL_POST_HOUR = int(os.getenv("SOCIAL_POST_HOUR", "9"))
+SOCIAL_POST_MINUTE = int(os.getenv("SOCIAL_POST_MINUTE", "30"))
 PARTNER_PASSWORD = os.getenv("PARTNER_PASSWORD", "")
 PARTNER_SHARE_PCT = int(os.getenv("PARTNER_SHARE_PCT", "50"))     # доля партнёра от выручки, %
 DEEPSEEK_BALANCE_ALERT_USD = float(os.getenv("DEEPSEEK_BALANCE_ALERT_USD", "3"))

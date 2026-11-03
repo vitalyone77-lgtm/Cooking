@@ -130,6 +130,10 @@ def setup_scheduler(bot: Bot, dp: Dispatcher) -> AsyncIOScheduler:
     # тревоги админу: 80% дневного потолка, мало денег на DeepSeek
     import alerts
     scheduler.add_job(alerts.check, trigger=CronTrigger(minute=7), args=[bot], id="admin_alerts", replace_existing=True)
+    # «рецепт дня» в сообщество ВК и канал (публикует сам только при SOCIAL_AUTOPOST=true)
+    import social
+    scheduler.add_job(social.daily_job, trigger=CronTrigger(hour=config.SOCIAL_POST_HOUR, minute=config.SOCIAL_POST_MINUTE),
+                      args=[bot], id="social_daily", replace_existing=True)
     scheduler.start()
     logger.info(
         f"Напоминания пропавшим (паузы {config.REMINDER_GAPS} дн.): проверка в {config.REMINDER_HOUR:02d}:{config.REMINDER_MINUTE:02d} "

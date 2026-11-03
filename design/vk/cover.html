@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><title>Обложка сообщества</title>
+<style>
+/* 1590×530. Всё важное внутри 1196 пикселей по центру: на телефоне края обрезаются. */
+html,body{margin:0;width:1590px;height:530px;overflow:hidden;background:#FBF7F2;color:#2B2622;
+  font-family:"Segoe UI","Helvetica Neue",Arial,sans-serif}
+.wrap{position:relative;width:1590px;height:530px}
+.circle{position:absolute;right:230px;top:100px;width:330px;height:330px;border-radius:50%;background:#2F6B4F}
+.ring{position:absolute;right:190px;top:60px;width:410px;height:410px;border-radius:50%;border:3px solid #E6F0EA}
+.dot{position:absolute;border-radius:50%;background:#FBE3C4}
+.text{position:absolute;left:240px;top:92px;width:760px}
+h1{margin:0 0 18px;font-size:88px;line-height:1.05;font-weight:600;letter-spacing:-1px}
+p{margin:0 0 30px;font-size:36px;line-height:1.35;color:#6B625A}
+.chips{display:flex;gap:14px;flex-wrap:wrap}
+.chip{padding:10px 22px;border-radius:999px;background:#E6F0EA;color:#24593F;font-size:26px;font-weight:500}
+svg{position:absolute;right:230px;top:100px;width:330px;height:330px}
+</style></head><body>
+<div class="wrap">
+  <div class="ring"></div><div class="circle"></div>
+  <div class="dot" style="right:150px;top:390px;width:44px;height:44px"></div>
+  <div class="dot" style="right:640px;top:70px;width:26px;height:26px"></div>
+  <div class="dot" style="right:560px;top:450px;width:18px;height:18px"></div>
+  <svg viewBox="0 0 500 500" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+    <g fill="none" stroke="#FBF7F2" stroke-width="16" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M200 150c-22-26 22-42 0-72"/><path d="M250 150c-22-26 22-42 0-72"/><path d="M300 150c-22-26 22-42 0-72"/>
+      <path d="M140 205h220"/><path d="M160 205v100a44 44 0 0 0 44 44h92a44 44 0 0 0 44-44V205"/><path d="M160 240h-52M340 240h52"/>
+    </g>
+    <circle cx="250" cy="288" r="9" fill="#FBE3C4"/>
+  </svg>
+  <div class="text">
+    <h1>Кухонный помощник</h1>
+    <p>Что приготовить сегодня? Рецепт с КБЖУ, меню на день и список покупок за минуту.</p>
+    <div class="chips"><span class="chip">Рецепт по фото холодильника</span><span class="chip">Голосом или текстом</span></div>
+  </div>
+</div>
+</body></html>
