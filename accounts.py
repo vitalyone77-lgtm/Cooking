@@ -35,6 +35,10 @@ CREATE INDEX IF NOT EXISTS sess_ts ON sess(ts);
 CREATE TABLE IF NOT EXISTS favs(uid TEXT, id TEXT, title TEXT, text TEXT, cuisine TEXT, ts REAL, PRIMARY KEY(uid, id));
 CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY, value TEXT, ts REAL, who TEXT);
 CREATE TABLE IF NOT EXISTS admin_log(id INTEGER PRIMARY KEY AUTOINCREMENT, ts REAL, who TEXT, action TEXT, details TEXT);
+CREATE TABLE IF NOT EXISTS diary(id INTEGER PRIMARY KEY AUTOINCREMENT, uid TEXT, day TEXT, ts REAL, title TEXT, kcal INTEGER,
+  protein REAL, fat REAL, carb REAL, src TEXT);
+CREATE INDEX IF NOT EXISTS diary_uid_day ON diary(uid, day);
+CREATE TABLE IF NOT EXISTS energy(uid TEXT PRIMARY KEY, activity TEXT, tdee INTEGER, updated REAL);
 CREATE TABLE IF NOT EXISTS pub_recipes(slug TEXT PRIMARY KEY, ts REAL, title TEXT, body TEXT, image BLOB);
 CREATE TABLE IF NOT EXISTS feedback(id INTEGER PRIMARY KEY AUTOINCREMENT, ts REAL, uid TEXT, kind TEXT, text TEXT, contact TEXT,
   src TEXT, done INTEGER DEFAULT 0);
@@ -651,11 +655,110 @@ def weight_delete(uid, day: str) -> None:
 
 
 def delete_my_data(uid) -> dict:
-    """Стереть всё, что человек сам ввёл в профиле: список «не использовать», цели, вес, полку и согласие."""
+    """Стереть всё, что человек сам ввёл в профиле: список «не использовать», цели, вес, полку, дневник и согласие."""
     uid = str(uid)
     out = {"weights": _q("DELETE FROM weights WHERE uid=?", (uid,)), "goals": _q("DELETE FROM goals WHERE uid=?", (uid,)),
-           "shelf": _q("DELETE FROM shelf WHERE uid=?", (uid,)), "consent": _q("DELETE FROM consents WHERE uid=?", (uid,))}
+           "shelf": _q("DELETE FROM shelf WHERE uid=?", (uid,)), "consent": _q("DELETE FROM consents WHERE uid=?", (uid,)),
+           "diary": _q("DELETE FROM diary WHERE uid=?", (uid,)), "energy": _q("DELETE FROM energy WHERE uid=?", (uid,))}
     return out
+
+
+# ---------- дневник питания и расход энергии ----------
+DIARY_NOTE = ("Калории оценочные: их считает справочник или ИИ, и они могут ошибаться. Готовность блюд (мясо, птица, рыба, "
+              "яйца) проверяйте сами. Приложение не врач и не диетолог и не заменяет консультацию специалиста.")
+ACTIVITY = {
+    "sedentary": (1.2, "Сидячая работа, почти без тренировок"),
+    "office_sport": (1.375, "Офис и спорт 1–3 раза в неделю"),
+    "sport": (1.55, "Спорт 4–5 раз в неделю"),
+    "active": (1.725, "Активная работа на ногах или ежедневный спорт"),
+}
+DIARY_DAILY_MAX = 60
+
+
+def calc_tdee(sex: str, age, height_cm, weight_kg, activity: str) -> int:
+    """Суточный расход по формуле Миффлина — Сан Жеора с обычными коэффициентами активности. ValueError — если данные неверны.
+    Приблизительная оценка: реальный расход может отличаться на 10–20%."""
+    if sex not in ("m", "f") or activity not in ACTIVITY:
+        raise ValueError("Выберите пол и уровень активности")
+    age, h, w = (_num(age, 14, 90), _num(height_cm, 120, 230), _num(weight_kg, 30, 250, as_float=True))
+    if None in (age, h, w):
+        raise ValueError("Нужны возраст, рост и вес")
+    bmr = 10 * w + 6.25 * h - 5 * age + (5 if sex == "m" else -161)
+    return int(round(bmr * ACTIVITY[activity][0] / 10.0) * 10)
+
+
+def energy_set(uid, activity: str, tdee: int) -> None:
+    _q("INSERT INTO energy(uid, activity, tdee, updated) VALUES(?,?,?,?) ON CONFLICT(uid) DO UPDATE SET activity=excluded.activity, "
+       "tdee=excluded.tdee, updated=excluded.updated", (str(uid), activity, int(tdee), time.time()))
+
+
+def energy_get(uid) -> dict | None:
+    row = _q("SELECT activity, tdee FROM energy WHERE uid=?", (str(uid),), one=True)
+    return {"activity": row[0], "tdee": row[1], "activity_title": ACTIVITY.get(row[0], (0, ""))[1]} if row else None
+
+
+def diary_add(uid, title: str, kcal, protein=0, fat=0, carb=0, src: str = "manual", day: str | None = None) -> int:
+    title = re.sub(r"\s+", " ", (title or "")).strip()[:80]
+    if not title:
+        raise ValueError("Напишите название")
+    kcal = _num(kcal, 1, 5000)
+    if kcal is None:
+        raise ValueError("Нужно число калорий")
+    day = day or time.strftime("%Y-%m-%d")
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", day):
+        raise ValueError("Дата в формате ГГГГ-ММ-ДД")
+    with _lock:
+        c = _conn()
+        try:
+            with c:
+                n = c.execute("SELECT COUNT(*) FROM diary WHERE uid=? AND day=?", (str(uid), day)).fetchone()[0]
+                if n >= DIARY_DAILY_MAX:
+                    raise ValueError("За день уже много записей")
+                cur = c.execute("INSERT INTO diary(uid, day, ts, title, kcal, protein, fat, carb, src) VALUES(?,?,?,?,?,?,?,?,?)",
+                                (str(uid), day, time.time(), title, kcal, float(protein or 0), float(fat or 0), float(carb or 0), src))
+                return cur.lastrowid
+        finally:
+            c.close()
+
+
+def diary_day(uid, day: str | None = None) -> dict:
+    day = day or time.strftime("%Y-%m-%d")
+    rows = _q("SELECT id, title, kcal, protein, fat, carb, src FROM diary WHERE uid=? AND day=? ORDER BY id", (str(uid), day), all_=True)
+    items = [{"id": r[0], "title": r[1], "kcal": r[2], "protein": r[3], "fat": r[4], "carb": r[5], "src": r[6]} for r in rows]
+    return {"day": day, "items": items, "kcal": sum(i["kcal"] for i in items), "protein": round(sum(i["protein"] for i in items), 1),
+            "fat": round(sum(i["fat"] for i in items), 1), "carb": round(sum(i["carb"] for i in items), 1)}
+
+
+def diary_delete(uid, entry_id: int) -> bool:
+    return _q("DELETE FROM diary WHERE uid=? AND id=?", (str(uid), int(entry_id))) > 0
+
+
+def diary_series(uid, days: int = 14, end: str | None = None) -> list[dict]:
+    """По одному элементу на каждый календарный день окна (дни без записей: n=0)."""
+    import datetime
+    last = datetime.date.fromisoformat(end) if end else datetime.date.today()
+    first = last - datetime.timedelta(days=days - 1)
+    rows = _q("SELECT day, SUM(kcal), SUM(protein), SUM(fat), SUM(carb), COUNT(*) FROM diary WHERE uid=? AND day>=? AND day<=? GROUP BY day",
+              (str(uid), first.isoformat(), last.isoformat()), all_=True)
+    by = {r[0]: r for r in rows}
+    out = []
+    for i in range(days):
+        d = (first + datetime.timedelta(days=i)).isoformat()
+        r = by.get(d)
+        out.append({"day": d, "kcal": int(r[1]) if r else 0, "protein": round(r[2], 1) if r else 0, "fat": round(r[3], 1) if r else 0,
+                    "carb": round(r[4], 1) if r else 0, "n": r[5] if r else 0})
+    return out
+
+
+def diary_stats(series: list[dict]) -> dict:
+    """Среднее за день по дням, где есть записи (дни без записей не считаем «голодными»)."""
+    logged = [d for d in series if d["n"]]
+    if not logged:
+        return {"days": len(series), "logged": 0, "avg_kcal": 0, "avg_protein": 0, "avg_fat": 0, "avg_carb": 0}
+    n = len(logged)
+    return {"days": len(series), "logged": n, "avg_kcal": int(round(sum(d["kcal"] for d in logged) / n)),
+            "avg_protein": round(sum(d["protein"] for d in logged) / n), "avg_fat": round(sum(d["fat"] for d in logged) / n),
+            "avg_carb": round(sum(d["carb"] for d in logged) / n)}
 
 
 def trial_available(uid) -> bool:

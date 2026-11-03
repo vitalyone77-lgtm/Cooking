@@ -73,7 +73,12 @@ def _profile_view(uid: int) -> tuple[str, InlineKeyboardMarkup]:
     shelf_on = plans.shelf_on(uid)
     consent = accounts.consent_get(uid)
     g = accounts.goals_get(uid) if consent else None
-    lines = ["👤 *Профиль*", "", plans.status_text(uid)]
+    diary_on = bool(consent and "diary" in g["feats"])
+    lines = ["👤 *Профиль*", ""]
+    if diary_on:
+        from bot_diary import summary_line
+        lines += [summary_line(uid), ""]
+    lines.append(plans.status_text(uid))
     if shelf_on:
         shelf = accounts.shelf_list(uid)
         lines.append(f"🏠 На полке: {len(shelf)} " + _plural(len(shelf), "продукт", "продукта", "продуктов"))
@@ -87,16 +92,19 @@ def _profile_view(uid: int) -> tuple[str, InlineKeyboardMarkup]:
             vals = [w["kg"] for w in ws]
             delta = vals[-1] - vals[0]
             goal = f", цель {g['weight_goal']:g}" if g["weight_goal"] else ""
-            lines.append(f"⚖️ Вес: {vals[-1]:g} кг{goal}; за период {delta:+.1f} кг  {accounts.spark(vals[-20:])}")
+            lines.append(f"⚖️ Вес: {vals[-1]:g} кг{goal}; за период {delta:+.1f} кг (график картинкой: кнопка «📊 График»)")
         else:
             lines.append("⚖️ Вес: не записан")
     else:
         lines += ["", "ℹ️ " + accounts.CONSENT_TEXT]
     lines += ["", "_Аллергии и продукты, которые не нужны на один раз, пиши в анкете в строке «Исключить» — я предложу их кнопкой «Как в прошлый раз»._"]
     rows: list[list[tuple[str, str]]] = []
+    if diary_on:
+        rows.append([("📒 Дневник", "dy:open"), ("📊 График", "dy:ch:14")])
     if consent:
         rows.append([("🚫 Не использовать" if mem else "💎 Не использовать", "pf:never"), ("🎯 Цель КБЖУ", "pf:goal")])
-        rows.append([("⚖️ Вес", "pf:weight")] + ([("🏠 Моя полка", "pf:shelf")] if shelf_on else []))
+        rows.append([("⚖️ Вес", "pf:weight")] + ([] if diary_on else [("📊 График", "dy:ch:30")] if accounts.weights_list(uid, 2) else [])
+                    + ([("🏠 Моя полка", "pf:shelf")] if shelf_on else []))
         rows.append([("⚙️ Функции", "pf:fts"), ("🗑 Удалить мои данные", "pf:del")])
     else:
         rows.append([("✅ Согласен", "pf:consent")])
@@ -413,7 +421,7 @@ async def profile_delete_yes(callback: CallbackQuery, state: FSMContext):
 
 
 # ---------- функции профиля: включаются галочками ----------
-FEATURE_LABELS = {"shelf": "🏠 Полка (что есть дома)", "never": "🚫 Список «не использовать»",
+FEATURE_LABELS = {"diary": "📒 Дневник питания", "shelf": "🏠 Полка (что есть дома)", "never": "🚫 Список «не использовать»",
                   "macro": "🎯 Цель КБЖУ", "weight": "⚖️ Вес и график"}
 NEEDS_MEMORY = {"shelf", "never"}
 

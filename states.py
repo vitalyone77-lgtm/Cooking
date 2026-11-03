@@ -62,3 +62,13 @@ class ProfileForm(StatesGroup):
 class FeedbackForm(StatesGroup):
     """«Написать разработчику»: ждём текст сообщения."""
     text = State()
+
+
+class DiaryForm(StatesGroup):
+    """Дневник питания: свои граммы, поиск, расчёт расхода (возраст, рост, вес, активность)."""
+    grams = State()
+    find = State()
+    age = State()
+    height = State()
+    weight = State()
+    activity = State()

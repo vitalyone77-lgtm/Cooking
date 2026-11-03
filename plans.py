@@ -135,6 +135,16 @@ def shelf_on(uid) -> bool:
         return False
 
 
+def diary_on(uid) -> bool:
+    """Дневник питания включён галочкой в профиле (после согласия)."""
+    if is_anon(uid):
+        return False
+    try:
+        return accounts.consent_get(uid) and "diary" in accounts.goals_get(uid)["feats"]
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def rollout() -> dict[str, str]:
     raw = cfg("FEATURE_ROLLOUT") or {}
     if isinstance(raw, str):

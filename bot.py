@@ -16,7 +16,7 @@ from aiogram.exceptions import TelegramBadRequest, TelegramRetryAfter
 from aiogram.filters import CommandStart, Command, CommandObject, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.types import Message, CallbackQuery, BotCommand, ErrorEvent, BufferedInputFile
+from aiogram.types import Message, CallbackQuery, BotCommand, ErrorEvent, BufferedInputFile, InlineKeyboardButton
 
 import config
 import keyboards as kb
@@ -52,6 +52,7 @@ import plans
 import bot_cook
 import bot_shop
 import bot_social
+import bot_diary
 import bot_vision
 import accounts
 
@@ -317,7 +318,7 @@ async def last_open(callback: CallbackQuery, state: FSMContext):
         return
     await state.clear()
     await callback.answer()
-    await callback.message.answer(last["text"], reply_markup=recipe_kb(last["text"]))
+    await callback.message.answer(last["text"], reply_markup=recipe_kb(last["text"], callback.message.chat.id))
 
 
 async def show_ready_menus(message: Message, state: FSMContext):
@@ -726,7 +727,7 @@ async def step_confirm_go(callback: CallbackQuery, state: FSMContext):
 
     await status_msg.delete()
     # Рецепт и кнопки («Найти продукты в магазине», «В избранное», «Ещё рецепт») — одним сообщением
-    sent = await callback.message.answer(recipe_text, reply_markup=recipe_kb(recipe_text))
+    sent = await callback.message.answer(recipe_text, reply_markup=recipe_kb(recipe_text, callback.message.chat.id))
     remember_recipe_terms(callback.message.chat.id, sent.message_id, shopping_terms)
 
 
@@ -823,8 +824,11 @@ _active_timers: dict[int, set] = {}
 MAX_TIMERS_PER_CHAT = 8
 
 
-def recipe_kb(recipe_text: str):
-    return kb.recipe_result_kb(step_timers_mod.step_timers(recipe_text))
+def recipe_kb(recipe_text: str, chat_id: int | None = None):
+    markup = kb.recipe_result_kb(step_timers_mod.step_timers(recipe_text))
+    if chat_id is not None and plans.diary_on(chat_id):          # «Съел порцию»: только у тех, кто включил дневник
+        markup.inline_keyboard.append([InlineKeyboardButton(text="🍽 Съел порцию", callback_data="dy:eat")])
+    return markup
 
 
 async def _run_timer(message: Message, step: int, mn: int, mx: int):
@@ -901,7 +905,7 @@ async def reminder_cook(callback: CallbackQuery, state: FSMContext):
     await callback.message.edit_reply_markup()
     text = saved["text"]
     set_last_recipe(chat_id, extract_dish_title(text), text, (get_last_request(chat_id) or {}).get("cuisine"))
-    sent = await callback.message.answer(text, reply_markup=recipe_kb(text))
+    sent = await callback.message.answer(text, reply_markup=recipe_kb(text, callback.message.chat.id))
     remember_recipe_terms(chat_id, sent.message_id, saved.get("terms") or [])
 
 
@@ -1029,7 +1033,7 @@ async def run_missing(callback: CallbackQuery, anchor: Message, ctx: str, names:
             text, new_terms = await missing.adapt_recipe(anchor.text, names, get_last_inputs(chat_id).get("excluded", ""))
             await status.delete()
             set_last_recipe(chat_id, extract_dish_title(text), text, (get_last_request(chat_id) or {}).get("cuisine"))
-            sent = await msg.answer(text, reply_markup=recipe_kb(text))
+            sent = await msg.answer(text, reply_markup=recipe_kb(text, msg.chat.id))
             remember_recipe_terms(chat_id, sent.message_id, new_terms)
         elif ctx == "d":
             await missing.rebuild_day(chat_id, names)
@@ -1811,7 +1815,7 @@ def _orig_kb(message: Message, ctx: str):
         view = day_menu.build_summary_view(message.chat.id)
         return view[1] if view else None
     if ctx == "r":
-        return recipe_kb(message.text or "")
+        return recipe_kb(message.text or "", message.chat.id)
     return kb.shopping_btn_kb(ctx)
 
 
@@ -1826,6 +1830,7 @@ dp.include_router(bot_cook.router)
 dp.include_router(bot_shop.router)
 dp.include_router(bot_vision.router)
 dp.include_router(bot_social.router)
+dp.include_router(bot_diary.router)
 dp.include_router(fallback_router)
 
 
