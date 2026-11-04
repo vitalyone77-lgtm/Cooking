@@ -256,9 +256,22 @@ def top_tags(limit: int = 16) -> list[tuple[str, int]]:
     return sorted(count.items(), key=lambda kv: (-kv[1], kv[0]))[:limit]
 
 
+# основной ингредиент: название на кнопке -> корни слов для поиска по составу
+MAINS = {
+    "говядина": ("говяд", "телятин"), "свинина": ("свинин",), "курица": ("куриц", "курин", "индейк"), "фарш": ("фарш",),
+    "рыба": ("рыб", "лосос", "форел", "тунец", "треск", "семг", "сёмг", "минтай", "горбуш"), "морепродукты": ("креветк", "кальмар", "мидии"),
+    "овощи": ("кабачк", "баклажан", "капуст", "морков", "тыкв", "брокколи", "цветная"), "яйца": ("яйц", "яйца"),
+    "творог": ("творог", "сырник"), "крупы": ("греч", "рис", "овсян", "булгур", "пшен", "кускус", "киноа", "перлов"),
+    "макароны": ("макарон", "паста", "спагетти", "лапш"), "бобовые": ("фасол", "нут", "чечевиц", "горох"),
+}
+APPLIANCES = {"stove": "Плита", "oven": "Духовка", "multicooker": "Мультиварка", "airfryer": "Аэрогриль"}
+
+
 def search(meal: str | None = None, tag: str | None = None, q: str | None = None, max_min: int | None = None, max_kcal: int | None = None,
+           appliance: str | None = None, servings: int | None = None, main: str | None = None,
            limit: int = 8, offset: int = 0) -> tuple[list[dict], int]:
-    """Список для просмотра: раздел, хештег, слова из названия или состава, время, калорийность. -> (страница, всего)."""
+    """Список для просмотра: раздел, хештег, слова, время, калорийность, на чём готовить, на сколько человек, основной ингредиент.
+    Смотреть книгу можно без лимитов: ИИ не вызывается. -> (страница, всего)."""
     where, args = ["1=1"], []
     if meal in MEALS:
         where.append("meal=?")
@@ -275,6 +288,15 @@ def search(meal: str | None = None, tag: str | None = None, q: str | None = None
     if max_kcal:
         where.append("kcal IS NOT NULL AND kcal <= ?")
         args.append(int(max_kcal))
+    if appliance in APPLIANCES:
+        where.append("(',' || appliance || ',') LIKE ?")
+        args.append(f"%,{appliance},%")
+    if servings:
+        where.append("servings=?")
+        args.append(int(servings))
+    if main in MAINS:
+        where.append("(" + " OR ".join("text_l LIKE ?" for _ in MAINS[main]) + ")")
+        args += [f"%{root}%" for root in MAINS[main]]
     cond = " AND ".join(where)
     n = accounts._q(f"SELECT COUNT(*) FROM book WHERE {cond}", args, one=True)[0]
     rows = accounts._q(f"SELECT {COLS} FROM book WHERE {cond} ORDER BY id DESC LIMIT ? OFFSET ?", args + [int(limit), int(offset)], all_=True)

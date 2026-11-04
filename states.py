@@ -73,3 +73,8 @@ class DiaryForm(StatesGroup):
     height = State()
     weight = State()
     activity = State()
+
+
+class BookForm(StatesGroup):
+    """Книга рецептов: ждём слово для поиска."""
+    q = State()

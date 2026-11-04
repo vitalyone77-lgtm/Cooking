@@ -69,12 +69,13 @@ def cuisine_kb(with_extras: bool = True, last_title: str | None = None, fridge: 
     if fridge:      # последним пунктом после аюрведы: рецепт по фото продуктов
         b.button(text="📷 По фото продуктов", callback_data="fridge:start")
     b.button(text="⭐ Избранное", callback_data="favorites:open")
+    b.button(text="📖 Книга рецептов", callback_data="book:open")
     b.button(text="📅 Меню на день", callback_data="daymenu:start")
     b.button(text=f"📆 Меню на {config.WEEK_MENU_DAYS} дня", callback_data="weekmenu:start")
     if last_title:
         short = last_title if len(last_title) <= 28 else last_title[:26] + "…"
         b.button(text=f"📖 Последний: {short}", callback_data="last:open")
-    b.adjust(*((2, 2, 2, 2, 1, 2, 1) if fridge else (2, 2, 2, 2, 2, 1)))
+    b.adjust(*((2, 2, 2, 1, 1, 2, 2, 1) if fridge else (2, 2, 2, 1, 2, 2, 1)))
     return b.as_markup()
 
 
@@ -255,7 +256,7 @@ def favorite_view_kb(fav_id: str) -> InlineKeyboardMarkup:
     b.button(text="👨‍🍳 Готовить по шагам", callback_data="ck:start")
     b.button(text="🛒 Список покупок", callback_data=f"sl:o:f{fav_id}")
     b.button(text="🗑 Удалить из избранного", callback_data=f"fav:delete:{fav_id}")
-    b.button(text="⬅️ К списку избранного", callback_data="favorites:open")
+    b.button(text="⬅️ К избранному", callback_data="favorites:open")
     b.adjust(2, 1, 1)
     return b.as_markup()
 

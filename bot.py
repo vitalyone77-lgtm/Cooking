@@ -55,6 +55,8 @@ import bot_shop
 import bot_social
 import bot_diary
 import bot_promo
+import bot_book
+import cards
 import book
 import ui
 import bot_vision
@@ -458,11 +460,9 @@ async def legacy_buttons(message: Message, state: FSMContext):
         await message.answer(HELP_TEXT, reply_markup=kb.help_hub_kb(), parse_mode=None)
         return
     if message.text == kb.LEGACY_BTN_FAVORITES:
-        favs = get_favorites(message.chat.id)
-        if favs:
-            await state.clear()
-            await message.answer(f"⭐ Твоё избранное ({len(favs)}):", reply_markup=kb.favorites_list_kb(favs))
-            return
+        await state.clear()
+        await bot_book.show_favorites(message, 0, "fresh")
+        return
     if message.text in (kb.LEGACY_BTN_DAY_MENU, kb.LEGACY_BTN_WEEK_MENU):
         await show_ready_menus(message, state)
         return
@@ -741,6 +741,10 @@ async def step_confirm_go(callback: CallbackQuery, state: FSMContext):
         return
 
     await status_msg.delete()
+    try:        # фирменная карточка рецепта (рисуется сразу, ИИ не нужен)
+        await callback.message.answer_photo(BufferedInputFile(cards.make_card(dish_title, recipe_text), "recipe.png"))
+    except Exception:  # noqa: BLE001 — картинка не обязательна
+        logger.exception("Карточка рецепта не отправилась")
     # Рецепт и кнопки («Найти продукты в магазине», «В избранное», «Ещё рецепт») — одним сообщением
     sent = await callback.message.answer(recipe_text, reply_markup=recipe_kb(recipe_text, callback.message.chat.id))
     remember_recipe_terms(callback.message.chat.id, sent.message_id, shopping_terms)
@@ -844,6 +848,9 @@ def recipe_kb(recipe_text: str, chat_id: int | None = None):
     if chat_id is not None and plans.diary_on(chat_id):          # «Съел порцию»: только у тех, кто включил дневник
         markup.inline_keyboard.append([InlineKeyboardButton(text="🍽 Съел порцию", callback_data="dy:eat")])
     return markup
+
+
+bot_book.recipe_kb = recipe_kb
 
 
 async def _run_timer(message: Message, step: int, mn: int, mx: int):
@@ -1710,20 +1717,9 @@ async def weekmenu_status(callback: CallbackQuery):
 
 @dp.callback_query(F.data == "favorites:open")
 async def favorites_open(callback: CallbackQuery, state: FSMContext):
-    chat_id = callback.message.chat.id
-    favs = get_favorites(chat_id)
-    if favs:
-        await callback.message.answer(
-            f"⭐ Твоё избранное ({len(favs)}):", reply_markup=kb.favorites_list_kb(favs)
-        )
-    else:
-        await callback.message.answer(
-            "Пока в избранном пусто. Понравившийся рецепт можно сохранить кнопкой "
-            "«⭐ В избранное» после его получения.",
-            reply_markup=kb.cuisine_kb(),
-        )
-        await state.set_state(RecipeForm.cuisine)
+    await state.clear()
     await callback.answer()
+    await bot_book.show_favorites(callback, 0, "auto")
 
 
 @dp.callback_query(F.data == "favorites:back")
@@ -1847,6 +1843,7 @@ dp.include_router(bot_vision.router)
 dp.include_router(bot_social.router)
 dp.include_router(bot_diary.router)
 dp.include_router(bot_promo.router)
+dp.include_router(bot_book.router)
 dp.include_router(fallback_router)
 
 
