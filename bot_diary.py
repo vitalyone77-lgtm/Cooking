@@ -13,6 +13,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 import accounts
 import cards
+import ui
 import charts
 import foods
 import plans
@@ -44,16 +45,16 @@ def summary_line(uid: int) -> str:
     return f"📒 Сегодня: {_fmt(day['kcal'])}" + (f" из ≈{_fmt(en['tdee'])}" if en else "") + " ккал"
 
 
-def diary_view(uid: int) -> tuple[str, InlineKeyboardMarkup]:
+def diary_view(uid: int, note: str = "") -> tuple[str, InlineKeyboardMarkup]:
     day = accounts.diary_day(uid)
     en = accounts.energy_get(uid)
     target = en["tdee"] if en else None
-    lines = ["📒 Дневник питания, сегодня", ""]
+    lines = ([note, ""] if note else []) + ["📒 Дневник питания, сегодня", ""]
     lines.append(f"Съедено: {_fmt(day['kcal'])} ккал" + (f" из ≈{_fmt(target)}" if target else ""))
     if target:
         lines.append(_bar(day["kcal"], target) + ("  (больше расхода)" if day["kcal"] > target else ""))
     else:
-        lines.append("Расход не задан: нажмите «⚙️ Расход», чтобы посчитать примерно.")
+        lines.append("Расход не задан: нажмите «🧮 Расход», чтобы посчитать примерно.")
     lines.append(f"Б {day['protein']:g} г · Ж {day['fat']:g} г · У {day['carb']:g} г")
     lines.append("")
     if day["items"]:
@@ -64,10 +65,9 @@ def diary_view(uid: int) -> tuple[str, InlineKeyboardMarkup]:
     lines += ["", SHORT_NOTE]
     b = InlineKeyboardBuilder()
     b.row(InlineKeyboardButton(text="➕ Из списка", callback_data="dy:cat"), InlineKeyboardButton(text="🔎 Найти", callback_data="dy:find"))
-    b.row(InlineKeyboardButton(text="🍽 Съел рецепт", callback_data="dy:eat"))
-    b.row(InlineKeyboardButton(text="📊 График 7 дн.", callback_data="dy:ch:7"), InlineKeyboardButton(text="📊 14 дн.", callback_data="dy:ch:14"),
-          InlineKeyboardButton(text="30 дн.", callback_data="dy:ch:30"))
-    b.row(InlineKeyboardButton(text="⚙️ Расход", callback_data="dy:calc"), InlineKeyboardButton(text="⬅️ Профиль", callback_data="pf:back"))
+    b.row(InlineKeyboardButton(text="🍽 Съел рецепт", callback_data="dy:eat"),
+          *([] if en else [InlineKeyboardButton(text="🧮 Расход", callback_data="dy:calc")]))
+    b.row(InlineKeyboardButton(text="⬅️ Профиль", callback_data="pf:main"))
     dels = [InlineKeyboardButton(text=f"❌ {i}", callback_data=f"dy:del:{it['id']}") for i, it in enumerate(day["items"][:12], 1)]
     for k in range(0, len(dels), 6):
         b.row(*dels[k:k + 6])
@@ -77,6 +77,20 @@ def diary_view(uid: int) -> tuple[str, InlineKeyboardMarkup]:
 def _open_kb() -> InlineKeyboardMarkup:
     b = InlineKeyboardBuilder()
     b.button(text="📒 Открыть дневник", callback_data="dy:open")
+    b.button(text="⬅️ Профиль", callback_data="pf:main")
+    b.adjust(1)
+    return b.as_markup()
+
+
+def _back_kb() -> InlineKeyboardMarkup:
+    b = InlineKeyboardBuilder()
+    b.button(text="⬅️ Профиль", callback_data="pf:back")
+    return b.as_markup()
+
+
+def _cancel_kb() -> InlineKeyboardMarkup:
+    b = InlineKeyboardBuilder()
+    b.button(text="⬅️ Отмена", callback_data="dy:open")
     return b.as_markup()
 
 
@@ -87,15 +101,9 @@ async def _need_diary(callback: CallbackQuery) -> bool:
     return False
 
 
-async def _show(callback: CallbackQuery, edit: bool = True) -> None:
-    text, markup = diary_view(callback.message.chat.id)
-    if edit:
-        try:
-            await callback.message.edit_text(text, reply_markup=markup, parse_mode=None)
-            return
-        except Exception:  # noqa: BLE001 — сообщение старое или не наше
-            pass
-    await callback.message.answer(text, reply_markup=markup, parse_mode=None)
+async def _show(callback: CallbackQuery, note: str = "") -> None:
+    text, markup = diary_view(callback.message.chat.id, note)
+    await ui.show(callback, text, markup, mode="edit")
 
 
 @router.callback_query(F.data == "dy:open")
@@ -104,7 +112,7 @@ async def open_diary(callback: CallbackQuery, state: FSMContext):
     if not await _need_diary(callback):
         return
     await callback.answer()
-    await _show(callback, edit=False)
+    await _show(callback)
 
 
 @router.callback_query(F.data == "dy:eat")
@@ -130,9 +138,7 @@ async def eat_recipe(callback: CallbackQuery):
         await callback.answer(str(e), show_alert=True)
         return
     usage.event("diary_add", uid)
-    await callback.answer("Записал")
-    await callback.message.answer(f"✅ Записал в дневник одну порцию: {d['title']}, {d['kcal']} ккал.\n{SHORT_NOTE}",
-                                  reply_markup=_open_kb(), parse_mode=None)
+    await callback.answer(f"✅ В дневник: {d['title'][:60]}, {d['kcal']} ккал. Оценка примерная.", show_alert=True)
 
 
 def _f(v) -> float:
@@ -151,12 +157,19 @@ async def categories(callback: CallbackQuery, state: FSMContext):
         return
     await callback.answer()
     b = InlineKeyboardBuilder()
+    by_name = {f["name"]: f for f in foods.FOODS}
+    freq = [by_name[n] for n in accounts.diary_frequent(callback.message.chat.id) if n in by_name]
+    for f in freq:
+        b.button(text=f"⭐ {f['name']} · {foods.portion_kcal(f)}", callback_data=f"dy:f:{f['id']}")
+    b.adjust(1)
+    names = InlineKeyboardBuilder()
     for i, name in enumerate(foods.CATEGORIES):
-        b.button(text=name, callback_data=f"dy:c:{i}")
-    b.adjust(2)
-    b.row(InlineKeyboardButton(text="🔎 Найти по названию", callback_data="dy:find"))
-    b.row(InlineKeyboardButton(text="⬅️ Дневник", callback_data="dy:open"))
-    await callback.message.edit_text("➕ Что вы съели? Выберите раздел.\n\nЗначения справочные, средние.", reply_markup=b.as_markup(), parse_mode=None)
+        names.button(text=name, callback_data=f"dy:c:{i}")
+    names.adjust(2)
+    b.attach(names)
+    b.row(InlineKeyboardButton(text="🔎 Найти", callback_data="dy:find"), InlineKeyboardButton(text="⬅️ Дневник", callback_data="dy:open"))
+    await ui.show(callback, "➕ Что вы съели? " + ("Часто записываете: ⭐. " if freq else "") + "Выберите раздел.\n\nЗначения справочные, средние.",
+                  b.as_markup(), mode="edit")
 
 
 @router.callback_query(F.data.startswith("dy:c:"))
@@ -175,7 +188,7 @@ async def category_items(callback: CallbackQuery):
         b.button(text=f"{f['name']} · {foods.portion_kcal(f)}", callback_data=f"dy:f:{f['id']}")
     b.adjust(1)
     b.row(InlineKeyboardButton(text="⬅️ Разделы", callback_data="dy:cat"))
-    await callback.message.edit_text(f"{title}\n\nВ кнопке: ккал в обычной порции.", reply_markup=b.as_markup(), parse_mode=None)
+    await ui.show(callback, f"{title}\n\nВ кнопке: ккал в обычной порции.", b.as_markup(), mode="edit")
 
 
 def _portion_view(food: dict) -> tuple[str, InlineKeyboardMarkup]:
@@ -199,7 +212,7 @@ async def choose_portion(callback: CallbackQuery):
         return
     await callback.answer()
     text, markup = _portion_view(food)
-    await callback.message.edit_text(text, reply_markup=markup, parse_mode=None)
+    await ui.show(callback, text, markup, mode="edit")
 
 
 def _add_food(uid: int, food: dict, grams: float) -> dict:
@@ -225,7 +238,7 @@ async def add_portion(callback: CallbackQuery):
         await callback.answer(str(e), show_alert=True)
         return
     await callback.answer(f"Записал: {n['kcal']} ккал")
-    await _show(callback)
+    await _show(callback, f"✅ Записал: {n['kcal']} ккал")
 
 
 @router.callback_query(F.data.startswith("dy:g:"))
@@ -237,26 +250,28 @@ async def ask_grams(callback: CallbackQuery, state: FSMContext):
     await state.set_state(DiaryForm.grams)
     await state.update_data(dy_food=food["id"])
     await callback.answer()
-    await callback.message.edit_text(f"{food['name']}: сколько граммов съели? Напишите число, например 180.", parse_mode=None)
+    await ui.show(callback, f"{food['name']}: сколько граммов съели? Напишите число, например 180.",
+                  _cancel_kb(), mode="edit")
 
 
 @router.message(DiaryForm.grams, F.text)
 async def got_grams(message: Message, state: FSMContext):
     uid = message.chat.id
+    await ui.drop(message)
     food = foods.BY_ID.get((await state.get_data()).get("dy_food"))
     m = re.search(r"\d+[.,]?\d*", message.text or "")
     grams = float(m.group(0).replace(",", ".")) if m else 0
     if not food or not 5 <= grams <= 2000:
-        await message.answer("Напишите вес в граммах от 5 до 2000, например 180.", parse_mode=None)
+        await ui.show(message, f"{food['name'] if food else 'Продукт'}: напишите вес в граммах от 5 до 2000, например 180.", _cancel_kb(), mode="tracked")
         return
     await state.clear()
     try:
         n = _add_food(uid, food, grams)
     except ValueError as e:
-        await message.answer(str(e), parse_mode=None)
+        await ui.show(message, str(e), _cancel_kb(), mode="tracked")
         return
-    text, markup = diary_view(uid)
-    await message.answer(f"✅ Записал: {n['kcal']} ккал.\n\n{text}", reply_markup=markup, parse_mode=None)
+    text, markup = diary_view(uid, f"✅ Записал: {n['kcal']} ккал")
+    await ui.show(message, text, markup, mode="tracked")
 
 
 # ---------- поиск и своё блюдо ----------
@@ -267,8 +282,8 @@ async def ask_find(callback: CallbackQuery, state: FSMContext):
         return
     await state.set_state(DiaryForm.find)
     await callback.answer()
-    await callback.message.edit_text("🔎 Напишите название, например «борщ» или «куриная грудка».\n\n"
-                                     "Своё блюдо можно записать сразу с калориями: «пицца 450».", parse_mode=None)
+    await ui.show(callback, "🔎 Напишите название, например «борщ» или «куриная грудка».\n\n"
+                  "Своё блюдо можно записать сразу с калориями: «пицца 450».", _cancel_kb(), mode="edit")
 
 
 def parse_manual(text: str) -> tuple[str, int] | None:
@@ -279,21 +294,22 @@ def parse_manual(text: str) -> tuple[str, int] | None:
 @router.message(DiaryForm.find, F.text)
 async def got_find(message: Message, state: FSMContext):
     uid = message.chat.id
+    await ui.drop(message)
     manual = parse_manual(message.text)
     if manual:
         await state.clear()
         try:
             accounts.diary_add(uid, manual[0], manual[1], src="manual")
         except ValueError as e:
-            await message.answer(str(e), parse_mode=None)
+            await ui.show(message, str(e), _cancel_kb(), mode="tracked")
             return
         usage.event("diary_add", uid)
-        text, markup = diary_view(uid)
-        await message.answer(f"✅ Записал: {manual[0]}, {manual[1]} ккал.\n\n{text}", reply_markup=markup, parse_mode=None)
+        text, markup = diary_view(uid, f"✅ Записал: {manual[0]}, {manual[1]} ккал")
+        await ui.show(message, text, markup, mode="tracked")
         return
     found = foods.search(message.text)
     if not found:
-        await message.answer("Ничего не нашёл. Попробуйте другое слово или запишите сразу с калориями: «пицца 450».", parse_mode=None)
+        await ui.show(message, "Ничего не нашёл. Попробуйте другое слово или запишите сразу с калориями: «пицца 450».", _cancel_kb(), mode="tracked")
         return
     await state.clear()
     b = InlineKeyboardBuilder()
@@ -301,7 +317,7 @@ async def got_find(message: Message, state: FSMContext):
         b.button(text=f"{f['name']} · {foods.portion_kcal(f)}", callback_data=f"dy:f:{f['id']}")
     b.adjust(1)
     b.row(InlineKeyboardButton(text="⬅️ Дневник", callback_data="dy:open"))
-    await message.answer("Нашёл. В кнопке: ккал в обычной порции.", reply_markup=b.as_markup(), parse_mode=None)
+    await ui.show(message, "Нашёл. В кнопке: ккал в обычной порции.", b.as_markup(), mode="tracked")
 
 
 @router.callback_query(F.data.startswith("dy:del:"))
@@ -319,37 +335,27 @@ async def delete_entry(callback: CallbackQuery):
 # ---------- график ----------
 
 @router.callback_query(F.data.startswith("dy:ch:"))
-async def chart(callback: CallbackQuery):
+async def chart(callback: CallbackQuery, state: FSMContext):
+    """Старые кнопки «График»: при дневнике показываем главный экран профиля, без дневника только график веса."""
     uid = callback.message.chat.id
     if not accounts.consent_get(uid):
         await callback.answer("Сначала нажмите «Согласен» в профиле", show_alert=True)
         return
-    try:
-        days = max(2, min(int(callback.data.split(":")[2]), 60))
-    except ValueError:
-        days = 14
-    weights = accounts.weights_list(uid, 120)
-    goal = accounts.goals_get(uid)["weight_goal"]
     if plans.diary_on(uid):
-        series = accounts.diary_series(uid, days)
-        en = accounts.energy_get(uid)
-        st = accounts.diary_stats(series)
-        png = charts.diary_chart(series, en["tdee"] if en else None, weights)
-        cap = (f"В среднем {_fmt(st['avg_kcal'])} ккал в день (по {st['logged']} дн. с записями)" if st["logged"] else "Записей за этот период нет")
-        if en:
-            cap += f". Расход примерно {_fmt(en['tdee'])} ккал"
-        if st["logged"]:
-            cap += f"\nБ {st['avg_protein']:g} · Ж {st['avg_fat']:g} · У {st['avg_carb']:g} г в день"
-        cap += f"\n{SHORT_NOTE}"
-    elif weights:
-        png = charts.weight_chart(weights, goal)
-        cap = "График веса. Оценка динамики, не медицинское заключение."
-    else:
+        from bot_profile import show_profile
+        arg = callback.data.split(":")[2]
+        await callback.answer()
+        days = int(arg) if arg.isdigit() else 30
+        await show_profile(callback, state, edit=True, days=days if days in (7, 30, 90) else 30)
+        return
+    weights = accounts.weights_list(uid, 120)
+    if not weights:
         await callback.answer("Пока нечего показывать: запишите вес или включите дневник", show_alert=True)
         return
     await callback.answer()
     usage.event("diary_chart", uid)
-    await callback.message.answer_photo(BufferedInputFile(png, "chart.png"), caption=cap[:1000])
+    png = charts.weight_chart(weights, accounts.goals_get(uid)["weight_goal"])
+    await ui.show(callback, "График веса. Оценка динамики, не медицинское заключение.", _back_kb(), png, mode="edit")
 
 
 # ---------- расчёт примерного расхода ----------
@@ -371,10 +377,11 @@ async def calc_start(callback: CallbackQuery, state: FSMContext):
     b = InlineKeyboardBuilder()
     b.button(text="Мужской", callback_data="dy:s:m")
     b.button(text="Женский", callback_data="dy:s:f")
-    b.adjust(2)
-    await callback.message.edit_text(
-        "⚙️ Примерный расход калорий в день.\n\nСчитаем по формуле Миффлина — Сан Жеора. Пол, возраст и рост мы не сохраняем: "
-        "останется только итоговое число и уровень активности.\n\nВаш пол?", reply_markup=b.as_markup(), parse_mode=None)
+    b.button(text="⬅️ Отмена", callback_data="pf:set")
+    b.adjust(2, 1)
+    await ui.show(callback,
+        "🧮 Примерный расход калорий в день.\n\nСчитаем по формуле Миффлина — Сан Жеора. Пол, возраст и рост мы не сохраняем: "
+        "останется только итоговое число и уровень активности.\n\nВаш пол?", b.as_markup(), mode="edit")
 
 
 @router.callback_query(F.data.startswith("dy:s:"))
@@ -386,14 +393,21 @@ async def calc_sex(callback: CallbackQuery, state: FSMContext):
     await state.set_state(DiaryForm.age)
     await state.update_data(dy_sex=sex)
     await callback.answer()
-    await callback.message.edit_text("Сколько вам лет? Напишите число.", parse_mode=None)
+    await ui.show(callback, "Сколько вам лет? Напишите число.", _calc_cancel_kb(), mode="edit")
+
+
+def _calc_cancel_kb() -> InlineKeyboardMarkup:
+    b = InlineKeyboardBuilder()
+    b.button(text="⬅️ Отмена", callback_data="pf:set")
+    return b.as_markup()
 
 
 async def _number(message: Message, lo: float, hi: float, hint: str) -> float | None:
+    await ui.drop(message)
     m = re.search(r"\d+[.,]?\d*", message.text or "")
     v = float(m.group(0).replace(",", ".")) if m else None
     if v is None or not lo <= v <= hi:
-        await message.answer(hint, parse_mode=None)
+        await ui.show(message, hint, _calc_cancel_kb(), mode="tracked")
         return None
     return v
 
@@ -405,7 +419,7 @@ async def calc_age(message: Message, state: FSMContext):
         return
     await state.update_data(dy_age=v)
     await state.set_state(DiaryForm.height)
-    await message.answer("Какой у вас рост в сантиметрах? Например 172.", parse_mode=None)
+    await ui.show(message, "Какой у вас рост в сантиметрах? Например 172.", _calc_cancel_kb(), mode="tracked")
 
 
 @router.message(DiaryForm.height, F.text)
@@ -417,7 +431,7 @@ async def calc_height(message: Message, state: FSMContext):
     await state.set_state(DiaryForm.weight)
     ws = accounts.weights_list(message.chat.id, 1)
     tip = f" Последний записанный: {ws[-1]['kg']:g} кг." if ws else ""
-    await message.answer(f"Какой у вас вес в килограммах?{tip}", parse_mode=None)
+    await ui.show(message, f"Какой у вас вес в килограммах?{tip}", _calc_cancel_kb(), mode="tracked")
 
 
 @router.message(DiaryForm.weight, F.text)
@@ -427,7 +441,7 @@ async def calc_weight(message: Message, state: FSMContext):
         return
     await state.update_data(dy_weight=v)
     await state.set_state(DiaryForm.activity)
-    await message.answer("Какая у вас повседневная активность?", reply_markup=_activity_kb(), parse_mode=None)
+    await ui.show(message, "Какая у вас повседневная активность?", _activity_kb(), mode="tracked")
 
 
 @router.callback_query(F.data.startswith("dy:a:"))
@@ -446,8 +460,7 @@ async def calc_activity(callback: CallbackQuery, state: FSMContext):
     accounts.energy_set(callback.message.chat.id, key, tdee)
     usage.event("diary_calc", callback.message.chat.id)
     await callback.answer()
-    await callback.message.edit_text(
+    await ui.show(callback,
         f"Примерный расход: {_fmt(tdee)} ккал в день.\nАктивность: {accounts.ACTIVITY[key][1].lower()}.\n\n"
-        f"Это ориентир: реальный расход может отличаться на 10–20%. Ориентиры по питанию: около {_fmt(tdee)} ккал, чтобы держать вес; "
-        f"на {_fmt(int(tdee * 0.85))}–{_fmt(int(tdee * 0.9))} ккал вес обычно снижается медленно. Сохранены только это число и уровень активности.\n\n"
-        f"{accounts.DIARY_NOTE}", reply_markup=_open_kb(), parse_mode=None)
+        f"Это ориентир: реальный расход может отличаться на 10–20%. Сколько есть, чтобы менять вес, мы не советуем: это вопрос к врачу или диетологу. "
+        f"Сохранены только это число и уровень активности.\n\n{accounts.DIARY_NOTE}", _open_kb(), mode="edit")

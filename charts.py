@@ -35,7 +35,15 @@ def diary_chart(series: list[dict], tdee: int | None = None, weights: list[dict]
     avg = int(round(sum(d["kcal"] for d in logged) / len(logged))) if logged else 0
     wts = [w for w in (weights or []) if series and series[0]["day"] <= w["day"] <= series[-1]["day"]]
 
-    draw.text((60, 30), f"Калории и вес за {n} дн.", font=cards._font(40, True), fill=INK)
+    weekly = n > 31                                             # за 2–3 месяца столбик = среднее за неделю
+    bars = []
+    for k in range(0, n, 7 if weekly else 1):
+        chunk = series[k:k + (7 if weekly else 1)]
+        got = [d for d in chunk if d["n"]]
+        bars.append({"day": chunk[0]["day"], "kcal": int(round(sum(d["kcal"] for d in got) / len(got))) if got else 0, "n": len(got)})
+    nb = len(bars)
+    step = 7 if weekly else 1
+    draw.text((60, 30), f"Калории и вес за {n} дн." + (" (недельные средние)" if weekly else ""), font=cards._font(40, True), fill=INK)
     sub = f"В среднем {_fmt(avg)} ккал в день" if logged else "Записей пока нет"
     if tdee:
         sub += f"  ·  расход примерно {_fmt(tdee)} ккал"
@@ -43,7 +51,7 @@ def diary_chart(series: list[dict], tdee: int | None = None, weights: list[dict]
 
     left, right = 120, (1050 if len(wts) >= 2 else 1140)
     top, bottom = 150, 540
-    ymax = max([d["kcal"] for d in series] + [tdee or 0, 1000]) * 1.12
+    ymax = max([d["kcal"] for d in bars] + [tdee or 0, 1000]) * 1.12
     ymax = int(-(-ymax // 500) * 500)
     Y = lambda v: bottom - (bottom - top) * v / ymax
 
@@ -53,22 +61,24 @@ def diary_chart(series: list[dict], tdee: int | None = None, weights: list[dict]
         draw.line((left, Y(v), right, Y(v)), fill=LINE, width=2)
         draw.text((left - 12 - draw.textlength(_fmt(int(v)), font=f_small), Y(v) - 12), _fmt(int(v)), font=f_small, fill=MUTED)
 
-    slot = (right - left) / max(n, 1)
+    slot = (right - left) / max(nb, 1)
     bw = slot * 0.62
-    f_day = cards._font(20 if n > 14 else 22)
-    for i, d in enumerate(series):
+    f_day = cards._font(20 if nb > 14 else 22)
+    every = 1 if nb <= 14 else 2 if nb <= 20 else 3
+    for i, d in enumerate(bars):
         cx = left + slot * (i + 0.5)
         if d["n"]:
-            color = GREEN_DARK if i == n - 1 else GREEN
+            color = GREEN_DARK if i == nb - 1 else GREEN
             draw.rounded_rectangle((cx - bw / 2, Y(d["kcal"]), cx + bw / 2, bottom), radius=min(8, int(bw / 3)), fill=color)
         else:
             draw.line((cx - bw / 4, bottom - 2, cx + bw / 4, bottom - 2), fill=LINE, width=4)
-        if n <= 14 or i % 3 == 0 or i == n - 1:
+        if i % every == 0 or i == nb - 1:
             dt = datetime.date.fromisoformat(d["day"])
-            label = f"{dt.day}"
+            label = f"{dt.day:02d}.{dt.month:02d}" if weekly else f"{dt.day}"
             draw.text((cx - draw.textlength(label, font=f_day) / 2, bottom + 10), label, font=f_day, fill=INK)
-            wd = WEEKDAYS[dt.weekday()]
-            draw.text((cx - draw.textlength(wd, font=f_small) / 2, bottom + 36), wd, font=f_small, fill=MUTED)
+            if not weekly:
+                wd = WEEKDAYS[dt.weekday()]
+                draw.text((cx - draw.textlength(wd, font=f_small) / 2, bottom + 36), wd, font=f_small, fill=MUTED)
 
     if tdee:                                                    # линия примерного расхода
         _dashed(draw, left, right, Y(tdee), ORANGE)
@@ -86,9 +96,20 @@ def diary_chart(series: list[dict], tdee: int | None = None, weights: list[dict]
         pts = []
         for w in wts:
             idx = (datetime.date.fromisoformat(w["day"]) - first).days
-            pts.append((left + slot * (idx + 0.5), YW(w["kg"]), w["kg"]))
-        draw.line([(x, y) for x, y, _ in pts], fill=INK, width=4, joint="curve")
-        for x, y, _ in pts:
+            pts.append((left + slot * (idx + 0.5) / step, YW(w["kg"]), w["kg"], idx))
+        if len(pts) >= 3 and pts[-1][3] - pts[0][3] >= 14:      # линия тренда (по методу наименьших квадратов)
+            mx, my = sum(p[3] for p in pts) / len(pts), sum(p[2] for p in pts) / len(pts)
+            den = sum((p[3] - mx) ** 2 for p in pts)
+            k = sum((p[3] - mx) * (p[2] - my) for p in pts) / den if den else 0
+            x0, x1 = pts[0][0], pts[-1][0]
+            y0, y1 = YW(my + k * (pts[0][3] - mx)), YW(my + k * (pts[-1][3] - mx))
+            steps = max(int((x1 - x0) // 24), 1)
+            for s in range(steps):
+                if s % 2 == 0:
+                    draw.line((x0 + (x1 - x0) * s / steps, y0 + (y1 - y0) * s / steps, x0 + (x1 - x0) * (s + 1) / steps,
+                               y0 + (y1 - y0) * (s + 1) / steps), fill=MUTED, width=3)
+        draw.line([(x, y) for x, y, _, _ in pts], fill=INK, width=4, joint="curve")
+        for x, y, _, _ in pts:
             draw.ellipse((x - 7, y - 7, x + 7, y + 7), fill=BG, outline=INK, width=4)
         for v in (lo + pad, (lo + hi) / 2, hi - pad):
             draw.text((right + 14, YW(v) - 12), f"{v:.1f}", font=f_small, fill=MUTED)

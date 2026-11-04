@@ -750,6 +750,16 @@ def diary_series(uid, days: int = 14, end: str | None = None) -> list[dict]:
     return out
 
 
+def diary_frequent(uid, limit: int = 4) -> list[str]:
+    """Названия продуктов из справочника, которые человек записывает чаще всего (за последние 90 дней)."""
+    rows = _q("SELECT title FROM diary WHERE uid=? AND src='list' ORDER BY id DESC LIMIT 300", (str(uid),), all_=True)
+    count: dict[str, int] = {}
+    for (t,) in rows:
+        name = t.split(" (")[0]
+        count[name] = count.get(name, 0) + 1
+    return [n for n, _ in sorted(count.items(), key=lambda kv: -kv[1])[:limit]]
+
+
 def diary_stats(series: list[dict]) -> dict:
     """Среднее за день по дням, где есть записи (дни без записей не считаем «голодными»)."""
     logged = [d for d in series if d["n"]]

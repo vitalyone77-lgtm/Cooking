@@ -54,6 +54,7 @@ import bot_shop
 import bot_social
 import bot_diary
 import bot_promo
+import ui
 import bot_vision
 import accounts
 
@@ -302,12 +303,17 @@ def _input_hints(chat_id: int) -> str:
     return ("\n\n" + "\n".join(hints)) if hints else ""
 
 
-async def show_main_menu(message: Message, state: FSMContext, intro: str = "Что готовим? Выбери тип питания/кухни:"):
+async def show_main_menu(message: Message, state: FSMContext, intro: str = "Что готовим? Выбери тип питания/кухни:", event=None):
+    """event — нажатая кнопка: если она под экраном бота, экран правится на месте, под рецептом приходит новое сообщение."""
     await state.clear()
     await ensure_reply_kb(message)
     last = get_last_recipe(message.chat.id)
     intro += _input_hints(message.chat.id) + _left_line(message.chat.id, "recipe")
-    await message.answer(intro, reply_markup=kb.cuisine_kb(fridge=plans.feature_on(message.chat.id, "photo_recipe"), last_title=(last or {}).get("title") or ("Рецепт" if last else None)))
+    markup = kb.cuisine_kb(fridge=plans.feature_on(message.chat.id, "photo_recipe"), last_title=(last or {}).get("title") or ("Рецепт" if last else None))
+    if event is not None:
+        await ui.show(event, intro, markup, mode="auto", parse_mode=ParseMode.MARKDOWN)
+    else:
+        await message.answer(intro, reply_markup=markup)
     await state.set_state(RecipeForm.cuisine)
 
 
@@ -403,19 +409,19 @@ async def cmd_app(message: Message):
 
 @dp.callback_query(F.data == "confirm:restart")
 async def restart(callback: CallbackQuery, state: FSMContext):
-    await show_main_menu(callback.message, state, "Хорошо, начнём заново! Выбери тип питания/кухни:")
+    await show_main_menu(callback.message, state, "Хорошо, начнём заново! Выбери тип питания/кухни:", event=callback)
     await callback.answer()
 
 
 @dp.callback_query(F.data == "menu:open")
 async def menu_open(callback: CallbackQuery, state: FSMContext):
-    await show_main_menu(callback.message, state)
+    await show_main_menu(callback.message, state, event=callback)
     await callback.answer()
 
 
 @dp.callback_query(F.data == "help:open")
 async def help_open(callback: CallbackQuery):
-    await callback.message.answer(HELP_TEXT, reply_markup=kb.help_hub_kb(), parse_mode=None)
+    await ui.show(callback, HELP_TEXT, kb.help_hub_kb(), mode="auto")
     await callback.answer()
 
 

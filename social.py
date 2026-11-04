@@ -6,6 +6,7 @@
 вызывает /postvk, смотрит черновик и нажимает «Опубликовать». Ключи берутся только из .env, в логи и сообщения
 об ошибках они не попадают.
 """
+import asyncio
 import logging
 import random
 import re
@@ -16,6 +17,7 @@ from zoneinfo import ZoneInfo
 import httpx
 
 import accounts
+import cards
 import config
 import images
 from ai import generate_recipe
@@ -24,19 +26,28 @@ from shopping import extract_dish_title, extract_shopping_terms
 
 logger = logging.getLogger(__name__)
 
-# тема дня недели: понедельник = 0
-WEEKDAY_HINTS = [
-    "быстрый и сытный завтрак",
-    "ужин за 30 минут",
-    "суп",
-    "блюдо из курицы",
-    "лёгкий ужин на пятницу",
-    "что-то вкусное на выходные, например запеканка или выпечка",
-    "семейный обед из доступных продуктов",
+# разделы «рецепта дня»: чередуются по дате (завтрак, обед, ужин, перекус, десерт), у каждого свои хештеги
+SECTIONS = [
+    ("завтрак", "быстрый и сытный завтрак на каждый день, например каша, сырники, омлет или запеканка", "#завтрак #завтракдома #быстрыйзавтрак"),
+    ("обед", "обед из доступных продуктов: суп или горячее с гарниром", "#обед #супы #обеддома"),
+    ("ужин", "ужин за 30 минут, сытный, но не тяжёлый", "#ужин #ужиндома #быстрыйужин"),
+    ("перекус", "лёгкий перекус или закуска, которую можно взять с собой", "#перекус #закуски #пп"),
+    ("десерт", "десерт или выпечка без лишних хлопот, можно с меньшим количеством сахара", "#десерт #выпечка #сладкое"),
 ]
-HASHTAGS = "#рецепты #рецептдня #едадома #чтоприготовить #кбжу #пп #меню #ужин"
+BASE_TAGS = "#рецепты #рецептдня #едадома #чтоприготовить #кбжу"
+
+
+def section_for(variant: int = 0, day: "date | None" = None) -> tuple[str, str, str]:
+    """Раздел на сегодня: (название, подсказка для ИИ, хештеги раздела). variant сдвигает раздел («Другой рецепт»)."""
+    d = day or datetime.now(ZoneInfo(config.REMINDER_TIMEZONE)).date()
+    return SECTIONS[(d.toordinal() + variant) % len(SECTIONS)]
+
+
+def hashtags(section_tags: str) -> str:
+    return f"{BASE_TAGS} {section_tags}"
 HISTORY_KEY = "social:history"
 LAST_KEY = "social:last"
+RETRY_PAUSE = 3          # секунд до повторной попытки, если ВК не взял превью ссылки
 
 
 _gid_cache: dict[str, int] = {}
@@ -130,8 +141,7 @@ async def build_post(variant: int = 0) -> tuple[str, str]:
 
 async def build_post_full(variant: int = 0) -> dict:
     """-> {"title", "body" (рецепт без ссылок, для страницы), "text" (пост)}. RuntimeError, если ИИ не ответил."""
-    weekday = datetime.now(ZoneInfo(config.REMINDER_TIMEZONE)).weekday()
-    hint = WEEKDAY_HINTS[(weekday + variant) % len(WEEKDAY_HINTS)]
+    section, hint, tags = section_for(variant)
     data = {"cuisine": "classic", "macro_goal": "", "preferred": "", "excluded": "", "time": "30 мин", "servings": 2,
             "portion": "normal", "appliance": ["stove"], "appliance_labels": ["Плита"],
             "variety_hint": hint, "avoid_titles": _history()}
@@ -142,8 +152,8 @@ async def build_post_full(variant: int = 0) -> dict:
         raise RuntimeError("ИИ не смог составить рецепт")
     title = extract_dish_title(recipe)
     body = plain(recipe)
-    text = f"Рецепт дня\n\n{body}\n\n{links_block()}\n\n{HASHTAGS}"
-    return {"title": title, "body": body, "text": text[:15000]}
+    text = f"Рецепт дня ({section})\n\n{body}\n\n{links_block()}\n\n{hashtags(tags)}"
+    return {"title": title, "body": body, "text": text[:15000], "section": section}
 
 
 def _photo_error(data: dict) -> None:
@@ -179,7 +189,8 @@ async def build_image(title: str, text: str) -> bytes | None:
 
 
 async def post_vk(text: str, attachment: str | None = None) -> int:
-    """Запись на стену сообщества от имени сообщества. -> номер записи. RuntimeError — без ключа в тексте."""
+    """Запись на стену сообщества от имени сообщества. -> номер записи. RuntimeError — без ключа в тексте.
+    Если ВК не принял превью ссылки (код 100, link_photo_sizing_rule), сбрасываем его кэш для этой страницы и пробуем ещё раз."""
     if not configured_vk():
         raise RuntimeError("ВКонтакте не настроен: нет VK_GROUP_ID или VK_GROUP_TOKEN")
     try:
@@ -189,8 +200,17 @@ async def post_vk(text: str, attachment: str | None = None) -> int:
                        "access_token": config.VK_GROUP_TOKEN, "v": config.VK_API_VERSION}
             if attachment:
                 payload["attachments"] = attachment
-            resp = await client.post(f"{config.VK_API_URL.rstrip('/')}/method/wall.post", data=payload)
-            data = resp.json()
+            url = f"{config.VK_API_URL.rstrip('/')}/method/wall.post"
+            data = (await client.post(url, data=payload)).json()
+            err = data.get("error") or {}
+            if err.get("error_code") == 100 and "link_photo" in str(err.get("error_msg", "")) and attachment:
+                try:
+                    await client.post(f"{config.VK_API_URL.rstrip('/')}/method/pages.clearCache",
+                                      data={"url": attachment, "access_token": config.VK_GROUP_TOKEN, "v": config.VK_API_VERSION})
+                except httpx.HTTPError:
+                    pass
+                await asyncio.sleep(RETRY_PAUSE)
+                data = (await client.post(url, data=payload)).json()
     except (httpx.HTTPError, ValueError) as e:
         raise RuntimeError(f"ВКонтакте не ответил ({type(e).__name__})") from None
     if "error" in data:
@@ -213,6 +233,8 @@ async def publish(bot, title: str, text: str, image: bytes | None = None, body: 
     out = {"vk": None, "tg": None, "errors": []}
     if configured_vk():
         attachment = None
+        if not image and config.VK_IMAGE_MODE != "upload":
+            image = cards.make_card(title, body or text)      # без картинки ВК не принимает превью ссылки: рисуем карточку сразу
         if image and config.VK_IMAGE_MODE == "upload":
             try:
                 attachment = await vk_photo_attachment(image)

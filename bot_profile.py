@@ -14,6 +14,7 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMar
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 import accounts
+import ui
 import config
 import plans
 import usage
@@ -74,10 +75,7 @@ def _profile_view(uid: int) -> tuple[str, InlineKeyboardMarkup]:
     consent = accounts.consent_get(uid)
     g = accounts.goals_get(uid) if consent else None
     diary_on = bool(consent and "diary" in g["feats"])
-    lines = ["👤 *Профиль*", ""]
-    if diary_on:
-        from bot_diary import summary_line
-        lines += [summary_line(uid), ""]
+    lines = ["⚙️ *Настройки*" if diary_on else "👤 *Профиль*", ""]
     lines.append(plans.status_text(uid))
     if shelf_on:
         shelf = accounts.shelf_list(uid)
@@ -99,11 +97,9 @@ def _profile_view(uid: int) -> tuple[str, InlineKeyboardMarkup]:
         lines += ["", "ℹ️ " + accounts.CONSENT_TEXT]
     lines += ["", "_Аллергии и продукты, которые не нужны на один раз, пиши в анкете в строке «Исключить» — я предложу их кнопкой «Как в прошлый раз»._"]
     rows: list[list[tuple[str, str]]] = []
-    if diary_on:
-        rows.append([("📒 Дневник", "dy:open"), ("📊 График", "dy:ch:14")])
     if consent:
         rows.append([("🚫 Не использовать" if mem else "💎 Не использовать", "pf:never"), ("🎯 Цель КБЖУ", "pf:goal")])
-        rows.append([("⚖️ Вес", "pf:weight")] + ([] if diary_on else [("📊 График", "dy:ch:30")] if accounts.weights_list(uid, 2) else [])
+        rows.append([("⚖️ Вес", "pf:weight")] + ([("🧮 Расход", "dy:calc")] if diary_on else [("📊 График", "dy:ch:30")] if accounts.weights_list(uid, 2) else [])
                     + ([("🏠 Моя полка", "pf:shelf")] if shelf_on else []))
         rows.append([("⚙️ Функции", "pf:fts"), ("🗑 Удалить мои данные", "pf:del")])
     else:
@@ -116,11 +112,54 @@ def _profile_view(uid: int) -> tuple[str, InlineKeyboardMarkup]:
     devs = accounts.devices_of(uid)
     rows.append([("🔕 Напоминания" if reminders_enabled(uid) else "🔔 Напоминания", "pf:rem")]
                 + ([(f"🔓 Выйти на сайте ({devs})", "pf:unall")] if devs else []))
-    rows.append([("❓ Справка", "help:open"), ("⬅️ Меню", "menu:open")])
+    rows.append([("❓ Справка", "help:open"), ("⬅️ Профиль" if diary_on else "⬅️ Меню", "pf:main" if diary_on else "menu:open")])
     b = InlineKeyboardBuilder()
     for row in rows:
         b.row(*[InlineKeyboardButton(text=t, callback_data=d) for t, d in row])
     return "\n".join(lines), b.as_markup()
+
+
+PERIODS = (30, 90, 7)       # кнопка «период» листает по кругу; по умолчанию месяц (за неделю вес почти не меняется)
+
+
+def _next_period(days: int) -> int:
+    return PERIODS[(PERIODS.index(days) + 1) % len(PERIODS)] if days in PERIODS else 30
+
+
+def _profile_main(uid: int, days: int = 30) -> tuple[str, InlineKeyboardMarkup, bytes | None]:
+    """Главный экран профиля при включённом дневнике: график калорий и веса картинкой, коротко итоги, три ряда кнопок."""
+    import charts
+    from bot_diary import summary_line
+    days = days if days in PERIODS else 30
+    series = accounts.diary_series(uid, days)
+    st = accounts.diary_stats(series)
+    en = accounts.energy_get(uid)
+    weights = accounts.weights_list(uid, days + 5)
+    first = series[0]["day"]
+    weights = [w for w in weights if w["day"] >= first]
+    lines = ["👤 Профиль", summary_line(uid)]
+    if st["logged"]:
+        lines.append(f"В среднем {st['avg_kcal']:,} ккал в день".replace(",", " ") + f" (дней с записями: {st['logged']} из {days})")
+    if weights:
+        delta = weights[-1]["kg"] - weights[0]["kg"]
+        lines.append(f"⚖️ Вес {weights[-1]['kg']:g} кг" + (f", за период {delta:+.1f} кг" if len(weights) > 1 else ""))
+    else:
+        lines.append("⚖️ Вес пока не записан")
+    if not en:
+        lines.append("Расход не задан: «⚙️ Настройки → Расход».")
+    lines.append(plans.status_text(uid).split("\n")[0][:160])
+    lines.append("Оценка приблизительная, не врач и не диетолог.")
+    png = None
+    if st["logged"] or len(weights) >= 2:
+        png = charts.diary_chart(series, en["tdee"] if en else None, weights)
+    else:
+        lines.insert(2, "График появится, когда будут записи о еде или вес за разные дни.")
+    b = InlineKeyboardBuilder()
+    b.row(InlineKeyboardButton(text="📒 Записать еду", callback_data="dy:open"), InlineKeyboardButton(text="⚖️ Вес", callback_data="pf:weight"))
+    b.row(InlineKeyboardButton(text=f"📅 {days} дн. ▸ {_next_period(days)}", callback_data=f"pf:p:{_next_period(days)}"),
+          InlineKeyboardButton(text="⚙️ Настройки", callback_data="pf:set"))
+    b.row(InlineKeyboardButton(text="⬅️ Меню", callback_data="menu:open"))
+    return "\n".join(lines), b.as_markup(), png
 
 
 def _plural(n: int, one: str, few: str, many: str) -> str:
@@ -131,23 +170,31 @@ def _plural(n: int, one: str, few: str, many: str) -> str:
     return many
 
 
-async def show_profile(message: Message, state: FSMContext | None = None, edit: bool = False):
+def _diary_enabled(uid: int) -> bool:
+    return plans.diary_on(uid)
+
+
+async def show_profile(event, state: FSMContext | None = None, edit: bool = False, settings: bool = False, days: int = 30,
+                       mode: str | None = None):
+    """Профиль. Включён дневник: главный экран это график картинкой, а прежние кнопки лежат в «⚙️ Настройки» (settings=True).
+    event — Message или CallbackQuery. edit=True: править нажатое сообщение; иначе удалить прошлый экран и прислать новый."""
+    import ui
+    uid = (event.message if isinstance(event, CallbackQuery) else event).chat.id
     if state:
         await state.clear()
-    text, markup = _profile_view(message.chat.id)
-    if edit:
-        try:
-            await message.edit_text(text, reply_markup=markup)
-            return
-        except Exception:  # noqa: BLE001 — сообщение старое/не наше — пришлём новое
-            pass
-    await message.answer(text, reply_markup=markup)
+    mode = mode or ("edit" if edit else "fresh")
+    if _diary_enabled(uid) and not settings:
+        text, markup, png = _profile_main(uid, days)
+        await ui.show(event, text, markup, png, mode=mode)
+    else:
+        text, markup = _profile_view(uid)
+        await ui.show(event, text, markup, None, mode=mode, parse_mode="Markdown")
 
 
 @router.callback_query(F.data == "profile:open")
 async def profile_open(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
-    await show_profile(callback.message, state)
+    await show_profile(callback, state, mode="auto")        # кнопка бывает и под рецептом: тогда профиль приходит новым сообщением
 
 
 @router.message(Command("profile"))
@@ -157,8 +204,28 @@ async def cmd_profile(message: Message, state: FSMContext):
 
 @router.callback_query(F.data == "pf:back")
 async def profile_back(callback: CallbackQuery, state: FSMContext):
+    """Назад из подразделов: при дневнике это «Настройки», иначе обычный профиль."""
     await callback.answer()
-    await show_profile(callback.message, state, edit=True)
+    await show_profile(callback, state, edit=True, settings=True)
+
+
+@router.callback_query(F.data == "pf:main")
+async def profile_main(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()
+    await show_profile(callback, state, edit=True)
+
+
+@router.callback_query(F.data == "pf:set")
+async def profile_settings(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()
+    await show_profile(callback, state, edit=True, settings=True)
+
+
+@router.callback_query(F.data.startswith("pf:p:"))
+async def profile_period(callback: CallbackQuery, state: FSMContext):
+    arg = callback.data.split(":")[2]
+    await callback.answer()
+    await show_profile(callback, state, edit=True, days=int(arg) if arg.isdigit() else 30)
 
 
 def _cancel_kb() -> InlineKeyboardMarkup:
@@ -172,7 +239,7 @@ async def profile_reminders(callback: CallbackQuery, state: FSMContext):
     uid = callback.message.chat.id
     set_reminders_enabled(uid, not reminders_enabled(uid))
     await callback.answer("Готово")
-    await show_profile(callback.message, state, edit=True)
+    await show_profile(callback, state, edit=True, settings=True)
 
 
 # ---------- справка по разделам и «написать разработчику» ----------
@@ -223,13 +290,13 @@ def _feedback_kind_kb() -> InlineKeyboardMarkup:
 async def feedback_start(callback: CallbackQuery, state: FSMContext):
     await state.clear()
     await callback.answer()
-    await callback.message.answer("✉️ Что вы хотите отправить разработчику?", reply_markup=_feedback_kind_kb(), parse_mode=None)
+    await ui.show(callback, "✉️ Что вы хотите отправить разработчику?", _feedback_kind_kb(), mode="edit")
 
 
 @router.message(Command("feedback"))
 async def cmd_feedback(message: Message, state: FSMContext):
     await state.clear()
-    await message.answer("✉️ Что вы хотите отправить разработчику?", reply_markup=_feedback_kind_kb(), parse_mode=None)
+    await ui.show(message, "✉️ Что вы хотите отправить разработчику?", _feedback_kind_kb(), mode="fresh")
 
 
 @router.callback_query(F.data.startswith("fb:k:"))
@@ -259,10 +326,11 @@ async def feedback_text(message: Message, state: FSMContext):
     data = await state.get_data()
     kind = data.get("fb_kind", "idea")
     uid = message.chat.id
+    await ui.drop(message)
     try:
         fid = accounts.feedback_add(uid, kind, message.text, "", "bot")
     except ValueError as e:
-        await message.answer(f"😔 {e}", parse_mode=None)
+        await ui.show(message, f"😔 {e}", _cancel_kb_help(), mode="tracked")
         if "много" in str(e):
             await state.clear()
         return
@@ -270,7 +338,7 @@ async def feedback_text(message: Message, state: FSMContext):
     usage.event("feedback", uid)
     username = message.from_user.username if message.from_user else ""
     await feedback.notify_bot(message.bot, feedback.admin_text(fid, kind, "bot", uid, message.text, "", username or ""))
-    await message.answer("✅ Спасибо! Сообщение отправлено разработчику.", parse_mode=None)
+    await ui.show(message, "✅ Спасибо! Сообщение отправлено разработчику.", _help_back_kb(), mode="tracked")
 
 
 # ---------- данные профиля: согласие, «не использовать», цель, вес ----------
@@ -287,7 +355,7 @@ async def profile_consent(callback: CallbackQuery, state: FSMContext):
     accounts.consent_set(callback.message.chat.id)
     usage.event("profile_consent", callback.message.chat.id)
     await callback.answer("Спасибо!")
-    await show_profile(callback.message, state, edit=True)
+    await show_profile(callback, state, edit=True)
 
 
 @router.callback_query(F.data == "pf:trial")
@@ -298,10 +366,9 @@ async def profile_trial(callback: CallbackQuery, state: FSMContext):
         await callback.answer("Пробный период уже использован", show_alert=True)
         return
     usage.event("trial_start", uid)
-    await callback.answer()
-    await callback.message.answer(f"🎁 Подключил тариф «{plans.PREMIUM_NAME}» на {int(plans.cfg('TRIAL_DAYS') or 0)} дней: "
-                                  "пробуй все функции приложения.", parse_mode=None)
-    await show_profile(callback.message, state)
+    await callback.answer(f"🎁 Подключил тариф «{plans.PREMIUM_NAME}» на {int(plans.cfg('TRIAL_DAYS') or 0)} дней: "
+                          "пробуй все функции приложения.", show_alert=True)
+    await show_profile(callback, state, edit=True, settings=True)
 
 
 @router.callback_query(F.data == "pf:never")
@@ -319,6 +386,7 @@ async def profile_never(callback: CallbackQuery, state: FSMContext):
 @router.message(ProfileForm.never, F.text)
 async def profile_set_never(message: Message, state: FSMContext):
     uid = message.chat.id
+    await ui.drop(message)
     if not accounts.consent_get(uid) or not plans.has_feature(uid, "memory"):
         await state.clear()
         return
@@ -327,8 +395,7 @@ async def profile_set_never(message: Message, state: FSMContext):
     accounts.goals_set(uid, never="" if clear else message.text,
                        feats=[f for f in g["feats"] if f != "never"] + ([] if clear else ["never"]))
     usage.event("profile_edit", uid)
-    await message.answer("✅ Сохранил." if not clear else "✅ Список очищен.", parse_mode=None)
-    await show_profile(message, state)
+    await show_profile(message, state, mode="tracked", settings=True)
 
 
 @router.callback_query(F.data == "pf:goal")
@@ -355,11 +422,10 @@ async def profile_set_goal(message: Message, state: FSMContext):
         cleared = all(v is None for v in fields.values())
         accounts.goals_set(uid, **fields, feats=[f for f in g["feats"] if f != "macro"] + ([] if cleared else ["macro"]))
     except ValueError as e:
-        await message.answer(f"😔 {e}", parse_mode=None)
+        await ui.show(message, f"😔 {e}", _cancel_kb(), mode="tracked")
         return
     usage.event("profile_edit", uid)
-    await message.answer("✅ Цель сохранена. Она предлагается на шаге «Цель по КБЖУ»." if not cleared else "✅ Цель убрана.", parse_mode=None)
-    await show_profile(message, state)
+    await show_profile(message, state, mode="tracked", settings=True)
 
 
 @router.callback_query(F.data == "pf:weight")
@@ -377,6 +443,7 @@ async def profile_weight(callback: CallbackQuery, state: FSMContext):
 @router.message(ProfileForm.weight, F.text)
 async def profile_set_weight(message: Message, state: FSMContext):
     uid = message.chat.id
+    await ui.drop(message)
     if not accounts.consent_get(uid):
         await state.clear()
         return
@@ -393,11 +460,10 @@ async def profile_set_weight(message: Message, state: FSMContext):
             if "weight" not in g["feats"]:
                 accounts.goals_set(uid, feats=g["feats"] + ["weight"])
     except ValueError as e:
-        await message.answer(f"😔 {e}. Напиши число, например 82.5", parse_mode=None)
+        await ui.show(message, f"😔 {e}. Напиши число, например 82.5", _cancel_kb(), mode="tracked")
         return
     usage.event("weight_add", uid)
-    await message.answer("✅ Записал.", parse_mode=None)
-    await show_profile(message, state)
+    await show_profile(message, state, mode="tracked")
 
 
 @router.callback_query(F.data == "pf:del")
@@ -417,7 +483,7 @@ async def profile_delete_yes(callback: CallbackQuery, state: FSMContext):
     accounts.delete_my_data(callback.message.chat.id)
     usage.event("profile_delete", callback.message.chat.id)
     await callback.answer("Удалено")
-    await show_profile(callback.message, state, edit=True)
+    await show_profile(callback, state, edit=True)
 
 
 # ---------- функции профиля: включаются галочками ----------
@@ -611,7 +677,7 @@ async def link_reject(callback: CallbackQuery):
 async def unlink_all(callback: CallbackQuery, state: FSMContext):
     n = accounts.unlink_all(callback.message.chat.id)
     await callback.answer(f"Отвязано устройств: {n}", show_alert=True)
-    await show_profile(callback.message, state, edit=True)
+    await show_profile(callback, state, edit=True, settings=True)
 
 
 # ---------- подписка и оплата ----------
@@ -730,24 +796,24 @@ async def cmd_paysupport(message: Message):
 async def promo_start(callback: CallbackQuery, state: FSMContext):
     await state.set_state(ProfileForm.promo)
     await callback.answer()
-    await callback.message.answer("🎟 Напиши промокод:", reply_markup=_cancel_kb(), parse_mode=None)
+    await ui.show(callback, "🎟 Напиши промокод:", _cancel_kb(), mode="edit")
 
 
 @router.message(ProfileForm.promo, F.text)
 async def promo_enter(message: Message, state: FSMContext):
     code = message.text.strip()[:32]
     days = plans.promo_days(code)
+    await ui.drop(message)
     await state.clear()
     if not days:
-        await message.answer("😔 Такого промокода нет.", parse_mode=None)
+        note = "😔 Такого промокода нет."
     elif not accounts.use_promo(message.chat.id, code):
-        await message.answer("Этот промокод ты уже использовал 🙂", parse_mode=None)
+        note = "Этот промокод ты уже использовал 🙂"
     else:
         until = accounts.grant_days(message.chat.id, days, "promo:" + code.upper())
         usage.event("promo", message.chat.id)
-        await message.answer(f"🎉 Промокод принят! Полный доступ до {time.strftime('%d.%m.%Y', time.localtime(until))}.",
-                             parse_mode=None)
-    await show_profile(message)
+        note = f"🎉 Промокод принят! Полный доступ до {time.strftime('%d.%m.%Y', time.localtime(until))}."
+    await ui.show(message, note, _cancel_kb(), mode="tracked")
 
 
 @router.message(Command("grant"))
