@@ -16,6 +16,7 @@ from aiogram.exceptions import TelegramBadRequest, TelegramRetryAfter
 from aiogram.filters import CommandStart, Command, CommandObject, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.types import Message, CallbackQuery, BotCommand, ErrorEvent, BufferedInputFile, InlineKeyboardButton
 
 import config
@@ -1844,6 +1845,14 @@ dp.include_router(fallback_router)
 
 @fallback_router.message(StateFilter(None), F.text)
 async def fallback_text(message: Message, state: FSMContext):
+    mark = accounts.sess_get(f"dycalc:{message.chat.id}")
+    if mark and mark.get("step") == "body" and plans.diary_on(message.chat.id):      # расчёт расхода прервался (бот обновлялся)
+        accounts.sess_set(f"dycalc:{message.chat.id}", {"step": "lost"})
+        b = InlineKeyboardBuilder()
+        b.button(text="🧮 Рассчитать расход заново", callback_data="dy:calc")
+        await message.answer("Расчёт расхода прервался: бот обновлялся и забыл, на каком вы шаге. Нажмите кнопку и начните заново, "
+                             "это быстро: три числа в одном сообщении.", reply_markup=b.as_markup(), parse_mode=None)
+        return
     await message.answer("Не совсем понял 🙂 Вот меню:", reply_markup=kb.main_reply_kb())
     _kb_sent(message.chat.id)
     await show_main_menu(message, state)

@@ -390,10 +390,12 @@ async def calc_sex(callback: CallbackQuery, state: FSMContext):
     if sex not in ("m", "f"):
         await callback.answer()
         return
-    await state.set_state(DiaryForm.age)
+    await state.set_state(DiaryForm.body)
     await state.update_data(dy_sex=sex)
+    accounts.sess_set(f"dycalc:{callback.message.chat.id}", {"step": "body"})      # только отметка шага, без цифр
     await callback.answer()
-    await ui.show(callback, "Сколько вам лет? Напишите число.", _calc_cancel_kb(), mode="edit")
+    await ui.show(callback, "Напишите одним сообщением три числа через пробел: возраст, рост (см), вес (кг).\n\n"
+                  "Например: 38 175 82", _calc_cancel_kb(), mode="edit")
 
 
 def _calc_cancel_kb() -> InlineKeyboardMarkup:
@@ -402,44 +404,32 @@ def _calc_cancel_kb() -> InlineKeyboardMarkup:
     return b.as_markup()
 
 
-async def _number(message: Message, lo: float, hi: float, hint: str) -> float | None:
+BODY_HINT = "Нужно три числа через пробел: возраст, рост в сантиметрах и вес в килограммах. Например: 38 175 82"
+
+
+def parse_body(text: str) -> tuple[float, float, float] | str:
+    """«38 175 82» -> (возраст, рост, вес) или текст подсказки, что не так."""
+    nums = re.findall(r"\d+(?:[.,]\d+)?", text or "")
+    if len(nums) != 3:
+        return BODY_HINT
+    age, height, weight = (float(n.replace(",", ".")) for n in nums)
+    if not 14 <= age <= 90:
+        return "Возраст должен быть от 14 до 90. " + BODY_HINT
+    if not 120 <= height <= 230:
+        return "Рост должен быть от 120 до 230 см. " + BODY_HINT
+    if not 30 <= weight <= 250:
+        return "Вес должен быть от 30 до 250 кг. " + BODY_HINT
+    return age, height, weight
+
+
+@router.message(DiaryForm.body, F.text)
+async def calc_body(message: Message, state: FSMContext):
     await ui.drop(message)
-    m = re.search(r"\d+[.,]?\d*", message.text or "")
-    v = float(m.group(0).replace(",", ".")) if m else None
-    if v is None or not lo <= v <= hi:
-        await ui.show(message, hint, _calc_cancel_kb(), mode="tracked")
-        return None
-    return v
-
-
-@router.message(DiaryForm.age, F.text)
-async def calc_age(message: Message, state: FSMContext):
-    v = await _number(message, 14, 90, "Возраст от 14 до 90, напишите число.")
-    if v is None:
+    got = parse_body(message.text)
+    if isinstance(got, str):
+        await ui.show(message, got, _calc_cancel_kb(), mode="tracked")
         return
-    await state.update_data(dy_age=v)
-    await state.set_state(DiaryForm.height)
-    await ui.show(message, "Какой у вас рост в сантиметрах? Например 172.", _calc_cancel_kb(), mode="tracked")
-
-
-@router.message(DiaryForm.height, F.text)
-async def calc_height(message: Message, state: FSMContext):
-    v = await _number(message, 120, 230, "Рост от 120 до 230 см, напишите число.")
-    if v is None:
-        return
-    await state.update_data(dy_height=v)
-    await state.set_state(DiaryForm.weight)
-    ws = accounts.weights_list(message.chat.id, 1)
-    tip = f" Последний записанный: {ws[-1]['kg']:g} кг." if ws else ""
-    await ui.show(message, f"Какой у вас вес в килограммах?{tip}", _calc_cancel_kb(), mode="tracked")
-
-
-@router.message(DiaryForm.weight, F.text)
-async def calc_weight(message: Message, state: FSMContext):
-    v = await _number(message, 30, 250, "Вес от 30 до 250 кг, напишите число.")
-    if v is None:
-        return
-    await state.update_data(dy_weight=v)
+    await state.update_data(dy_age=got[0], dy_height=got[1], dy_weight=got[2])
     await state.set_state(DiaryForm.activity)
     await ui.show(message, "Какая у вас повседневная активность?", _activity_kb(), mode="tracked")
 
@@ -457,6 +447,7 @@ async def calc_activity(callback: CallbackQuery, state: FSMContext):
         await callback.answer(str(e), show_alert=True)
         return
     await state.clear()
+    accounts.sess_set(f"dycalc:{callback.message.chat.id}", {"step": "done"})
     accounts.energy_set(callback.message.chat.id, key, tdee)
     usage.event("diary_calc", callback.message.chat.id)
     await callback.answer()

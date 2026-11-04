@@ -68,6 +68,7 @@ class DiaryForm(StatesGroup):
     """Дневник питания: свои граммы, поиск, расчёт расхода (возраст, рост, вес, активность)."""
     grams = State()
     find = State()
+    body = State()          # одним сообщением: возраст, рост, вес
     age = State()
     height = State()
     weight = State()

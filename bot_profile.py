@@ -145,6 +145,9 @@ def _profile_main(uid: int, days: int = 30) -> tuple[str, InlineKeyboardMarkup, 
         lines.append(f"⚖️ Вес {weights[-1]['kg']:g} кг" + (f", за период {delta:+.1f} кг" if len(weights) > 1 else ""))
     else:
         lines.append("⚖️ Вес пока не записан")
+    goal = accounts.goal_text(uid)
+    if goal:
+        lines.append(f"🎯 Цель на день: {goal}")
     if not en:
         lines.append("Расход не задан: «⚙️ Настройки → Расход».")
     lines.append(plans.status_text(uid).split("\n")[0][:160])
