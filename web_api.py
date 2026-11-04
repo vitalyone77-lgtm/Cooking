@@ -10,6 +10,7 @@ ai.py, search.py, prompts.py, day_menu.py, week_menu.py, favorites.py, shopping.
 """
 import asyncio
 import contextvars
+import httpx
 from collections import deque
 from html import escape
 import hashlib
@@ -71,8 +72,8 @@ def _dev(x_device: str | None) -> int:
     if dev_id is None:
         raise HTTPException(401, "device")
     tg = accounts.tg_of_device(dev_id)
-    if tg:
-        usage.touch(tg)          # заходит на сайт — напоминания в Telegram не нужны
+    if tg and tg < accounts.VK_OFFSET:
+        usage.touch(tg)          # заходит на сайт — напоминания в Telegram не нужны (аккаунтам ВК напоминать в Telegram нечем)
     return dev_id
 
 
@@ -507,7 +508,9 @@ def me(x_device: str | None = Header(default=None)):
     left = {k: list(v) for k in ("recipe", "daymenu", "week") if (v := usage.left(uid, k))}
     feat = {f: plans.has_feature(uid, f) for f in ("memory", "pdf", "cart", "noads")}
     out = {"linked": bool(tg), "plan": plans.plan_of(uid), "status": plans.status_text(uid), "left": left,
-           "paywall": plans.paywall(), "memory": memory, "shelf_on": shelf_on, "bot": config.BOT_USERNAME, "feat": feat, "name": plans.PREMIUM_NAME,
+           "paywall": plans.paywall(), "memory": memory, "shelf_on": shelf_on, "bot": config.BOT_USERNAME, "feat": feat, "via": ("vk" if tg and tg >= accounts.VK_OFFSET else "tg" if tg else ""),
+           "vk_app": (config.VK_CLIENT_ID if config.VK_LOGIN else ""),
+           "vk_redirect": (config.WEB_APP_URL or "https://menu.ymayaka.ru").rstrip("/") + "/api/vk/callback", "name": plans.PREMIUM_NAME,
            "trial": plans.trial_available(uid), "trial_days": int(plans.cfg("TRIAL_DAYS") or 0),
            "offers": [{"key": o["key"], "days": o["days"], "rub": o["rub"]} for o in plans.offers()],
            "favorites": len(fav_mod.get_favorites(uid))}
@@ -554,6 +557,44 @@ def link_claim(body: CodeIn, x_device: str | None = Header(default=None)):
     if not tg:
         raise HTTPException(400, "Ссылка для входа устарела или уже использована — возьми новую в боте (Профиль → Открыть сайт).")
     return {"ok": True}
+
+
+class VkIn(BaseModel):
+    access_token: str = Field(min_length=10, max_length=4096)
+
+
+@app.post("/api/vk/login")
+def vk_login(body: VkIn, x_device: str | None = Header(default=None)):
+    """Вход через VK ID: виджет отдал токен, сервер спрашивает у ВК, чей он. Номер из браузера не принимаем: верим только ответу ВК."""
+    if not config.VK_LOGIN:
+        raise HTTPException(404, "Вход через ВКонтакте выключен")
+    dev_id = _dev(x_device)
+    hist = [t for t in _link_log.get(dev_id, []) if time.time() - t < 3600]
+    if len(hist) >= 10:
+        raise HTTPException(429, "Слишком много попыток входа — попробуй через час.")
+    _link_log[dev_id] = hist + [time.time()]
+    _prune(_link_log, 3600)
+    try:
+        resp = httpx.post(config.VK_ID_API_URL.rstrip("/") + "/oauth2/user_info",
+                          data={"client_id": config.VK_CLIENT_ID, "access_token": body.access_token}, timeout=10)
+        data = resp.json()
+    except (httpx.HTTPError, ValueError):
+        raise HTTPException(502, "ВКонтакте не ответил — попробуй ещё раз")
+    user = data.get("user") if isinstance(data, dict) else None
+    vk_id = str((user or {}).get("user_id") or "")
+    if not vk_id.isdigit() or not 0 < int(vk_id) < 10**11:
+        raise HTTPException(400, "ВКонтакте не подтвердил вход — попробуй ещё раз")
+    accounts.link_device_vk(dev_id, int(vk_id))
+    usage.event("site_link_vk", accounts.VK_OFFSET + int(vk_id))
+    return {"ok": True}
+
+
+@app.get("/api/vk/callback", response_class=HTMLResponse)
+def vk_callback():
+    """Адрес возврата, который зарегистрирован в приложении VK ID. Виджет работает без перехода, страница нужна на всякий случай."""
+    return HTMLResponse("<!doctype html><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>"
+                        "<title>Вход</title><body style='font-family:sans-serif;padding:24px'>Можно закрыть это окно и вернуться на сайт."
+                        "<p><a href='/'>На главную</a></p></body>")
 
 
 @app.post("/api/unlink")

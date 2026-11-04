@@ -272,6 +272,24 @@ def link_code_status(code: str, dev_id: int) -> bool:
     return bool(row and row[0])
 
 
+VK_OFFSET = 500_000_000_000     # аккаунт ВКонтакте хранится как «число-аккаунт» = смещение + номер в ВК (id в Telegram такими большими не бывают)
+
+
+def link_device_vk(dev_id: int, vk_id: int) -> int:
+    """Вошли через VK ID: привязать устройство сайта к аккаунту ВКонтакте. -> номер аккаунта."""
+    acc = VK_OFFSET + int(vk_id)
+    with _lock:
+        c = _conn()
+        try:
+            with c:
+                c.execute("INSERT INTO links(dev_id, tg_id, ts) VALUES(?,?,?) ON CONFLICT(dev_id) DO UPDATE SET "
+                          "tg_id=excluded.tg_id, ts=excluded.ts", (dev_id, acc, time.time()))
+                _merge_device(c, dev_id, acc)
+        finally:
+            c.close()
+    return acc
+
+
 def tg_of_device(dev_id: int) -> int | None:
     row = _q("SELECT tg_id FROM links WHERE dev_id=?", (dev_id,), one=True)
     return row[0] if row else None

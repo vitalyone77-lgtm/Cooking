@@ -140,6 +140,11 @@ VK_GROUP_ID = (os.getenv("VK_GROUP_ID", "") or "").strip()       # число-ID
 VK_GROUP_TOKEN = os.getenv("VK_GROUP_TOKEN", "")                 # ключ доступа сообщества с правом на стену
 VK_API_VERSION = os.getenv("VK_API_VERSION", "5.199")
 VK_API_URL = os.getenv("VK_API_URL", "https://api.vk.com")
+# Вход на сайте через VK ID (для тех, у кого Telegram не открывается без VPN). ID приложения не секретный; защищённый ключ не нужен:
+# виджет обменивает код в браузере, а сервер проверяет токен запросом к VK.
+VK_CLIENT_ID = os.getenv("VK_CLIENT_ID", "54875605")
+VK_ID_API_URL = os.getenv("VK_ID_API_URL", "https://id.vk.com")
+VK_LOGIN = os.getenv("VK_LOGIN", "true").strip().lower() not in ("0", "false", "no", "off")
 TG_CHANNEL_ID = os.getenv("TG_CHANNEL_ID", "")                   # @имя_канала или число; бот должен быть админом канала
 SOCIAL_AUTOPOST = os.getenv("SOCIAL_AUTOPOST", "false").lower() == "true"   # false: только вручную через /postvk
 SOCIAL_POST_HOUR = int(os.getenv("SOCIAL_POST_HOUR", "9"))

@@ -545,6 +545,7 @@ select{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--lin
       var h='<h1>Профиль</h1>';
       if(!m.linked){
         return linkCode().then(function(L){
+        if(m.vk_app)h+='<div class="card pcard"><h2>Войти через ВКонтакте</h2><p class="sub" style="margin:0 0 10px">Подходит, если Telegram не открывается без VPN. Избранное и профиль сохранятся в вашем аккаунте.</p><div id="vk-btn"></div></div>';
         h+='<div class="card pcard"><h2>Войди через Telegram</h2><p class="sub" style="margin:0">Избранное и подписка станут общими с ботом и не пропадут при смене телефона. Пароль не нужен — подтверждаешь одной кнопкой в Telegram.</p>'+
           '<a class="btn" data-link-go="1" href="'+esc(L.url)+'" target="_blank" rel="noopener">Войти через Telegram</a><div id="link-wait"></div></div>';
         if(m.paywall)h+='<div class="card pcard">'+esc(m.status)+'</div>';
@@ -552,7 +553,7 @@ select{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--lin
         return h;
         });
       }
-      h+='<div class="card pcard">Вход выполнен через Telegram<br><span class="sub">'+esc(m.status)+'</span>'+
+      h+='<div class="card pcard">Вход выполнен через '+(m.via==="vk"?"ВКонтакте":"Telegram")+'<br><span class="sub">'+esc(m.status)+'</span>'+
         (m.paywall&&m.plan!=="premium"?(m.trial?'<button class="btn" data-gate-trial="1">Попробовать тариф «'+esc(m.name||"Повар")+'» '+(m.trial_days||7)+' дней бесплатно</button>':'')+'<a class="btn ghost" href="'+botLink("pay")+'" target="_blank" rel="noopener">Оформить подписку в Telegram</a>':'')+'</div>';
       return profileCards(m).then(function(cards){
         h+=cards;
@@ -567,6 +568,28 @@ select{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--lin
     });
   }
   // код входа создаём заранее (кнопка — настоящая ссылка t.me, её не блокирует браузер), живёт 10 минут
+  // вход через VK ID: кнопка из SDK ВКонтакте, код обменивается в браузере, сервер проверяет токен у ВК
+  var VK_SDK="https://unpkg.com/@vkid/sdk@<3.0.0/dist-sdk/umd/index.js",VK_LOADING=null;
+  function vkSdk(){
+    if(window.VKIDSDK)return Promise.resolve(window.VKIDSDK);
+    if(!VK_LOADING)VK_LOADING=new Promise(function(ok,no){var s=document.createElement("script");s.src=VK_SDK;s.onload=function(){ok(window.VKIDSDK);};s.onerror=function(){VK_LOADING=null;no(new Error("sdk"));};document.head.appendChild(s);});
+    return VK_LOADING;
+  }
+  function vkMount(){
+    var box=document.getElementById("vk-btn");if(!box||!ME||!ME.vk_app)return;
+    vkSdk().then(function(V){
+      if(!V)throw new Error("sdk");
+      V.Config.init({app:Number(ME.vk_app),redirectUrl:ME.vk_redirect,responseMode:V.ConfigResponseMode.Callback,source:V.ConfigSource.LOWCODE,scope:""});
+      new V.OneTap().render({container:box,showAlternativeLogin:true,oauthList:["ok_ru","mail_ru"]})
+        .on(V.WidgetEvents.ERROR,function(){toast("Не удалось войти через ВКонтакте, попробуй ещё раз");})
+        .on(V.OneTapInternalEvents.LOGIN_SUCCESS,function(p){
+          V.Auth.exchangeCode(p.code,p.device_id)
+            .then(function(d){return call("POST","/api/vk/login",{access_token:d.access_token});})
+            .then(function(){toast("✅ Вход выполнен через ВКонтакте");return loadMe().then(function(){show("profile");});})
+            .catch(function(e){toast((e&&e.message)||"Не удалось войти через ВКонтакте");});
+        });
+    }).catch(function(){box.innerHTML='<p class="sub" style="margin:0">Кнопка ВКонтакте не загрузилась. Проверьте интернет и обновите страницу.</p>';});
+  }
   var LINK=null;
   function linkCode(){
     if(LINK&&Date.now()-LINK.ts<8*60*1000)return Promise.resolve(LINK);
@@ -592,7 +615,7 @@ select{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--lin
     if(tab==="new"){viewNew();window.scrollTo(0,0);return;}
     main.innerHTML='<div class="skeleton"></div><div class="skeleton"></div><div class="skeleton"></div>';
     OFFLINE=false;
-    Promise.resolve(VIEWS[tab]()).then(function(h){if(OFFLINE)h=offlineBanner()+h;main.innerHTML=h;if(Object.keys(TM).length)tmEnsureTick();window.scrollTo(0,0);}).catch(fail);
+    Promise.resolve(VIEWS[tab]()).then(function(h){if(OFFLINE)h=offlineBanner()+h;main.innerHTML=h;if(Object.keys(TM).length)tmEnsureTick();window.scrollTo(0,0);if(cur==="profile")vkMount();}).catch(fail);
   }
 
   // ---- замки на функциях тарифа, окно «попробовать» ----
