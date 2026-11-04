@@ -319,6 +319,14 @@ for _f in FOODS:
 _VOCAB = sorted({t for f in FOODS for t in f["tokens"] if len(t) >= 3})
 
 
+_STOP = {"из", "на", "без", "по", "со", "от", "для", "под", "над", "при", "или", "порция", "порции", "тарелка", "кусок", "кусочек", "стакан", "чашка"}
+
+
+def content_words(text: str) -> list[str]:
+    """Слова запроса без служебных: «суп из курицы» -> суп, курицы."""
+    return [w for w in _tokens(text) if len(w) >= 2 and w not in _STOP]
+
+
 def _stem(w: str) -> str:
     """«курицу» -> «кури», «картошка» -> «картош»: ищем слова, которые начинаются так же."""
     if len(w) <= 3:
@@ -331,7 +339,7 @@ def _stem(w: str) -> str:
 def search(query: str, limit: int = 10) -> list[dict]:
     """Поиск по названию и синонимам: каждое слово запроса должно начинаться как слово продукта (склонения, «картошка»).
     Если ничего нет, пробуем поправить опечатки («греча», «крица»)."""
-    words = [w for w in _tokens(query) if len(w) >= 2]
+    words = content_words(query)
     if not words:
         return []
 

@@ -15,6 +15,7 @@ import accounts
 import cards
 import ui
 import charts
+import food_ai
 import foods
 import plans
 import usage
@@ -196,7 +197,9 @@ PORTIONS = (("Малая", 7), ("Стандарт", 10), ("Большая", 15))
 
 def _portion_view(food: dict) -> tuple[str, InlineKeyboardMarkup]:
     g = food["grams"]
-    lines = [food["name"], f"Обычная порция: {food['label']}. На 100 г: {food['kcal100']} ккал.", ""]
+    lines = [food["name"], f"Обычная порция: {food['label']}. На 100 г: {int(food['kcal100'])} ккал.", ""]
+    if food.get("ai"):
+        lines[1:1] = ["🤖 Оценка ИИ, может ошибаться."]
     for label, m in PORTIONS:
         gr = int(round(g * m / 10))
         n = foods.nutrition(food, gr)
@@ -211,7 +214,7 @@ def _portion_view(food: dict) -> tuple[str, InlineKeyboardMarkup]:
 
 @router.callback_query(F.data.startswith("dy:f:"))
 async def choose_portion(callback: CallbackQuery):
-    food = foods.BY_ID.get(callback.data.split(":", 2)[2])
+    food = food_ai.lookup(callback.data.split(":", 2)[2])
     if not food or not await _need_diary(callback):
         await callback.answer()
         return
@@ -222,7 +225,7 @@ async def choose_portion(callback: CallbackQuery):
 
 def _add_food(uid: int, food: dict, grams: float) -> dict:
     n = foods.nutrition(food, grams)
-    accounts.diary_add(uid, f"{food['name']} ({int(round(grams))} г)", n["kcal"], n["protein"], n["fat"], n["carb"], "list")
+    accounts.diary_add(uid, f"{food['name']} ({int(round(grams))} г)", n["kcal"], n["protein"], n["fat"], n["carb"], "ai" if food.get("ai") else "list")
     usage.event("diary_add", uid)
     return n
 
@@ -231,10 +234,10 @@ def _add_food(uid: int, food: dict, grams: float) -> dict:
 async def add_portion(callback: CallbackQuery):
     try:
         _, _, fid, mult = callback.data.split(":")
-        food, m = foods.BY_ID[fid], int(mult)
-        if m not in (5, 7, 10, 15, 20):
+        food, m = food_ai.lookup(fid), int(mult)
+        if not food or m not in (5, 7, 10, 15, 20):
             raise ValueError(m)
-    except (ValueError, KeyError):
+    except ValueError:
         await callback.answer()
         return
     if not await _need_diary(callback):
@@ -250,7 +253,7 @@ async def add_portion(callback: CallbackQuery):
 
 @router.callback_query(F.data.startswith("dy:g:"))
 async def ask_grams(callback: CallbackQuery, state: FSMContext):
-    food = foods.BY_ID.get(callback.data.split(":", 2)[2])
+    food = food_ai.lookup(callback.data.split(":", 2)[2])
     if not food or not await _need_diary(callback):
         await callback.answer()
         return
@@ -265,7 +268,7 @@ async def ask_grams(callback: CallbackQuery, state: FSMContext):
 async def got_grams(message: Message, state: FSMContext):
     uid = message.chat.id
     await ui.drop(message)
-    food = foods.BY_ID.get((await state.get_data()).get("dy_food"))
+    food = food_ai.lookup((await state.get_data()).get("dy_food"))
     m = re.search(r"\d+[.,]?\d*", message.text or "")
     grams = float(m.group(0).replace(",", ".")) if m else 0
     if not food or not 5 <= grams <= 2000:
@@ -289,7 +292,7 @@ async def ask_find(callback: CallbackQuery, state: FSMContext):
         return
     await state.set_state(DiaryForm.find)
     await callback.answer()
-    await ui.show(callback, "🔎 Напишите название, например «борщ» или «куриная грудка».\n\n"
+    await ui.show(callback, "🔎 Напишите название, например «борщ» или «куриная грудка». Если в справочнике такого нет, спрошу у ИИ.\n\n"
                   "Своё блюдо можно записать сразу с калориями: «пицца 450».", _cancel_kb(), mode="edit")
 
 
@@ -314,18 +317,46 @@ async def got_find(message: Message, state: FSMContext):
         text, markup = diary_view(uid, f"✅ Записал: {manual[0]}, {manual[1]} ккал")
         await ui.show(message, text, markup, mode="tracked")
         return
-    found = foods.search(message.text)
+    query = (message.text or "").strip()[:60]
+    found = foods.search(query)
     if not found:
-        await ui.show(message, "Такого в справочнике нет. Попробуйте другое слово или запишите своё блюдо сразу с калориями: «домашняя пицца 450». "
-                  "Калории можно взять с упаковки или из рецепта.", _cancel_kb(), mode="tracked")
+        await ui.show(message, "В справочнике такого нет, спрашиваю у ИИ…", None, mode="tracked")
+        food, why = await food_ai.estimate(uid, query)
+        if not food:
+            await ui.show(message, why, _cancel_kb(), mode="tracked")     # состояние поиска остаётся: можно написать ещё раз
+            return
+        await state.clear()
+        text, markup = _portion_view(food)
+        await ui.show(message, text, markup, mode="tracked")
         return
-    await state.clear()
+    await state.update_data(dy_q=query)
+    await state.set_state(None)
     b = InlineKeyboardBuilder()
     for f in found:
         b.button(text=f"{f['name']} · {foods.portion_kcal(f)}", callback_data=f"dy:f:{f['id']}")
     b.adjust(1)
+    b.row(InlineKeyboardButton(text="🤖 Нет нужного: спросить ИИ", callback_data="dy:ask"))
     b.row(InlineKeyboardButton(text="⬅️ Дневник", callback_data="dy:open"))
     await ui.show(message, "Нашёл. В кнопке: ккал в обычной порции.", b.as_markup(), mode="tracked")
+
+
+@router.callback_query(F.data == "dy:ask")
+async def ask_ai(callback: CallbackQuery, state: FSMContext):
+    """Нужного блюда в результатах нет: оценка ИИ по тому же запросу."""
+    if not await _need_diary(callback):
+        return
+    query = (await state.get_data()).get("dy_q")
+    if not query:
+        await callback.answer("Напишите название ещё раз", show_alert=True)
+        return
+    await callback.answer("Спрашиваю у ИИ…")
+    food, why = await food_ai.estimate(callback.message.chat.id, query)
+    if not food:
+        await ui.show(callback, why, _cancel_kb(), mode="edit")
+        return
+    await state.clear()
+    text, markup = _portion_view(food)
+    await ui.show(callback, text, markup, mode="edit")
 
 
 @router.callback_query(F.data.startswith("dy:del:"))

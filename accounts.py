@@ -55,6 +55,9 @@ CREATE TABLE IF NOT EXISTS book_seen(uid TEXT, book_id INTEGER, ts REAL, PRIMARY
 CREATE TABLE IF NOT EXISTS alias(src TEXT PRIMARY KEY, dst TEXT, ts REAL);
 CREATE TABLE IF NOT EXISTS pay_orders(id TEXT PRIMARY KEY, uid TEXT, plan TEXT, days INTEGER, amount TEXT, test INTEGER, ts REAL, status TEXT, op TEXT);
 CREATE INDEX IF NOT EXISTS pay_orders_uid ON pay_orders(uid, ts);
+CREATE TABLE IF NOT EXISTS shop_lists(id TEXT PRIMARY KEY, uid TEXT, title TEXT, items TEXT, done TEXT, ts REAL);
+CREATE INDEX IF NOT EXISTS shop_lists_uid ON shop_lists(uid, ts);
+CREATE TABLE IF NOT EXISTS ai_foods(id INTEGER PRIMARY KEY AUTOINCREMENT, key TEXT UNIQUE, name TEXT, grams REAL, kcal100 REAL, p100 REAL, f100 REAL, c100 REAL, label TEXT, ts REAL);
 """
 
 
@@ -503,6 +506,7 @@ def _merge_accounts(c, src: str, dst: str) -> None:
         c.execute(f"DELETE FROM {t} WHERE uid=?", (src,))
     c.execute("UPDATE diary SET uid=? WHERE uid=?", (dst, src))
     c.execute("UPDATE payments SET uid=? WHERE uid=?", (dst, src))
+    c.execute("UPDATE shop_lists SET uid=? WHERE uid=?", (dst, src))
     s = c.execute("SELECT until, source, trial_used FROM subs WHERE uid=?", (src,)).fetchone()
     if s:
         d = c.execute("SELECT until, trial_used FROM subs WHERE uid=?", (dst,)).fetchone()
@@ -727,7 +731,7 @@ def delete_my_data(uid) -> dict:
     out = {"weights": _q("DELETE FROM weights WHERE uid=?", (uid,)), "goals": _q("DELETE FROM goals WHERE uid=?", (uid,)),
            "shelf": _q("DELETE FROM shelf WHERE uid=?", (uid,)), "consent": _q("DELETE FROM consents WHERE uid=?", (uid,)),
            "diary": _q("DELETE FROM diary WHERE uid=?", (uid,)), "energy": _q("DELETE FROM energy WHERE uid=?", (uid,)),
-           "book_seen": _q("DELETE FROM book_seen WHERE uid=?", (uid,))}
+           "book_seen": _q("DELETE FROM book_seen WHERE uid=?", (uid,)), "shop_lists": _q("DELETE FROM shop_lists WHERE uid=?", (uid,))}
     return out
 
 

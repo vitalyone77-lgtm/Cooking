@@ -141,6 +141,9 @@ def _profile_main(uid: int, days: int = 30) -> tuple[str, InlineKeyboardMarkup, 
     lines = ["👤 Профиль", summary_line(uid)]
     if st["logged"]:
         lines.append(f"В среднем {st['avg_kcal']:,} ккал в день".replace(",", " ") + f" (дней с записями: {st['logged']} из {days})")
+        shares = charts.macro_shares(series)
+        if shares:
+            lines.append(f"Белки {shares['protein']}%, жиры {shares['fat']}%, углеводы {shares['carb']}% калорий")
     if weights:
         delta = weights[-1]["kg"] - weights[0]["kg"]
         lines.append(f"⚖️ Вес {weights[-1]['kg']:g} кг" + (f", за период {delta:+.1f} кг" if len(weights) > 1 else ""))
@@ -151,7 +154,6 @@ def _profile_main(uid: int, days: int = 30) -> tuple[str, InlineKeyboardMarkup, 
         lines.append(f"🎯 Цель на день: {goal}")
     if not en:
         lines.append("Расход не задан: «⚙️ Настройки → Расход».")
-    lines.append(plans.status_text(uid).split("\n")[0][:160])
     lines.append("Оценка приблизительная, не врач и не диетолог.")
     png = None
     if st["logged"] or len(weights) >= 2:

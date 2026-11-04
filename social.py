@@ -165,22 +165,28 @@ def _photo_error(data: dict) -> None:
 
 
 async def vk_photo_attachment(image: bytes) -> str:
-    """Загрузить картинку для записи на стену сообщества. -> «photo-НОМЕР_ID». RuntimeError без ключа в тексте."""
+    """Загрузить картинку для записи на стену. -> «photo-НОМЕР_ID_КЛЮЧ». RuntimeError без ключа в тексте.
+    Ключ сообщества не может грузить фото на стену (photos.getWallUploadServer, код 27), поэтому сначала идём через альбом сообщений
+    (photos.getMessagesUploadServer): такая фотография прикрепляется к записи. Ключ пользователя (VK_IMAGE_MODE=upload) грузит на стену."""
     try:
         async with httpx.AsyncClient(timeout=60) as client:
             gid = await group_numeric_id(client)
             base = config.VK_API_URL.rstrip("/") + "/method/"
             common = {"access_token": config.VK_GROUP_TOKEN, "v": config.VK_API_VERSION}
-            server = (await client.post(base + "photos.getWallUploadServer", data={"group_id": gid, **common})).json()
+            wall = config.VK_IMAGE_MODE == "upload"
+            server = (await client.post(base + ("photos.getWallUploadServer" if wall else "photos.getMessagesUploadServer"),
+                                        data={("group_id" if wall else "peer_id"): (gid if wall else 0), **common})).json()
             _photo_error(server)
             up = (await client.post(server["response"]["upload_url"], files={"photo": ("dish.png", image, "image/png")})).json()
             if not up.get("photo") or up.get("photo") == "[]":
                 raise RuntimeError("Картинка не загрузилась: ВКонтакте не принял файл")
-            saved = (await client.post(base + "photos.saveWallPhoto", data={
-                "group_id": gid, "photo": up["photo"], "server": up["server"], "hash": up["hash"], **common})).json()
+            extra = {"group_id": gid} if wall else {}
+            saved = (await client.post(base + ("photos.saveWallPhoto" if wall else "photos.saveMessagesPhoto"), data={
+                "photo": up["photo"], "server": up["server"], "hash": up["hash"], **extra, **common})).json()
             _photo_error(saved)
             ph = saved["response"][0]
-            return f"photo{ph['owner_id']}_{ph['id']}"
+            key = ph.get("access_key")
+            return f"photo{ph['owner_id']}_{ph['id']}" + (f"_{key}" if key else "")
     except (httpx.HTTPError, ValueError, KeyError, IndexError, TypeError) as e:
         raise RuntimeError(f"Картинка не загрузилась в ВКонтакте ({type(e).__name__})") from None
 
@@ -192,7 +198,7 @@ async def build_image(title: str, text: str) -> bytes | None:
 
 async def post_vk(text: str, attachment: str | None = None) -> int:
     """Запись на стену сообщества от имени сообщества. -> номер записи. RuntimeError — без ключа в тексте.
-    Если ВК не принял превью ссылки (код 100, link_photo_sizing_rule), сбрасываем его кэш для этой страницы и пробуем ещё раз."""
+    Если ВК не принял вложение-ссылку (код 100, link_photo_sizing_rule), запись всё равно выходит: без вложения, со ссылкой в тексте."""
     if not configured_vk():
         raise RuntimeError("ВКонтакте не настроен: нет VK_GROUP_ID или VK_GROUP_TOKEN")
     try:
@@ -206,11 +212,9 @@ async def post_vk(text: str, attachment: str | None = None) -> int:
             data = (await client.post(url, data=payload)).json()
             err = data.get("error") or {}
             if err.get("error_code") == 100 and "link_photo" in str(err.get("error_msg", "")) and attachment:
-                try:
-                    await client.post(f"{config.VK_API_URL.rstrip('/')}/method/pages.clearCache",
-                                      data={"url": attachment, "access_token": config.VK_GROUP_TOKEN, "v": config.VK_API_VERSION})
-                except httpx.HTTPError:
-                    pass
+                payload.pop("attachments")
+                if attachment.startswith("http") and attachment not in text:
+                    payload["message"] = f"{text}\n\nРецепт с картинкой: {attachment}"
                 await asyncio.sleep(RETRY_PAUSE)
                 data = (await client.post(url, data=payload)).json()
     except (httpx.HTTPError, ValueError) as e:
@@ -231,25 +235,27 @@ async def post_tg(bot, text: str, image: bytes | None = None) -> int:
 
 async def publish(bot, title: str, text: str, image: bytes | None = None, body: str | None = None) -> dict:
     """Публикует везде, где настроено (с картинкой, если она есть). -> {"vk": id|None, "tg": id|None, "errors": [...]}.
-    В ВК картинка идёт ссылкой на страницу рецепта (VK_IMAGE_MODE=link): ключ сообщества фото не загружает (код 27)."""
+    В ВК картинка идёт настоящей фотографией (см. vk_photo_attachment), а если не загрузилась, то ссылкой на страницу рецепта."""
     out = {"vk": None, "tg": None, "errors": []}
     if configured_vk():
         attachment = None
         if not image and config.VK_IMAGE_MODE != "upload":
-            image = cards.make_card(title, body or text)      # без картинки ВК не принимает превью ссылки: рисуем карточку сразу
-        if image and config.VK_IMAGE_MODE == "upload":
+            image = cards.make_card(title, body or text)      # запись всегда с картинкой: своя карточка, если другой нет
+        if image:
             try:
                 attachment = await vk_photo_attachment(image)
             except RuntimeError as e:
-                out["errors"].append(f"{e}. Запись опубликована без картинки")
-        elif image:
-            try:
-                slug = slugify(title)
-                accounts.pub_recipe_add(slug, title, body or text, image)
-                attachment = page_url(slug)
-            except Exception:  # noqa: BLE001
-                logger.exception("Страница рецепта не создана")
-                out["errors"].append("Страница рецепта не создана. Запись опубликована без картинки")
+                logger.warning("ВК: фото не загрузилось, пробую ссылку: %s", e)
+                if config.VK_IMAGE_MODE == "upload":
+                    out["errors"].append(f"{e}. Запись опубликована без картинки")
+            if not attachment and config.VK_IMAGE_MODE != "upload":
+                try:
+                    slug = slugify(title)
+                    accounts.pub_recipe_add(slug, title, body or text, image)
+                    attachment = page_url(slug)
+                except Exception:  # noqa: BLE001
+                    logger.exception("Страница рецепта не создана")
+                    out["errors"].append("Страница рецепта не создана. Запись опубликована без картинки")
         try:
             out["vk"] = await post_vk(text, attachment)
         except RuntimeError as e:

@@ -66,7 +66,7 @@ def cuisine_kb(with_extras: bool = True, last_title: str | None = None, fridge: 
     if not with_extras:
         b.adjust(2)
         return b.as_markup()
-    if fridge:      # последним пунктом после аюрведы: рецепт по фото продуктов
+    if fridge:      # в одной строке с аюрведой: рецепт по фото продуктов
         b.button(text="📷 По фото продуктов", callback_data="fridge:start")
     b.button(text="⭐ Избранное", callback_data="favorites:open")
     b.button(text="📖 Книга рецептов", callback_data="book:open")
@@ -75,7 +75,7 @@ def cuisine_kb(with_extras: bool = True, last_title: str | None = None, fridge: 
     if last_title:
         short = last_title if len(last_title) <= 28 else last_title[:26] + "…"
         b.button(text=f"📖 Последний: {short}", callback_data="last:open")
-    b.adjust(*((2, 2, 2, 1, 1, 2, 2, 1) if fridge else (2, 2, 2, 1, 2, 2, 1)))
+    b.adjust(*((2, 2, 2, 2, 2, 2, 1) if fridge else (2, 2, 2, 1, 2, 2, 1)))
     return b.as_markup()
 
 
@@ -227,11 +227,11 @@ def restart_kb() -> InlineKeyboardMarkup:
 def recipe_result_kb(timers: list[tuple[int, int, int]] | None = None) -> InlineKeyboardMarkup:
     """
     Кнопки под готовым рецептом. Таймеры — внутри режима готовки по шагам (там же галочки шагов),
-    продукты — в списке покупок с галочками (там же магазины и замена того, чего нет).
+    продукты — в «Продукты и магазины» (там галочки, магазины, отправка списка и замена того, чего нет).
     """
     b = InlineKeyboardBuilder()
     b.button(text="👨‍🍳 Готовить по шагам", callback_data="ck:start")
-    b.button(text="🛒 Список покупок", callback_data="sl:o:r")
+    b.button(text="🛒 Продукты и магазины", callback_data="sl:o:r")
     b.button(text="⭐ В избранное", callback_data="fav:save")
     b.button(text="📄 PDF", callback_data="pdf:r")
     b.button(text="🍳 Подобрать ещё рецепт", callback_data="confirm:restart")
@@ -254,7 +254,7 @@ def favorites_list_kb(favorites: list[dict]) -> InlineKeyboardMarkup:
 def favorite_view_kb(fav_id: str) -> InlineKeyboardMarkup:
     b = InlineKeyboardBuilder()
     b.button(text="👨‍🍳 Готовить по шагам", callback_data="ck:start")
-    b.button(text="🛒 Список покупок", callback_data=f"sl:o:f{fav_id}")
+    b.button(text="🛒 Продукты и магазины", callback_data=f"sl:o:f{fav_id}")
     b.button(text="🗑 Удалить из избранного", callback_data=f"fav:delete:{fav_id}")
     b.button(text="⬅️ К избранному", callback_data="favorites:open")
     b.adjust(2, 1, 1)
@@ -262,9 +262,9 @@ def favorite_view_kb(fav_id: str) -> InlineKeyboardMarkup:
 
 
 def shopping_btn_kb(ctx: str) -> InlineKeyboardMarkup:
-    """Кнопка «Список покупок» с галочками (ctx: r — рецепт, d — меню на день, w — корзина плана, wd<N> — докупить к дню N)."""
+    """Кнопка «Продукты и магазины» (ctx: r — рецепт, d — меню на день, w — корзина плана, wd<N> — докупить к дню N)."""
     b = InlineKeyboardBuilder()
-    b.button(text="🛒 Список покупок", callback_data=f"sl:o:{ctx}")
+    b.button(text="🛒 Продукты и магазины", callback_data=f"sl:o:{ctx}")
     b.adjust(1)
     return b.as_markup()
 

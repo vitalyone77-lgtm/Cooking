@@ -1,22 +1,25 @@
 """
-Список покупок с галочками — разворачивается на месте (вместо кнопок под рецептом / меню / корзиной плана),
-без новых сообщений; «⬅️ Свернуть» возвращает прежние кнопки.
+«Продукты и магазины» разворачиваются на месте (вместо кнопок под рецептом / меню / корзиной плана), без новых сообщений;
+«⬅️ Свернуть» возвращает прежние кнопки. Внутри: отмечать купленное, найти в магазине, отправить список.
 
-Сверху — что отмечаем: ✅ купил, ❌ нет в магазине, 🏠 есть дома. Нажатие на продукт ставит выбранную отметку.
-Долгоживущее (масло, специи, крупы), отмеченное «купил» или «есть дома», уходит на полку — в следующих
-рецептах оно сразу стоит отдельно как «🏠 есть дома». Внизу: найти оставшееся в магазине (одно сообщение со
-ссылками, которое переключается между магазинами и закрывается), заменить отсутствующие (ИИ), отправить списком.
+Галочки открываются только по кнопке, потому что список длинный. Сверху — что отмечаем: ✅ купил, ❌ нет в магазине, 🏠 есть дома.
+Долгоживущее (масло, специи, крупы), отмеченное «купил» или «есть дома», уходит на полку — в следующих рецептах оно сразу стоит
+отдельно как «🏠 есть дома». «Отправить список» присылает текст с количеством и ссылку на страницу с галочками (shoplists.py):
+пересланные кнопки у получателя не работают, а страница работает у всех и без VPN.
 """
 import logging
 
 from aiogram import F, Router
 from aiogram.exceptions import TelegramRetryAfter
+from urllib.parse import quote
+
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 import accounts
+import shoplists
 import usage
 import plans
-from shopping import format_store_links
+from shopping import extract_dish_title, format_store_links, item_amounts
 from stores.links import DEFAULT_STORES, STORES
 
 logger = logging.getLogger(__name__)
@@ -28,7 +31,7 @@ hooks: dict = {}
 
 MODES = {"b": "✅ Купил", "m": "❌ Нет", "h": "🏠 Есть дома"}
 ICON = {"b": "✅", "m": "❌", "h": "🏠"}
-PAGE = 20
+PAGE = 12
 
 
 def base_ctx(ctx: str) -> str:
@@ -47,6 +50,28 @@ def _order(s: dict) -> list[int]:
     return [i for i in range(n) if st.get(str(i)) != "h"] + [i for i in range(n) if st.get(str(i)) == "h"]
 
 
+def hub_kb(s: dict) -> InlineKeyboardMarkup:
+    """Меню «Продукты и магазины»."""
+    total = len(s["terms"])
+    done = sum(1 for v in s["st"].values() if v in ("b", "h"))
+    missing_n = sum(1 for v in s["st"].values() if v == "m")
+    rows = [[InlineKeyboardButton(text=f"☑️ Отмечать купленное ({done} из {total})", callback_data="sl:chk")],
+            [InlineKeyboardButton(text="🏪 Найти в магазине", callback_data="sl:st")],
+            [InlineKeyboardButton(text="📤 Отправить список", callback_data="sl:tx")]]
+    if missing_n and base_ctx(s["ctx"]) in ("r", "d", "w"):
+        rows.append([InlineKeyboardButton(text=f"🔄 Заменить ❌ ({missing_n})", callback_data="sl:rp")])
+    rows.append([InlineKeyboardButton(text="⬅️ Свернуть", callback_data="sl:c")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def _label(s: dict, i: int) -> str:
+    """Продукт с количеством на кнопке. Кнопка на всю ширину, поэтому количество видно."""
+    am = (s.get("am") or [])
+    amount = am[i] if i < len(am) else ""
+    name = s["terms"][i]
+    return (f"{name[:30]} · {amount}" if amount else name[:40])
+
+
 def checklist_kb(s: dict) -> InlineKeyboardMarkup:
     st, mode = s["st"], s.get("mode", "b")
     rows = [[InlineKeyboardButton(text=("• " if k == mode else "") + label, callback_data=f"sl:m:{k}")
@@ -54,21 +79,13 @@ def checklist_kb(s: dict) -> InlineKeyboardMarkup:
     order = _order(s)
     page = max(0, min(s.get("page", 0), (len(order) - 1) // PAGE if order else 0))
     chunk = order[page * PAGE:(page + 1) * PAGE]
-    row, home_header = [], False
+    home_header = False
     for i in chunk:
         code = st.get(str(i))
         if code == "h" and not home_header:
-            if row:
-                rows.append(row)
-                row = []
             rows.append([InlineKeyboardButton(text="— 🏠 есть дома / на полке —", callback_data="sl:n")])
             home_header = True
-        row.append(InlineKeyboardButton(text=f"{ICON.get(code, '▫️')} {s['terms'][i][:22]}", callback_data=f"sl:i:{i}"))
-        if len(row) == 2:
-            rows.append(row)
-            row = []
-    if row:
-        rows.append(row)
+        rows.append([InlineKeyboardButton(text=f"{ICON.get(code, '▫️')} {_label(s, i)}", callback_data=f"sl:i:{i}")])
     if len(order) > PAGE:
         nav = []
         if page > 0:
@@ -78,12 +95,10 @@ def checklist_kb(s: dict) -> InlineKeyboardMarkup:
             nav.append(InlineKeyboardButton(text="▶", callback_data=f"sl:p:{page + 1}"))
         rows.append(nav)
     missing_n = sum(1 for v in st.values() if v == "m")
-    bottom = [InlineKeyboardButton(text="🏪 Найти в магазине", callback_data="sl:st")]
+    last = [InlineKeyboardButton(text="⬅️ Назад", callback_data="sl:h")]
     if missing_n and base_ctx(s["ctx"]) in ("r", "d", "w"):
-        bottom.append(InlineKeyboardButton(text=f"🔄 Заменить ❌ ({missing_n})", callback_data="sl:rp"))
-    rows.append(bottom)
-    rows.append([InlineKeyboardButton(text="📤 Списком", callback_data="sl:tx"),
-                 InlineKeyboardButton(text="⬅️ Свернуть", callback_data="sl:c")])
+        last.insert(0, InlineKeyboardButton(text=f"🔄 Заменить ❌ ({missing_n})", callback_data="sl:rp"))
+    rows.append(last)
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -103,10 +118,23 @@ def _save(msg: Message, s: dict):
     accounts.sess_set(_key(msg.chat.id, msg.message_id), s)
 
 
-async def _redraw(callback: CallbackQuery, s: dict):
+def _recipe_text(msg: Message) -> str:
+    for src in (msg, msg.reply_to_message):
+        if src and "Продукты" in (src.text or "") or src and "Ингредиенты" in (src.text or ""):
+            return src.text
+    return ""
+
+
+def _amounts(msg: Message, ctx: str, terms: list[str]) -> list[str]:
+    """Сколько каждого продукта: из рецепта, меню или корзины плана."""
+    base = base_ctx(ctx)
+    return item_amounts(terms, hooks["amounts"](msg, base), _recipe_text(msg) if base == "r" else "")
+
+
+async def _redraw(callback: CallbackQuery, s: dict, kb_fn=None):
     _save(callback.message, s)
     try:
-        await callback.message.edit_reply_markup(reply_markup=checklist_kb(s))
+        await callback.message.edit_reply_markup(reply_markup=(kb_fn or checklist_kb)(s))
     except TelegramRetryAfter:
         pass          # слишком быстро нажимают — отметка сохранена, нарисуется со следующим нажатием
     except Exception as e:  # noqa: BLE001
@@ -130,8 +158,27 @@ async def list_open(callback: CallbackQuery):
         if plans.shelf_on(msg.chat.id):
             st = {str(i): "h" for i in accounts.shelf_match(msg.chat.id, terms)}
         s = {"ctx": ctx, "terms": terms, "st": st, "mode": "b", "page": 0}
-    _save(msg, s)
+    if "am" not in s:
+        s["am"] = _amounts(msg, ctx, terms)
     usage.event("list_open", msg.chat.id)
+    await callback.answer()
+    await _redraw(callback, s, hub_kb)
+
+
+@router.callback_query(F.data == "sl:h")
+async def list_hub(callback: CallbackQuery):
+    s = await _load(callback)
+    if not s:
+        return
+    await callback.answer()
+    await _redraw(callback, s, hub_kb)
+
+
+@router.callback_query(F.data == "sl:chk")
+async def list_check(callback: CallbackQuery):
+    s = await _load(callback)
+    if not s:
+        return
     await callback.answer("Выбери отметку сверху и нажимай на продукты")
     await _redraw(callback, s)
 
@@ -279,18 +326,40 @@ async def list_text(callback: CallbackQuery):
     if not s:
         return
     await callback.answer()
-    st = s["st"]
-    lines = ["🛒 Список покупок", ""]
+    st, msg = s["st"], callback.message
+    am = s.get("am") or []
+    amount = lambda i: am[i] if i < len(am) else ""
+    title = "Список покупок"
+    text = _recipe_text(msg)
+    if text and base_ctx(s["ctx"]) == "r":
+        title = extract_dish_title(text)[:80] or title
+    lines = [f"🛒 {title}", ""]
+    items, done = [], []
     for i, t in enumerate(s["terms"]):
         code = st.get(str(i))
-        if code != "h":
-            lines.append(f"{'✅' if code == 'b' else '❌' if code == 'm' else '▫️'} {t}")
+        if code == "h":
+            continue
+        lines.append(f"{'✅' if code == 'b' else '❌' if code == 'm' else '▫️'} {t}" + (f" — {amount(i)}" if amount(i) else ""))
+        if code == "b":
+            done.append(len(items))
+        items.append({"name": t, "amount": amount(i)})
     home = [t for i, t in enumerate(s["terms"]) if st.get(str(i)) == "h"]
     if home:
         lines += ["", "🏠 Есть дома: " + ", ".join(home)]
-    usage.event("list_share", callback.message.chat.id)
-    kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="✖ Убрать", callback_data="sl:tx:x")]])
-    await callback.message.answer("\n".join(lines), reply_markup=kb, parse_mode=None)
+    usage.event("list_share", msg.chat.id)
+    rows = []
+    try:
+        lid = s.get("share") or shoplists.create(msg.chat.id, title, items, done)
+        s["share"] = lid
+        _save(msg, s)
+        link = shoplists.url(lid)
+        lines += ["", f"☑️ Отмечать галочками, можно вместе (без VPN и входа): {link}"]
+        rows.append([InlineKeyboardButton(text="☑️ Открыть с галочками", url=link)])
+        rows.append([InlineKeyboardButton(text="📤 Переслать", url=f"https://t.me/share/url?url={quote(link, safe='')}&text={quote(title, safe='')}")])
+    except ValueError as e:                      # слишком часто или пустой: текст всё равно пригодится
+        lines += ["", str(e)]
+    rows.append([InlineKeyboardButton(text="✖ Убрать", callback_data="sl:tx:x")])
+    await msg.answer("\n".join(lines)[:4000], reply_markup=InlineKeyboardMarkup(inline_keyboard=rows), parse_mode=None, disable_web_page_preview=True)
 
 
 @router.callback_query(F.data == "sl:rp")

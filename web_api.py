@@ -49,13 +49,18 @@ from ai import generate_recipe
 import usage
 import accounts
 import book
+import cards
+import charts
+import food_ai
+import foods
 import payanyway
 import plans
 import profile_ctx
+import shoplists
 from cuisines import CUISINE_LABELS, PORTION_LABELS, PORTION_ORDER
 from keyboards import MEAL_LABELS, sort_meals, CUISINE_BUTTONS
 from search import search_recipes, format_results_for_prompt
-from shopping import extract_shopping_terms, extract_dish_title, amounts_from_recipe_text, _fmt_amount, _find_amount
+from shopping import extract_shopping_terms, extract_dish_title, amounts_from_recipe_text, item_amounts, _fmt_amount, _find_amount
 from storage import get_all_users
 from stores.links import STORES, DEFAULT_STORES, search_url, short_name
 from stores.basket import build_priced_basket
@@ -108,12 +113,11 @@ def parse_shopping(md: str) -> list[dict]:
     return items
 
 
-def with_amounts(items: list[dict], amounts: dict[str, int]) -> list[dict]:
-    """Дописывает к продуктам, сколько их нужно купить (из рецепта/меню)."""
-    for it in items:
-        found = _find_amount(it["name"], amounts) if amounts else None
-        if found:
-            it["amount"] = _fmt_amount(it["name"], found[1])
+def with_amounts(items: list[dict], amounts: dict[str, int], text: str = "") -> list[dict]:
+    """Дописывает к продуктам, сколько их нужно купить (из рецепта/меню). text — рецепт: для «2 ст. л.» и «по вкусу»."""
+    for it, am in zip(items, item_amounts([i["name"] for i in items], amounts, text)):
+        if am:
+            it["amount"] = am
     return items
 
 
@@ -333,7 +337,7 @@ async def api_recipe(p: Params, x_device: str | None = Header(default=None)):
                 raise RuntimeError("Не получилось составить рецепт под эти параметры")
             bid = book.add(data, extract_dish_title(text) or "Рецепт", text, terms)       # новый рецепт пополняет книгу
         return {"title": extract_dish_title(text) or "Рецепт", "text": text, "card": f"/api/bookimg/{bid}.png" if bid else None,
-                "shopping": _mark_home(dev_id, with_amounts(links_for(terms), amounts_from_recipe_text(text)))}
+                "shopping": _mark_home(dev_id, with_amounts(links_for(terms), amounts_from_recipe_text(text), text))}
 
     return _start_job(dev_id, work, sp)
 
@@ -556,6 +560,7 @@ def me(x_device: str | None = Header(default=None)):
     feat = {f: plans.has_feature(uid, f) for f in ("memory", "pdf", "cart", "noads")}
     out = {"linked": bool(tg), "plan": plans.plan_of(uid), "status": plans.status_text(uid), "left": left,
            "paywall": plans.paywall(), "memory": memory, "shelf_on": shelf_on, "bot": config.BOT_USERNAME, "feat": feat, "via": ("vk" if tg and tg >= accounts.VK_OFFSET else "tg" if tg else ""),
+           "diary_on": plans.diary_on(uid),
            "vk_app": (config.VK_CLIENT_ID if config.VK_LOGIN else ""),
            "pay_rub": bool(tg) and payanyway.allowed_for(uid),
            "pay_offers": ([{"key": o["key"], "title": o["title"], "rub": o["rub"], "days": o["days"]} for o in plans.pay_offers_for(uid)]
@@ -797,6 +802,185 @@ def weight_del(day: str = "", x_device: str | None = Header(default=None)):
     return _profile_json(uid)
 
 
+# ---------- дневник питания на сайте (те же данные, что в боте) ----------
+
+class DiaryIn(BaseModel):
+    food: str | None = Field(None, max_length=20)
+    grams: float | None = None
+    title: str | None = Field(None, max_length=80)
+    kcal: int | float | str | None = None
+
+
+class DiaryRecipeIn(BaseModel):
+    title: str = Field(min_length=1, max_length=200)
+    text: str = Field(min_length=1, max_length=20000)
+
+
+class EnergyIn(BaseModel):
+    sex: str = Field(max_length=1)
+    age: int | float | str
+    height: int | float | str
+    weight: int | float | str
+    activity: str = Field(max_length=20)
+
+
+def _need_diary(dev_id: int) -> str:
+    uid = _need_consent(dev_id)
+    if not plans.diary_on(uid):
+        raise HTTPException(403, "Включите «Дневник питания» в настройках профиля")
+    return uid
+
+
+def _food_json(f: dict) -> dict:
+    return {"id": f["id"], "name": f["name"], "label": f["label"], "grams": f["grams"], "kcal100": f["kcal100"],
+            "portion_kcal": foods.portion_kcal(f), "ai": bool(f.get("ai"))}
+
+
+@app.get("/api/diary")
+def diary_get(days: int = 30, x_device: str | None = Header(default=None)):
+    uid = _need_diary(_dev(x_device))
+    days = days if days in (7, 30, 90) else 30
+    series = accounts.diary_series(uid, days)
+    en, g = accounts.energy_get(uid), accounts.goals_get(uid)
+    target = {"kcal": g["kcal"], "title": "цель"} if g["kcal"] else {"kcal": en["tdee"], "title": "расход"} if en else None
+    by_name = {f["name"]: f for f in foods.FOODS}
+    return {"days": days, "today": accounts.diary_day(uid), "target": target, "energy": en, "series": series, "stats": accounts.diary_stats(series),
+            "shares": charts.macro_shares(series), "reference": charts.REFERENCE, "note": accounts.DIARY_NOTE,
+            "weights": [w for w in accounts.weights_list(uid, days + 5) if w["day"] >= series[0]["day"]], "weight_goal": g["weight_goal"],
+            "frequent": [_food_json(by_name[n]) for n in accounts.diary_frequent(uid) if n in by_name],
+            "activities": [{"key": k, "title": v[1]} for k, v in accounts.ACTIVITY.items()]}
+
+
+@app.get("/api/foods")
+async def foods_find(q: str = "", ai: int = 0, x_device: str | None = Header(default=None)):
+    """Поиск продукта: сначала справочник; если там пусто или попросили (ai=2), оценка ИИ. ai=0: только справочник."""
+    uid = await asyncio.to_thread(lambda: _need_diary(_dev(x_device)))
+    q = q.strip()[:60]
+    found = foods.search(q) if ai != 2 else []
+    if found or not ai:
+        return {"items": [_food_json(f) for f in found], "why": ""}
+    food, why = await food_ai.estimate(uid, q)
+    return {"items": [_food_json(food)] if food else [], "why": why}
+
+
+@app.post("/api/diary")
+def diary_add(body: DiaryIn, x_device: str | None = Header(default=None)):
+    uid = _need_diary(_dev(x_device))
+    try:
+        if body.food:
+            food = food_ai.lookup(body.food)
+            if not food or body.grams is None or not 5 <= body.grams <= 2000:
+                raise ValueError("Нужен вес от 5 до 2000 г")
+            n = foods.nutrition(food, body.grams)
+            accounts.diary_add(uid, f"{food['name']} ({int(round(body.grams))} г)", n["kcal"], n["protein"], n["fat"], n["carb"], "ai" if food.get("ai") else "list")
+            kcal = n["kcal"]
+        else:
+            accounts.diary_add(uid, body.title or "", body.kcal, src="manual")
+            kcal = int(float(str(body.kcal).replace(",", ".")))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    usage.event("diary_add", uid)
+    return {"ok": True, "kcal": kcal}
+
+
+@app.post("/api/diary/recipe")
+def diary_recipe(body: DiaryRecipeIn, x_device: str | None = Header(default=None)):
+    """«Съел порцию» под рецептом: КБЖУ берётся из самого рецепта."""
+    uid = _need_diary(_dev(x_device))
+    d = cards.parse(body.title, body.text)
+    num = lambda v: float(str(v or 0).replace(",", "."))
+    try:
+        if not d["kcal"]:
+            raise ValueError("В рецепте нет калорийности")
+        kcal = int(num(d["kcal"]))
+        accounts.diary_add(uid, d["title"], kcal, num(d["protein"]), num(d["fat"]), num(d["carb"]), "recipe")
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    usage.event("diary_add", uid)
+    return {"ok": True, "kcal": kcal}
+
+
+@app.delete("/api/diary/{entry_id}")
+def diary_del(entry_id: int, x_device: str | None = Header(default=None)):
+    uid = _need_diary(_dev(x_device))
+    return {"ok": accounts.diary_delete(uid, entry_id)}
+
+
+@app.post("/api/energy")
+def energy_calc(body: EnergyIn, x_device: str | None = Header(default=None)):
+    """Примерный расход. Пол, возраст, рост и вес не сохраняем: только итог и уровень активности."""
+    uid = _need_diary(_dev(x_device))
+    try:
+        tdee = accounts.calc_tdee(body.sex, body.age, body.height, body.weight, body.activity)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    accounts.energy_set(uid, body.activity, tdee)
+    usage.event("diary_calc", uid)
+    return {"tdee": tdee}
+
+
+# ---------- список покупок по ссылке ----------
+
+class ListIn(BaseModel):
+    title: str = Field("", max_length=120)
+    items: list[dict] = Field(max_length=100)
+    done: list[int] = Field(default_factory=list, max_length=100)
+
+
+class ListToggle(BaseModel):
+    i: int
+    on: bool
+
+
+_list_log: dict[str, deque] = {}
+LIST_TOGGLES_PER_HOUR = 1000          # отметок в одном списке в час: хватит семье, но база не раздуется
+
+
+@app.post("/api/list")
+def list_create(body: ListIn, x_device: str | None = Header(default=None)):
+    uid = _uid(_dev(x_device))
+    try:
+        lid = shoplists.create(uid, body.title, body.items, body.done)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    usage.event("list_share", uid)
+    return {"id": lid, "url": shoplists.url(lid)}
+
+
+@app.get("/api/list/{lid}")
+def list_get(lid: str):
+    rec = shoplists.get(lid)
+    if not rec:
+        raise HTTPException(404, "Список не найден")
+    return Response(json.dumps(rec, ensure_ascii=False), media_type="application/json", headers={"Cache-Control": "no-store"})
+
+
+@app.post("/api/list/{lid}/toggle")
+def list_toggle(lid: str, body: ListToggle):
+    q = _list_log.setdefault(lid, deque())
+    now = time.time()
+    while q and now - q[0] > 3600:
+        q.popleft()
+    if len(q) >= LIST_TOGGLES_PER_HOUR:
+        raise HTTPException(429, "Слишком много отметок, подождите немного")
+    q.append(now)
+    if len(_list_log) > 5000:
+        for k in [k for k, v in _list_log.items() if not v or now - v[-1] > 3600]:
+            _list_log.pop(k, None)
+    done = shoplists.toggle(lid, body.i, body.on)
+    if done is None:
+        raise HTTPException(404, "Список не найден")
+    return {"done": done}
+
+
+@app.api_route("/l/{lid}", methods=["GET", "HEAD"], response_class=HTMLResponse)
+def list_page(lid: str):
+    rec = shoplists.get(lid)
+    if not rec:
+        raise HTTPException(404, "Список не найден или устарел")
+    return HTMLResponse(shoplists.page(lid, rec), headers={"Cache-Control": "no-store", "X-Robots-Tag": "noindex"})
+
+
 @app.delete("/api/profile/data")
 def profile_delete(x_device: str | None = Header(default=None)):
     uid = _need_account(_dev(x_device))
@@ -824,7 +1008,7 @@ class FeedbackIn(BaseModel):
     contact: str = Field("", max_length=100)
 
 
-@app.get("/r/{slug}", response_class=HTMLResponse)
+@app.api_route("/r/{slug}", methods=["GET", "HEAD"], response_class=HTMLResponse)
 def recipe_page(slug: str):
     """Публичная страница рецепта дня: превью для ВК и мессенджеров (og:image) и текст для поисковиков."""
     import recipe_pages
@@ -835,7 +1019,7 @@ def recipe_page(slug: str):
     return HTMLResponse(recipe_pages.render(rec, slug, base, config.BOT_USERNAME))
 
 
-@app.get("/rimg/{slug}.png")
+@app.api_route("/rimg/{slug}.png", methods=["GET", "HEAD"])
 def recipe_image(slug: str):
     import recipe_pages
     img = accounts.pub_recipe_image(slug) if recipe_pages.SLUG_RE.match(slug) else None
@@ -1392,7 +1576,7 @@ async def api_missing(body: MissingIn, x_device: str | None = Header(default=Non
         if body.ctx == "recipe":
             text, terms = await missing_mod.adapt_recipe(body.text, names, body.excluded)
             return {"title": extract_dish_title(text) or "Рецепт", "text": text,
-                    "shopping": _mark_home(dev_id, with_amounts(links_for(terms), amounts_from_recipe_text(text)))}
+                    "shopping": _mark_home(dev_id, with_amounts(links_for(terms), amounts_from_recipe_text(text), text))}
         if body.ctx == "day":
             await missing_mod.rebuild_day(cid, names)
             terms = day_menu.get_shopping_terms(cid)

@@ -189,6 +189,40 @@ def amounts_from_recipe_text(text: str) -> dict[str, int]:
     return result
 
 
+def amount_labels(text: str) -> dict[str, str]:
+    """Количества из раздела «Продукты:» как написаны в рецепте: {продукт: «2 ст. л.»}, включая то, что не посчитать в граммах («по вкусу»)."""
+    header = _PRODUCTS_HEADER_RE.search(text or "")
+    if not header:
+        return {}
+    out: dict[str, str] = {}
+    for line in text[header.end():].splitlines():
+        s = line.strip()
+        if not s:
+            if out:
+                break
+            continue
+        if not _BULLET_RE.match(s):
+            break
+        name, sep, rest = re.sub(r"\([^)]*\)", "", _BULLET_RE.sub("", s)).partition(" — ")
+        if sep and rest.strip(" .;,*_`"):
+            out[name.strip(" .*_`").lower()] = rest.strip(" .;,*_`")[:24]
+    return out
+
+
+def item_amounts(terms: list[str], grams: dict[str, int] | None, text: str = "") -> list[str]:
+    """Для каждого продукта строка «сколько»: сначала посчитанные граммы и штуки, иначе как написано в рецепте, иначе пусто."""
+    labels = amount_labels(text)
+    out = []
+    for term in terms:
+        found = _find_amount(term, grams) if grams else None
+        if found:
+            out.append(_fmt_amount(term, found[1]))
+            continue
+        lab = _find_amount(term, labels) if labels else None
+        out.append(lab[1] if lab else "")
+    return out
+
+
 def merge_amounts(parts: list[dict[str, int]]) -> dict[str, int]:
     """Складывает количества одних и тех же продуктов из нескольких блюд."""
     total: dict[str, int] = {}

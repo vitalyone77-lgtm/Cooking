@@ -339,7 +339,7 @@ def build_summary_view(chat_id: int) -> tuple[str, InlineKeyboardMarkup] | None:
         emoji_label = MEAL_LABELS[meal_key]
         short_title = m["title"] if len(m["title"]) <= 30 else m["title"][:27] + "..."
         b.button(text=f"{emoji_label}: {short_title}", callback_data=f"daymenu:show:{meal_key}")
-    b.button(text="🛒 Список покупок", callback_data="sl:o:d")
+    b.button(text="🛒 Продукты и магазины", callback_data="sl:o:d")
     b.button(text="📄 PDF", callback_data="pdf:d")
     b.button(text="🔄 Собрать меню заново", callback_data="daymenu:start")
     b.adjust(*([1] * len(order)), 2, 1)
