@@ -14,6 +14,7 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMar
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 import accounts
+import payanyway
 import ui
 import config
 import plans
@@ -697,7 +698,9 @@ def _sub_view(uid: int) -> tuple[str, InlineKeyboardMarkup]:
             b.button(text=f"⭐ {o['title']} — {o['stars']} звёзд", callback_data=f"pf:buy:stars:{o['key']}")
         if config.PAYMENT_PROVIDER_TOKEN and o["rub"]:
             b.button(text=f"💳 {o['title']} — {o['rub']} ₽", callback_data=f"pf:buy:rub:{o['key']}")
-    if not config.PAYMENT_STARS_ENABLED and not config.PAYMENT_PROVIDER_TOKEN:
+        if payanyway.enabled() and o["rub"]:
+            b.button(text=f"💳 Картой или СБП: {o['title']} — {o['rub']} ₽", callback_data=f"pf:pw:{o['key']}")
+    if not config.PAYMENT_STARS_ENABLED and not config.PAYMENT_PROVIDER_TOKEN and not payanyway.enabled():
         lines.append("Оплата скоро появится 🙂")
     b.button(text="🎟 Промокод", callback_data="pf:promo")
     b.button(text="⬅️ Профиль", callback_data="pf:back")
@@ -722,6 +725,25 @@ async def sub_open(callback: CallbackQuery, state: FSMContext):
     usage.event("sub_view", callback.message.chat.id)
     await callback.answer()
     await show_subscription(callback.message, edit=True)
+
+
+@router.callback_query(F.data.startswith("pf:pw:"))
+async def sub_pay_pw(callback: CallbackQuery):
+    """Оплата картой или СБП через PayAnyWay: бот присылает кнопку-ссылку на страницу оплаты."""
+    uid = callback.message.chat.id
+    try:
+        order = payanyway.create_order(uid, callback.data.split(":", 2)[2])
+    except ValueError as e:
+        await callback.answer(str(e), show_alert=True)
+        return
+    await callback.answer()
+    usage.event("pay_start", uid)
+    b = InlineKeyboardBuilder()
+    b.button(text="💳 Перейти к оплате", url=(config.WEB_APP_URL or "https://menu.ymayaka.ru").rstrip("/") + "/pay/" + order["id"])
+    b.button(text="⬅️ Подписка", callback_data="pf:sub")
+    b.adjust(1)
+    await ui.show(callback, f"Оплата: {order['title']}, {order['amount']} ₽.\n\nНажмите кнопку, оплатите картой или через СБП. Подписка включится сама "
+                  "в течение минуты, я напишу сюда. Ссылка действует сутки.", b.as_markup(), mode="edit")
 
 
 @router.callback_query(F.data.startswith("pf:buy:"))

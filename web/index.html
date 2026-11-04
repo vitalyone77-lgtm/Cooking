@@ -563,6 +563,7 @@ select{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--lin
       return profileCards(m).then(function(cards){
         h+=cards;
         var pre=(m.via==="vk")?linkCode():Promise.resolve(null);
+        if(m.pay_rub&&m.plan!=="premium")h+='<div class="card pcard"><h2>Оплатить подписку</h2><p class="sub" style="margin:0 0 10px">Картой или через СБП. Подписка включится сама через минуту после оплаты.</p>'+(m.pay_offers||[]).map(function(o){return '<button class="btn" data-pay="'+esc(o.key)+'">💳 '+esc(o.title)+' — '+o.rub+' ₽</button>';}).join("")+'</div>';
         if(m.via==="tg"&&m.vk_app)h+='<div class="card pcard"><h2>Привязать ВКонтакте</h2><p class="sub" style="margin:0 0 10px">Тогда можно входить и через ВК, а профиль останется общим.</p><div id="vk-btn"></div></div>';
         if(m.shelf_on){
           h+='<div class="card pcard shelf"><h2>Моя полка</h2><p class="sub" style="margin:0 0 8px">Долгоживущие продукты, которые уже есть дома. В списках покупок они идут отдельно.</p><div class="chips">'+
@@ -686,6 +687,7 @@ select{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--lin
     var f=d.querySelector(".btn");if(f)f.focus();
   }
   document.addEventListener("keydown",function(e){if(e.key==="Escape")closeGate();if(e.key==="Enter"&&e.target&&e.target.id==="bk-q"){BK.q=e.target.value||"";BK.page=0;show("book");}});
+  (function(){var q=new URLSearchParams(location.search).get("pay");if(q){try{history.replaceState(null,"",location.pathname);}catch(e){}setTimeout(function(){toast(q==="ok"?"Платёж принят. Подписка включится в течение минуты.":"Оплата не прошла или была отменена.");},900);}})();
   document.addEventListener("change",function(ev){var s=ev.target&&ev.target.closest&&ev.target.closest("[data-bk]");if(!s)return;BK[s.getAttribute("data-bk")]=s.value;BK.page=0;show("book");});
 
   // ---- список покупок: галочки «куплено» (помним на устройстве 12 часов) ----
@@ -794,6 +796,7 @@ select{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--lin
     if(b=t.closest(".k-wake")){ if(b.checked){navigator.wakeLock.request("screen").then(function(l){wake=l;}).catch(function(){b.checked=false;});} else if(wake){wake.release();wake=null;} return;}
     if(b=t.closest(".tab")){show(b.getAttribute("data-tab"));return;}
     if(b=t.closest("[data-open-favs]")){show("favs");return;}
+    if(b=t.closest("[data-pay]")){b.disabled=true;call("POST","/api/pay/create",{plan:b.getAttribute("data-pay")}).then(function(j){location.href=j.url;}).catch(function(e){b.disabled=false;alert(e.message);});return;}
     if(b=t.closest("[data-open-book]")){show("book");return;}
     if(b=t.closest("[data-bk-meal]")){BK.meal=b.getAttribute("data-bk-meal");BK.page=0;show("book");return;}
     if(b=t.closest("[data-bk-tag]")){var tg=b.getAttribute("data-bk-tag");BK.tag=BK.tag===tg?"":tg;BK.page=0;show("book");return;}

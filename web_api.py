@@ -49,6 +49,7 @@ from ai import generate_recipe
 import usage
 import accounts
 import book
+import payanyway
 import plans
 import profile_ctx
 from cuisines import CUISINE_LABELS, PORTION_LABELS, PORTION_ORDER
@@ -556,6 +557,9 @@ def me(x_device: str | None = Header(default=None)):
     out = {"linked": bool(tg), "plan": plans.plan_of(uid), "status": plans.status_text(uid), "left": left,
            "paywall": plans.paywall(), "memory": memory, "shelf_on": shelf_on, "bot": config.BOT_USERNAME, "feat": feat, "via": ("vk" if tg and tg >= accounts.VK_OFFSET else "tg" if tg else ""),
            "vk_app": (config.VK_CLIENT_ID if config.VK_LOGIN else ""),
+           "pay_rub": bool(tg) and payanyway.allowed_for(uid),
+           "pay_offers": ([{"key": o["key"], "title": o["title"], "rub": o["rub"], "days": o["days"]} for o in plans.offers() if o["rub"]]
+                          if bool(tg) and payanyway.allowed_for(uid) else []),
            "vk_redirect": (config.WEB_APP_URL or "https://menu.ymayaka.ru").rstrip("/") + "/api/vk/callback", "name": plans.PREMIUM_NAME,
            "trial": plans.trial_available(uid), "trial_days": int(plans.cfg("TRIAL_DAYS") or 0),
            "offers": [{"key": o["key"], "days": o["days"], "rub": o["rub"]} for o in plans.offers()],
@@ -644,6 +648,51 @@ def vk_callback():
     return HTMLResponse("<!doctype html><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>"
                         "<title>Вход</title><body style='font-family:sans-serif;padding:24px'>Можно закрыть это окно и вернуться на сайт."
                         "<p><a href='/'>На главную</a></p></body>")
+
+
+class PayIn(BaseModel):
+    plan: str = Field(min_length=1, max_length=30)
+
+
+@app.post("/api/pay/create")
+def pay_create(body: PayIn, x_device: str | None = Header(default=None)):
+    """«Оплатить картой или СБП»: создаём заказ, возвращаем адрес страницы, которая отправит подписанную форму в PayAnyWay."""
+    dev_id = _dev(x_device)
+    if not accounts.tg_of_device(dev_id):
+        raise HTTPException(403, "Сначала войдите в профиль (через ВКонтакте или Telegram)")
+    uid = _uid(dev_id)
+    if not payanyway.allowed_for(uid):
+        raise HTTPException(403, "Оплата пока недоступна")
+    try:
+        order = payanyway.create_order(uid, body.plan)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    usage.event("pay_start", uid)
+    return {"url": (config.WEB_APP_URL or "https://menu.ymayaka.ru").rstrip("/") + "/pay/" + order["id"]}
+
+
+@app.get("/pay/{oid}", response_class=HTMLResponse)
+def pay_page(oid: str):
+    order = payanyway.get_order(oid) if payanyway.enabled() else None
+    if not order or order["status"] != "new" or time.time() - order["ts"] > payanyway.ORDER_TTL:
+        raise HTTPException(404, "Заказ не найден или уже оплачен")
+    return HTMLResponse(payanyway.pay_page(order), headers={"Cache-Control": "no-store"})
+
+
+@app.api_route("/api/pay/payanyway", methods=["GET", "POST"])
+async def pay_notify(request: Request):
+    """Pay URL: уведомление PayAnyWay об оплате. Ответ SUCCESS (текстом) только после проверки подписи, суммы и заказа."""
+    params = dict(request.query_params)
+    if request.method == "POST":
+        try:
+            params.update({k: str(v) for k, v in (await request.form()).items()})
+        except Exception:  # noqa: BLE001
+            return Response("FAIL", media_type="text/plain; charset=utf-8")
+    text, info = payanyway.handle_notification(params)
+    if info and info["new"]:
+        usage.event("payment_pw", info["uid"])
+        await asyncio.to_thread(payanyway.notify_paid, info)
+    return Response(text, media_type="text/plain; charset=utf-8")
 
 
 @app.post("/api/unlink")

@@ -53,6 +53,8 @@ CREATE INDEX IF NOT EXISTS book_find ON book(cuisine, servings, portion);
 CREATE INDEX IF NOT EXISTS book_meal ON book(meal);
 CREATE TABLE IF NOT EXISTS book_seen(uid TEXT, book_id INTEGER, ts REAL, PRIMARY KEY(uid, book_id));
 CREATE TABLE IF NOT EXISTS alias(src TEXT PRIMARY KEY, dst TEXT, ts REAL);
+CREATE TABLE IF NOT EXISTS pay_orders(id TEXT PRIMARY KEY, uid TEXT, plan TEXT, days INTEGER, amount TEXT, test INTEGER, ts REAL, status TEXT, op TEXT);
+CREATE INDEX IF NOT EXISTS pay_orders_uid ON pay_orders(uid, ts);
 """
 
 
