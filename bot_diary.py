@@ -191,17 +191,22 @@ async def category_items(callback: CallbackQuery):
     await ui.show(callback, f"{title}\n\nВ кнопке: ккал в обычной порции.", b.as_markup(), mode="edit")
 
 
+PORTIONS = (("Малая", 7), ("Стандарт", 10), ("Большая", 15))      # доли обычной порции в десятых
+
+
 def _portion_view(food: dict) -> tuple[str, InlineKeyboardMarkup]:
-    n = foods.nutrition(food, food["grams"])
-    text = (f"{food['name']}\n{food['label']} ≈ {n['kcal']} ккал (Б {n['protein']:g} · Ж {n['fat']:g} · У {n['carb']:g})\n"
-            f"На 100 г: {food['kcal100']} ккал.\n\nСколько съели?")
+    g = food["grams"]
+    lines = [food["name"], f"Обычная порция: {food['label']}. На 100 г: {food['kcal100']} ккал.", ""]
+    for label, m in PORTIONS:
+        gr = int(round(g * m / 10))
+        n = foods.nutrition(food, gr)
+        lines.append(f"{label}: {gr} г ≈ {n['kcal']} ккал (Б {n['protein']:g} · Ж {n['fat']:g} · У {n['carb']:g})")
+    lines += ["", "Сколько съели?"]
     b = InlineKeyboardBuilder()
-    for label, m in (("½ порции", 5), ("1 порция", 10), ("1½", 15), ("2 порции", 20)):
-        b.button(text=label, callback_data=f"dy:p:{food['id']}:{m}")
-    b.adjust(2, 2)
-    b.row(InlineKeyboardButton(text="✏️ Свои граммы", callback_data=f"dy:g:{food['id']}"))
-    b.row(InlineKeyboardButton(text="⬅️ Разделы", callback_data="dy:cat"))
-    return text, b.as_markup()
+    b.row(*[InlineKeyboardButton(text=label, callback_data=f"dy:p:{food['id']}:{m}") for label, m in PORTIONS],
+          InlineKeyboardButton(text="✏️ Граммы", callback_data=f"dy:g:{food['id']}"))
+    b.row(InlineKeyboardButton(text="⬅️ Назад", callback_data="dy:cat"))
+    return "\n".join(lines), b.as_markup()
 
 
 @router.callback_query(F.data.startswith("dy:f:"))
@@ -227,6 +232,8 @@ async def add_portion(callback: CallbackQuery):
     try:
         _, _, fid, mult = callback.data.split(":")
         food, m = foods.BY_ID[fid], int(mult)
+        if m not in (5, 7, 10, 15, 20):
+            raise ValueError(m)
     except (ValueError, KeyError):
         await callback.answer()
         return
@@ -309,7 +316,8 @@ async def got_find(message: Message, state: FSMContext):
         return
     found = foods.search(message.text)
     if not found:
-        await ui.show(message, "Ничего не нашёл. Попробуйте другое слово или запишите сразу с калориями: «пицца 450».", _cancel_kb(), mode="tracked")
+        await ui.show(message, "Такого в справочнике нет. Попробуйте другое слово или запишите своё блюдо сразу с калориями: «домашняя пицца 450». "
+                  "Калории можно взять с упаковки или из рецепта.", _cancel_kb(), mode="tracked")
         return
     await state.clear()
     b = InlineKeyboardBuilder()
