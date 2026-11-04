@@ -692,6 +692,8 @@ async def pay_notify(request: Request):
     if info and info["new"]:
         usage.event("payment_pw", info["uid"])
         await asyncio.to_thread(payanyway.notify_paid, info)
+    if text == "SUCCESS":
+        return Response(payanyway.success_response(params, info), media_type="application/xml; charset=utf-8")
     return Response(text, media_type="text/plain; charset=utf-8")
 
 

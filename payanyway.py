@@ -13,6 +13,7 @@
 Сумма всегда с двумя знаками (120.00); пустой MNT_SUBSCRIBER_ID в подписи пустая строка.
 """
 import hashlib
+import json
 import hmac
 import logging
 import secrets
@@ -105,6 +106,20 @@ def pay_page(order: dict) -> str:
             f"<form method=post action='{escape(config.PAYANYWAY_URL, quote=True)}' id=f>{fields}"
             "<button type=submit style='font-size:18px;padding:12px 24px;border-radius:12px;border:0;background:#2d6a4f;color:#fff'>Перейти к оплате</button></form>"
             "<script>setTimeout(function(){document.getElementById('f').submit();},300);</script></body></html>")
+
+
+def success_response(p: dict, info: dict | None) -> str:
+    """Ответ на уведомление: XML с кодом 200 и номенклатурой. Без номенклатуры Self.PayAnyWay не регистрирует доход самозанятого и чек не формируется."""
+    g = lambda k: str(p.get(k, "") or "")
+    o = plans.offer(info["plan"]) if info else None
+    name = f"Подписка «{plans.PREMIUM_NAME}»" + (f", {o['title'].lower()}" if o else "")
+    inventory = json.dumps([{"name": name, "price": float(Decimal(info["amount"])) if info else 0, "quantity": 1,
+                             "vatTag": 1105, "pm": "full_payment", "po": "service"}], ensure_ascii=False)
+    sig = _md5("200" + g("MNT_ID") + g("MNT_TRANSACTION_ID") + config.PAYANYWAY_CODE)
+    return ('<?xml version="1.0" encoding="UTF-8"?>' + chr(10) + '<MNT_RESPONSE>'
+            f"<MNT_ID>{escape(g('MNT_ID'))}</MNT_ID><MNT_TRANSACTION_ID>{escape(g('MNT_TRANSACTION_ID'))}</MNT_TRANSACTION_ID>"
+            f"<MNT_RESULT_CODE>200</MNT_RESULT_CODE><MNT_SIGNATURE>{sig}</MNT_SIGNATURE>"
+            f"<MNT_ATTRIBUTES><ATTRIBUTE><KEY>INVENTORY</KEY><VALUE>{escape(inventory)}</VALUE></ATTRIBUTE></MNT_ATTRIBUTES></MNT_RESPONSE>")
 
 
 def handle_notification(p: dict) -> tuple[str, dict | None]:
