@@ -558,7 +558,7 @@ def me(x_device: str | None = Header(default=None)):
            "paywall": plans.paywall(), "memory": memory, "shelf_on": shelf_on, "bot": config.BOT_USERNAME, "feat": feat, "via": ("vk" if tg and tg >= accounts.VK_OFFSET else "tg" if tg else ""),
            "vk_app": (config.VK_CLIENT_ID if config.VK_LOGIN else ""),
            "pay_rub": bool(tg) and payanyway.allowed_for(uid),
-           "pay_offers": ([{"key": o["key"], "title": o["title"], "rub": o["rub"], "days": o["days"]} for o in plans.offers() if o["rub"]]
+           "pay_offers": ([{"key": o["key"], "title": o["title"], "rub": o["rub"], "days": o["days"]} for o in plans.pay_offers_for(uid)]
                           if bool(tg) and payanyway.allowed_for(uid) else []),
            "vk_redirect": (config.WEB_APP_URL or "https://menu.ymayaka.ru").rstrip("/") + "/api/vk/callback", "name": plans.PREMIUM_NAME,
            "trial": plans.trial_available(uid), "trial_days": int(plans.cfg("TRIAL_DAYS") or 0),

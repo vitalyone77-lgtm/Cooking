@@ -700,6 +700,9 @@ def _sub_view(uid: int) -> tuple[str, InlineKeyboardMarkup]:
             b.button(text=f"💳 {o['title']} — {o['rub']} ₽", callback_data=f"pf:buy:rub:{o['key']}")
         if payanyway.enabled() and o["rub"]:
             b.button(text=f"💳 Картой или СБП: {o['title']} — {o['rub']} ₽", callback_data=f"pf:pw:{o['key']}")
+    chk = plans.check_offer()
+    if payanyway.enabled() and chk and plans.is_tester(uid):
+        b.button(text=f"🧪 {chk['title']} — {chk['rub']} ₽", callback_data=f"pf:pw:{chk['key']}")
     if not config.PAYMENT_STARS_ENABLED and not config.PAYMENT_PROVIDER_TOKEN and not payanyway.enabled():
         lines.append("Оплата скоро появится 🙂")
     b.button(text="🎟 Промокод", callback_data="pf:promo")

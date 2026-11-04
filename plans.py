@@ -201,8 +201,28 @@ def offers() -> list[dict]:
     return out
 
 
+CHECK_KEY = "check"
+
+
+def check_offer() -> dict | None:
+    """Тариф «Проверка оплаты» (на 1 день, копейки): им владелец проверяет платёжку настоящими деньгами; видят и могут купить только тестировщики."""
+    rub = int(config.PAYANYWAY_CHECK_RUB or 0)
+    return {"key": CHECK_KEY, "days": 1, "rub": rub, "stars": 0, "title": "Проверка оплаты"} if rub > 0 else None
+
+
 def offer(key: str) -> dict | None:
+    if key == CHECK_KEY:
+        return check_offer()
     return next((o for o in offers() if o["key"] == key), None)
+
+
+def pay_offers_for(uid) -> list[dict]:
+    """Тарифы для оплаты картой: обычные + «Проверка оплаты» для тестировщиков."""
+    out = [o for o in offers() if o["rub"]]
+    chk = check_offer()
+    if chk and is_tester(uid):
+        out.append(chk)
+    return out
 
 
 def promo_codes() -> dict[str, int]:

@@ -65,7 +65,7 @@ def create_order(uid, plan_key: str) -> dict:
     if not enabled():
         raise ValueError("Оплата картой ещё не подключена")
     o = plans.offer(plan_key)
-    if not o or not o["rub"] or o["rub"] <= 0:
+    if not o or not o["rub"] or o["rub"] <= 0 or (o["key"] == plans.CHECK_KEY and not plans.is_tester(uid)):
         raise ValueError("Такого тарифа нет")
     n = accounts._q("SELECT COUNT(*) FROM pay_orders WHERE uid=? AND status='new' AND ts > ?", (str(uid), time.time() - 3600), one=True)[0]
     if n >= MAX_NEW_PER_HOUR:
