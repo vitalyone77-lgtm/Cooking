@@ -562,13 +562,18 @@ select{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--lin
         (m.paywall&&m.plan!=="premium"?(m.trial?'<button class="btn" data-gate-trial="1">Попробовать тариф «'+esc(m.name||"Повар")+'» '+(m.trial_days||7)+' дней бесплатно</button>':'')+'<a class="btn ghost" href="'+botLink("pay")+'" target="_blank" rel="noopener">Оформить подписку в Telegram</a>':'')+'</div>';
       return profileCards(m).then(function(cards){
         h+=cards;
+        var pre=(m.via==="vk")?linkCode():Promise.resolve(null);
+        if(m.via==="tg"&&m.vk_app)h+='<div class="card pcard"><h2>Привязать ВКонтакте</h2><p class="sub" style="margin:0 0 10px">Тогда можно входить и через ВК, а профиль останется общим.</p><div id="vk-btn"></div></div>';
         if(m.shelf_on){
           h+='<div class="card pcard shelf"><h2>Моя полка</h2><p class="sub" style="margin:0 0 8px">Долгоживущие продукты, которые уже есть дома. В списках покупок они идут отдельно.</p><div class="chips">'+
             (m.shelf||[]).map(function(x){return '<button class="chip" data-shelf-del="'+esc(x)+'">'+esc(x)+' ✕</button>';}).join("")+'</div>'+
             '<div class="row" style="margin-top:8px"><input type="text" id="shelf-add" maxlength="60" placeholder="оливковое масло" aria-label="Добавить на полку"><button class="btn" style="width:auto;margin:0" data-shelf-add="1">Добавить</button></div></div>';
         }
         h+='<button class="btn ghost" data-tab-go="help">Справка</button><button class="btn ghost" data-unlink="1">Выйти из профиля на этом устройстве</button>';
-        return h;
+        return pre.then(function(L){
+          if(L)h+='<div class="card pcard"><h2>Привязать Telegram</h2><p class="sub" style="margin:0 0 10px">Профиль, избранное и дневник станут общими с ботом.</p><a class="btn" data-link-go="1" href="'+esc(L.url)+'" target="_blank" rel="noopener">Привязать Telegram</a><div id="link-wait"></div></div>';
+          return h;
+        });
       });
     });
   }

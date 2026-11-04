@@ -630,7 +630,10 @@ def vk_login(body: VkIn, x_device: str | None = Header(default=None)):
     vk_id = str((user or {}).get("user_id") or "")
     if not vk_id.isdigit() or not 0 < int(vk_id) < 10**11:
         raise HTTPException(400, "ВКонтакте не подтвердил вход — попробуй ещё раз")
-    accounts.link_device_vk(dev_id, int(vk_id))
+    try:
+        accounts.link_device_vk(dev_id, int(vk_id))
+    except ValueError as e:
+        raise HTTPException(409, str(e))
     usage.event("site_link_vk", accounts.VK_OFFSET + int(vk_id))
     return {"ok": True}
 

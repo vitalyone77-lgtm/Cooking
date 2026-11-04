@@ -52,6 +52,7 @@ CREATE TABLE IF NOT EXISTS book(id INTEGER PRIMARY KEY AUTOINCREMENT, ts REAL, t
 CREATE INDEX IF NOT EXISTS book_find ON book(cuisine, servings, portion);
 CREATE INDEX IF NOT EXISTS book_meal ON book(meal);
 CREATE TABLE IF NOT EXISTS book_seen(uid TEXT, book_id INTEGER, ts REAL, PRIMARY KEY(uid, book_id));
+CREATE TABLE IF NOT EXISTS alias(src TEXT PRIMARY KEY, dst TEXT, ts REAL);
 """
 
 
@@ -220,9 +221,7 @@ def use_link_code(code: str, tg_id: int) -> int | None:
                 if cur.rowcount != 1:
                     return None
                 dev_id = c.execute("SELECT dev_id FROM link_codes WHERE code=?", (code,)).fetchone()[0]
-                c.execute("INSERT INTO links(dev_id, tg_id, ts) VALUES(?,?,?) ON CONFLICT(dev_id) DO UPDATE SET "
-                          "tg_id=excluded.tg_id, ts=excluded.ts", (dev_id, tg_id, time.time()))
-                _merge_device(c, dev_id, tg_id)
+                _link(c, dev_id, tg_id)
                 return dev_id
         finally:
             c.close()
@@ -248,9 +247,7 @@ def claim_login_code(code: str, dev_id: int) -> int | None:
                 if cur.rowcount != 1:
                     return None
                 tg_id = c.execute("SELECT tg_id FROM link_codes WHERE code=?", (code,)).fetchone()[0]
-                c.execute("INSERT INTO links(dev_id, tg_id, ts) VALUES(?,?,?) ON CONFLICT(dev_id) DO UPDATE SET "
-                          "tg_id=excluded.tg_id, ts=excluded.ts", (dev_id, tg_id, time.time()))
-                _merge_device(c, dev_id, tg_id)
+                _link(c, dev_id, tg_id)
                 return tg_id
         finally:
             c.close()
@@ -282,18 +279,28 @@ VK_OFFSET = 500_000_000_000     # аккаунт ВКонтакте хранит
 
 
 def link_device_vk(dev_id: int, vk_id: int) -> int:
-    """Вошли через VK ID: привязать устройство сайта к аккаунту ВКонтакте. -> номер аккаунта."""
+    """Вошли через VK ID. Устройство ещё без входа: привязываем к аккаунту ВК (или к Telegram, если этот ВК уже объединён).
+    Устройство уже вошло через Telegram: ВК вливается в этот профиль (ValueError, если этот ВК уже объединён с другим Telegram).
+    -> номер аккаунта, к которому привязано устройство."""
     acc = VK_OFFSET + int(vk_id)
     with _lock:
         c = _conn()
         try:
             with c:
+                al = c.execute("SELECT dst FROM alias WHERE src=?", (str(acc),)).fetchone()
+                cur = c.execute("SELECT tg_id FROM links WHERE dev_id=?", (dev_id,)).fetchone()
+                if cur and cur[0] and cur[0] < VK_OFFSET:
+                    if al and al[0] != str(cur[0]):
+                        raise ValueError("Этот ВКонтакте уже объединён с другим профилем Telegram")
+                    _merge_accounts(c, str(acc), str(cur[0]))
+                    return cur[0]
+                target = int(al[0]) if al else acc
                 c.execute("INSERT INTO links(dev_id, tg_id, ts) VALUES(?,?,?) ON CONFLICT(dev_id) DO UPDATE SET "
-                          "tg_id=excluded.tg_id, ts=excluded.ts", (dev_id, acc, time.time()))
-                _merge_device(c, dev_id, acc)
+                          "tg_id=excluded.tg_id, ts=excluded.ts", (dev_id, target, time.time()))
+                _merge_device(c, dev_id, target)
+                return target
         finally:
             c.close()
-    return acc
 
 
 def tg_of_device(dev_id: int) -> int | None:
@@ -479,6 +486,40 @@ def fav_import(rows: list[tuple]) -> None:
                 c.executemany("INSERT OR IGNORE INTO favs(uid, id, title, text, cuisine, ts) VALUES(?,?,?,?,?,?)", rows)
         finally:
             c.close()
+
+
+_MERGE_TABLES = ("favs", "shelf", "weights", "goals", "energy", "consents", "promo_used", "refs", "book_seen")
+
+
+def _merge_accounts(c, src: str, dst: str) -> None:
+    """Аккаунт ВКонтакте (src) вливается в аккаунт Telegram (dst): всё, что человек нажил, переходит к dst. При совпадениях остаётся то,
+    что уже есть у dst; подписка берётся самая длинная."""
+    if src == dst:
+        return
+    for t in _MERGE_TABLES:
+        c.execute(f"UPDATE OR IGNORE {t} SET uid=? WHERE uid=?", (dst, src))
+        c.execute(f"DELETE FROM {t} WHERE uid=?", (src,))
+    c.execute("UPDATE diary SET uid=? WHERE uid=?", (dst, src))
+    c.execute("UPDATE payments SET uid=? WHERE uid=?", (dst, src))
+    s = c.execute("SELECT until, source, trial_used FROM subs WHERE uid=?", (src,)).fetchone()
+    if s:
+        d = c.execute("SELECT until, trial_used FROM subs WHERE uid=?", (dst,)).fetchone()
+        if d:
+            c.execute("UPDATE subs SET until=?, trial_used=? WHERE uid=?", (max(s[0] or 0, d[0] or 0), max(s[2] or 0, d[1] or 0), dst))
+        else:
+            c.execute("INSERT INTO subs(uid, until, source, trial_used) VALUES(?,?,?,?)", (dst, s[0], s[1], s[2]))
+        c.execute("DELETE FROM subs WHERE uid=?", (src,))
+    c.execute("INSERT INTO alias(src, dst, ts) VALUES(?,?,?) ON CONFLICT(src) DO UPDATE SET dst=excluded.dst, ts=excluded.ts", (src, dst, time.time()))
+
+
+def _link(c, dev_id: int, tg_id: int) -> None:
+    """Привязать устройство сайта к аккаунту Telegram. Если оно уже было привязано к аккаунту ВК, ВК вливается в Telegram."""
+    old = c.execute("SELECT tg_id FROM links WHERE dev_id=?", (dev_id,)).fetchone()
+    c.execute("INSERT INTO links(dev_id, tg_id, ts) VALUES(?,?,?) ON CONFLICT(dev_id) DO UPDATE SET tg_id=excluded.tg_id, ts=excluded.ts",
+              (dev_id, tg_id, time.time()))
+    _merge_device(c, dev_id, tg_id)
+    if old and old[0] and old[0] >= VK_OFFSET and tg_id < VK_OFFSET:
+        _merge_accounts(c, str(old[0]), str(tg_id))
 
 
 def _merge_device(c, dev_id: int, tg_id: int) -> None:
