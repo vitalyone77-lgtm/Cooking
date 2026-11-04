@@ -17,6 +17,7 @@ from zoneinfo import ZoneInfo
 import httpx
 
 import accounts
+import book
 import cards
 import config
 import images
@@ -151,6 +152,7 @@ async def build_post_full(variant: int = 0) -> dict:
     if not recipe.strip() or recipe.startswith("😔"):
         raise RuntimeError("ИИ не смог составить рецепт")
     title = extract_dish_title(recipe)
+    book.add(data, title, recipe, _terms)                                # рецепт дня тоже пополняет книгу
     body = plain(recipe)
     text = f"Рецепт дня ({section})\n\n{body}\n\n{links_block()}\n\n{hashtags(tags)}"
     return {"title": title, "body": body, "text": text[:15000], "section": section}

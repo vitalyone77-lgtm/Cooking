@@ -46,6 +46,12 @@ CREATE TABLE IF NOT EXISTS consents(uid TEXT PRIMARY KEY, version INTEGER, ts RE
 CREATE TABLE IF NOT EXISTS goals(uid TEXT PRIMARY KEY, feats TEXT DEFAULT '', never TEXT DEFAULT '', kcal INTEGER, protein INTEGER,
   fat INTEGER, carb INTEGER, weight_goal REAL, updated REAL);
 CREATE TABLE IF NOT EXISTS weights(uid TEXT, day TEXT, kg REAL, PRIMARY KEY(uid, day));
+CREATE TABLE IF NOT EXISTS book(id INTEGER PRIMARY KEY AUTOINCREMENT, ts REAL, title TEXT, key TEXT UNIQUE, text TEXT, terms TEXT, cuisine TEXT,
+  meal TEXT, minutes INTEGER, kcal INTEGER, protein REAL, fat REAL, carb REAL, servings INTEGER, portion TEXT, appliance TEXT, tags TEXT,
+  text_l TEXT, uses INTEGER DEFAULT 0);
+CREATE INDEX IF NOT EXISTS book_find ON book(cuisine, servings, portion);
+CREATE INDEX IF NOT EXISTS book_meal ON book(meal);
+CREATE TABLE IF NOT EXISTS book_seen(uid TEXT, book_id INTEGER, ts REAL, PRIMARY KEY(uid, book_id));
 """
 
 
@@ -677,7 +683,8 @@ def delete_my_data(uid) -> dict:
     uid = str(uid)
     out = {"weights": _q("DELETE FROM weights WHERE uid=?", (uid,)), "goals": _q("DELETE FROM goals WHERE uid=?", (uid,)),
            "shelf": _q("DELETE FROM shelf WHERE uid=?", (uid,)), "consent": _q("DELETE FROM consents WHERE uid=?", (uid,)),
-           "diary": _q("DELETE FROM diary WHERE uid=?", (uid,)), "energy": _q("DELETE FROM energy WHERE uid=?", (uid,))}
+           "diary": _q("DELETE FROM diary WHERE uid=?", (uid,)), "energy": _q("DELETE FROM energy WHERE uid=?", (uid,)),
+           "book_seen": _q("DELETE FROM book_seen WHERE uid=?", (uid,))}
     return out
 
 

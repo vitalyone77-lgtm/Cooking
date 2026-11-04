@@ -142,6 +142,7 @@ VK_API_VERSION = os.getenv("VK_API_VERSION", "5.199")
 VK_API_URL = os.getenv("VK_API_URL", "https://api.vk.com")
 # Вход на сайте через VK ID (для тех, у кого Telegram не открывается без VPN). ID приложения не секретный; защищённый ключ не нужен:
 # виджет обменивает код в браузере, а сервер проверяет токен запросом к VK.
+BOOK_REPEAT_DAYS = int(os.getenv("BOOK_REPEAT_DAYS", "14"))     # один и тот же рецепт из книги одному человеку не чаще, чем раз в столько дней
 VK_CLIENT_ID = os.getenv("VK_CLIENT_ID", "54875605")
 VK_ID_API_URL = os.getenv("VK_ID_API_URL", "https://id.vk.com")
 VK_LOGIN = os.getenv("VK_LOGIN", "true").strip().lower() not in ("0", "false", "no", "off")

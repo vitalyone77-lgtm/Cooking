@@ -47,6 +47,7 @@ fav_mod.FAVORITES_FILE = web_db.DATA_DIR / "favorites.json"
 from ai import generate_recipe
 import usage
 import accounts
+import book
 import plans
 import profile_ctx
 from cuisines import CUISINE_LABELS, PORTION_LABELS, PORTION_ORDER
@@ -316,13 +317,18 @@ async def api_recipe(p: Params, x_device: str | None = Header(default=None)):
     sp = _spend(dev_id, "recipe")
 
     async def work():
-        query, results = await search_recipes(data)
-        text = await generate_recipe(data, query, format_results_for_prompt(results))
-        if text.startswith("😔"):
-            raise RuntimeError("ИИ сейчас недоступен, попробуй позже")
-        text, terms = extract_shopping_terms(text)
-        if not text.strip():
-            raise RuntimeError("Не получилось составить рецепт под эти параметры")
+        hit = book.find(_uid(dev_id), data)
+        if hit:
+            text, terms = hit["text"], hit["terms"]
+        else:
+            query, results = await search_recipes(data)
+            text = await generate_recipe(data, query, format_results_for_prompt(results))
+            if text.startswith("😔"):
+                raise RuntimeError("ИИ сейчас недоступен, попробуй позже")
+            text, terms = extract_shopping_terms(text)
+            if not text.strip():
+                raise RuntimeError("Не получилось составить рецепт под эти параметры")
+            book.add(data, extract_dish_title(text) or "Рецепт", text, terms)       # новый рецепт пополняет книгу
         return {"title": extract_dish_title(text) or "Рецепт", "text": text,
                 "shopping": _mark_home(dev_id, with_amounts(links_for(terms), amounts_from_recipe_text(text)))}
 

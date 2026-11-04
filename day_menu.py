@@ -30,6 +30,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from keyboards import MEAL_LABELS, MEAL_KCAL_SHARE, SNACK_MEALS
 from cuisines import SNACK_RULE
 from search import search_recipes, format_results_for_prompt
+import book
 from ai import generate_recipe, call_llm_with_fallback
 from prompts import DAY_MENU_SYSTEM_PROMPT, DAY_MENU_BLOCK_DELIMITER, build_day_menu_user_prompt
 from shopping import (
@@ -119,6 +120,7 @@ async def _generate_one_meal(meal_key: str, base_data: dict, selected_meals: lis
         if not recipe_text.strip():
             raise RuntimeError("пустой ответ ИИ")
         dish_title = extract_dish_title(recipe_text) or _meal_label_text(meal_key)
+        book.add(data, dish_title, recipe_text, shopping_terms)          # блюдо из меню пополняет книгу рецептов
         return {
             "meal_key": meal_key,
             "ok": True,

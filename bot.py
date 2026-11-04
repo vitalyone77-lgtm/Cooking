@@ -55,6 +55,7 @@ import bot_shop
 import bot_social
 import bot_diary
 import bot_promo
+import book
 import ui
 import bot_vision
 import accounts
@@ -696,19 +697,23 @@ async def step_confirm_go(callback: CallbackQuery, state: FSMContext):
         return
     await callback.answer()  # отвечаем Telegram сразу, не дожидаясь долгого поиска+ИИ
     await callback.message.edit_reply_markup()
-    status_msg = await callback.message.answer("🔎 Ищу рецепты в интернете...")
     data = await state.get_data()
     data = {**data, 'portion': data.get('portion') or get_portion(callback.message.chat.id)}
+    hit = book.find(callback.message.chat.id, data)
+    status_msg = await callback.message.answer("📖 Нашёл в книге рецептов…" if hit else "🔎 Ищу рецепты в интернете...")
 
     try:
-        search_query, results = await search_recipes(data)
-        await status_msg.edit_text(
-            f"🔎 Искал по запросу: «{search_query}»\n🤖 Анализирую и подбираю рецепт..."
-        )
+        if hit:
+            recipe_text, shopping_terms = hit["text"], hit["terms"]
+        else:
+            search_query, results = await search_recipes(data)
+            await status_msg.edit_text(
+                f"🔎 Искал по запросу: «{search_query}»\n🤖 Анализирую и подбираю рецепт..."
+            )
 
-        results_text = format_results_for_prompt(results)
-        recipe_text = await generate_recipe(data, search_query, results_text)
-        recipe_text, shopping_terms = extract_shopping_terms(recipe_text)
+            results_text = format_results_for_prompt(results)
+            recipe_text = await generate_recipe(data, search_query, results_text)
+            recipe_text, shopping_terms = extract_shopping_terms(recipe_text)
 
         if not recipe_text.strip():
             await status_msg.edit_text(
@@ -720,6 +725,8 @@ async def step_confirm_go(callback: CallbackQuery, state: FSMContext):
             return
 
         dish_title = extract_dish_title(recipe_text)
+        if not hit:
+            book.add(data, dish_title, recipe_text, shopping_terms)       # новый рецепт пополняет книгу
         save_last_request(callback.message.chat.id, data, dish_title)
 
         set_last_recipe(callback.message.chat.id, dish_title, recipe_text, data.get("cuisine"))
