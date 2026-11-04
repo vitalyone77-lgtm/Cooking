@@ -83,6 +83,10 @@ input[type=text]{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid
 .tm.end{background:var(--danger);color:#fff;border-color:var(--danger)}.tm.end small,.tm.end .x{color:#fff}
 .favstrip{display:flex;align-items:center;gap:8px;width:100%;min-height:44px;padding:8px 14px;margin:0 0 12px;border-radius:12px;background:var(--soft);color:var(--primary);font-weight:600;font-size:15px;text-align:left}
 .favstrip .n{margin-left:auto;font-weight:400;color:var(--muted)}
+.favrow{display:flex;gap:8px;margin:0 0 12px}.favrow .favstrip{flex:1;min-width:0;margin:0;justify-content:space-between}
+.rcard{display:block;width:100%;height:auto;border-radius:12px;margin:8px 0}
+.bkgrid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:10px 0}
+.bk-sel{min-height:44px;padding:8px 10px;border:1px solid rgba(0,0,0,.18);border-radius:10px;background:var(--bg,#fff);color:inherit;font:inherit;width:100%}
 .chip.mini{min-height:36px;padding:0 12px;font-size:14px}
 .home{margin-top:10px;padding:10px 12px;border-radius:12px;background:var(--soft);font-size:15px}
 .pcard{padding:14px 16px}.pcard h2{font-size:18px;margin:0 0 6px}
@@ -469,7 +473,7 @@ select{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--lin
   function showRecipe(res){
     LAST_RECIPE=res.text;
     try{ls("lastrecipe",JSON.stringify(res));}catch(e){}
-        main.innerHTML='<h1>'+esc(res.title)+'</h1><div class="card" style="padding:4px 16px 16px">'+recipeHTML(res.text)+actions(res.title,res.text)+'</div>'+shoppingHTML(res.shopping,"Найти продукты в магазине","recipe")+adSlot("inline")+'<button class="btn ghost" id="again">🍳 Подобрать ещё</button>';
+        main.innerHTML='<h1>'+esc(res.title)+'</h1><div class="card" style="padding:4px 16px 16px">'+(res.card?'<img class="rcard" src="'+esc(res.card)+'" alt="" loading="lazy">':'')+recipeHTML(res.text)+actions(res.title,res.text)+'</div>'+shoppingHTML(res.shopping,"Найти продукты в магазине","recipe")+adSlot("inline")+'<button class="btn ghost" id="again">🍳 Подобрать ещё</button>';
         document.getElementById("again").onclick=function(){show("new");};
     if(Object.keys(TM).length)tmEnsureTick();
     window.scrollTo(0,0);
@@ -521,7 +525,8 @@ select{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--lin
   // ---- избранное: тонкая полоска наверху «Создать» и «Готовые меню» → отдельный экран ----
   function favStrip(){
     var n=ME.favorites;
-    return '<button class="favstrip" data-open-favs="1">❤️ Любимые рецепты<span class="n">'+(n?n+" ›":"›")+'</span></button>';
+    return '<div class="favrow"><button class="favstrip" data-open-favs="1">❤️ Любимые<span class="n">'+(n?n+" ›":"›")+'</span></button>'+
+      '<button class="favstrip" data-open-book="1">📖 Книга<span class="n">›</span></button></div>';
   }
   function favNote(){
     if(ME.linked) return '<div class="card" style="padding:12px 16px;margin:0 0 12px;border-left:4px solid var(--primary)">✅ Избранное сохранено в профиле — оно то же, что в Telegram-боте, и не пропадёт при смене телефона.</div>';
@@ -606,7 +611,34 @@ select{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--lin
     })();
   }
 
-  var VIEWS={menus:viewMenus,favs:viewFavs,profile:viewProfile,help:viewHelp};
+  // ---- «Книга рецептов»: общая книга, листать без лимитов, рядом с «Любимыми» ----
+  var BK0={meal:"",tag:"",q:"",max_min:"",max_kcal:"",appliance:"",servings:"",main:"",page:0}, BK=JSON.parse(JSON.stringify(BK0));
+  function bkQuery(){var p=[];Object.keys(BK).forEach(function(k){if(k==="page"){if(BK.page)p.push("page="+BK.page);}else if(BK[k]!=="")p.push(k+"="+encodeURIComponent(BK[k]));});return p.join("&");}
+  function bkSelect(name,opts){
+    return '<select class="bk-sel" data-bk="'+name+'" aria-label="'+esc(opts[0][1])+'">'+opts.map(function(o){return '<option value="'+esc(o[0])+'"'+(String(BK[name])===o[0]?' selected':'')+'>'+esc(o[1])+'</option>';}).join("")+'</select>';
+  }
+  function viewBook(){
+    return call("GET","/api/book"+(bkQuery()?"?"+bkQuery():"")).then(function(d){
+      var m=d.meta, h=favStrip()+'<h1>📖 Книга рецептов</h1><p class="sub">В книге '+m.total+' рецептов'+(m.today?', сегодня добавилось '+m.today:'')+'. Каждый новый рецепт, который составляет помощник, попадает сюда, поэтому книга пополняется каждый день. Листать можно без ограничений. Нужен рецепт под вас: «Создать» сначала ищет в книге, потом составляет новый.</p>';
+      h+='<div class="chips">'+[{key:"",title:"📚 Все",count:m.total}].concat(m.meals).map(function(x){return '<button class="chip" data-bk-meal="'+esc(x.key)+'" aria-pressed="'+(BK.meal===x.key)+'">'+esc(x.title)+' ('+x.count+')</button>';}).join("")+'</div>';
+      h+='<div class="row" style="margin-top:10px"><input type="text" id="bk-q" maxlength="40" placeholder="слово: борщ, говядина, творог" aria-label="Поиск по книге" value="'+esc(BK.q)+'"><button class="btn" style="width:auto;margin:0" data-bk-search="1">Найти</button></div>';
+      var mainOpts=[["","Любая основа"]].concat(m.mains.map(function(x){return [x,x.charAt(0).toUpperCase()+x.slice(1)];}));
+      h+='<div class="bkgrid">'+bkSelect("appliance",[["","Любая техника"],["stove","Плита"],["oven","Духовка"],["multicooker","Мультиварка"],["airfryer","Аэрогриль"]])+
+        bkSelect("servings",[["","Любые порции"],["1","1 порция"],["2","2 порции"],["3","3 порции"],["4","4 порции"],["6","6 порций"]])+
+        bkSelect("main",mainOpts)+bkSelect("max_kcal",[["","Любые калории"],["300","до 300 ккал"],["450","до 450 ккал"],["600","до 600 ккал"]])+
+        bkSelect("max_min",[["","Любое время"],["15","до 15 мин"],["30","до 30 мин"],["60","до 60 мин"]])+'<button class="btn ghost" style="margin:0" data-bk-reset="1">🧹 Сбросить</button></div>';
+      if(m.tags.length)h+='<div class="chips">'+m.tags.map(function(t){return '<button class="chip" data-bk-tag="'+esc(t[0])+'" aria-pressed="'+(BK.tag===t[0])+'">'+esc(t[0])+' ('+t[1]+')</button>';}).join("")+'</div>';
+      h+='<p class="sub" style="margin:12px 0 8px">Найдено: '+d.total+(d.pages>1?' (страница '+(d.page+1)+' из '+d.pages+')':'')+'</p>';
+      if(!d.items.length)h+='<div class="card empty">Под такие условия в книге пока ничего нет. Ослабьте условия или нажмите «Создать»: помощник составит новый рецепт, и он тоже попадёт в книгу.<br><button class="btn" data-tab-go="new" style="margin-top:10px">🍳 Создать рецепт</button></div>';
+      d.items.forEach(function(r){
+        var sub=[r.kcal?r.kcal+" ккал":"",r.minutes?r.minutes+" мин":"",r.servings?r.servings+" порц.":""].filter(Boolean).join(" · ");
+        h+=accordion(esc(r.title),sub,"",'<img class="rcard" src="'+esc(r.card)+'" alt="" loading="lazy"><div class="sub">'+esc((r.tags||[]).join(" "))+'</div>'+recipeHTML(r.text)+actions(r.title,r.text),false);
+      });
+      if(d.pages>1)h+='<div class="row" style="margin-top:12px">'+(d.page>0?'<button class="btn ghost" data-bk-page="'+(d.page-1)+'">◀ Назад</button>':'')+(d.page<d.pages-1?'<button class="btn" data-bk-page="'+(d.page+1)+'">Дальше ▶</button>':'')+'</div>';
+      return h;
+    });
+  }
+  var VIEWS={menus:viewMenus,favs:viewFavs,book:viewBook,profile:viewProfile,help:viewHelp};
   function offlineBanner(){return '<div class="card" style="padding:12px 16px;margin:0 0 12px;border-left:4px solid var(--primary)"><strong>📴 Нет интернета.</strong> Показываю сохранённое с прошлого раза: меню, план, избранное, рецепты и таймеры работают. Новые подборы — когда появится сеть.</div>';}
   window.addEventListener("online",function(){if(OFFLINE&&(cur==="menus"||cur==="favs"))show(cur);});
   function show(tab){
@@ -648,7 +680,8 @@ select{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--lin
     document.body.appendChild(d);
     var f=d.querySelector(".btn");if(f)f.focus();
   }
-  document.addEventListener("keydown",function(e){if(e.key==="Escape")closeGate();});
+  document.addEventListener("keydown",function(e){if(e.key==="Escape")closeGate();if(e.key==="Enter"&&e.target&&e.target.id==="bk-q"){BK.q=e.target.value||"";BK.page=0;show("book");}});
+  document.addEventListener("change",function(ev){var s=ev.target&&ev.target.closest&&ev.target.closest("[data-bk]");if(!s)return;BK[s.getAttribute("data-bk")]=s.value;BK.page=0;show("book");});
 
   // ---- список покупок: галочки «куплено» (помним на устройстве 12 часов) ----
   var BUY_TTL=12*3600*1000;
@@ -756,6 +789,12 @@ select{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--lin
     if(b=t.closest(".k-wake")){ if(b.checked){navigator.wakeLock.request("screen").then(function(l){wake=l;}).catch(function(){b.checked=false;});} else if(wake){wake.release();wake=null;} return;}
     if(b=t.closest(".tab")){show(b.getAttribute("data-tab"));return;}
     if(b=t.closest("[data-open-favs]")){show("favs");return;}
+    if(b=t.closest("[data-open-book]")){show("book");return;}
+    if(b=t.closest("[data-bk-meal]")){BK.meal=b.getAttribute("data-bk-meal");BK.page=0;show("book");return;}
+    if(b=t.closest("[data-bk-tag]")){var tg=b.getAttribute("data-bk-tag");BK.tag=BK.tag===tg?"":tg;BK.page=0;show("book");return;}
+    if(b=t.closest("[data-bk-page]")){BK.page=+b.getAttribute("data-bk-page")||0;show("book");return;}
+    if(b=t.closest("[data-bk-search]")){BK.q=(document.getElementById("bk-q")||{}).value||"";BK.page=0;show("book");return;}
+    if(b=t.closest("[data-bk-reset]")){BK=JSON.parse(JSON.stringify(BK0));show("book");return;}
     if(b=t.closest("[data-tab-go]")){show(b.getAttribute("data-tab-go"));return;}
     if(b=t.closest("[data-link-go]")){linkWait();return;}   // ссылка откроется сама, ждём подтверждения
     if(b=t.closest("[data-unlink]")){if(confirm("Выйти из профиля на этом устройстве? В Telegram всё останется."))call("POST","/api/unlink").then(function(){ocClear();return loadMe();}).then(function(){show("profile");}).catch(fail);return;}

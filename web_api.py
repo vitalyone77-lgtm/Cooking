@@ -10,6 +10,7 @@ ai.py, search.py, prompts.py, day_menu.py, week_menu.py, favorites.py, shopping.
 """
 import asyncio
 import contextvars
+import functools
 import httpx
 from collections import deque
 from html import escape
@@ -318,8 +319,9 @@ async def api_recipe(p: Params, x_device: str | None = Header(default=None)):
 
     async def work():
         hit = book.find(_uid(dev_id), data)
+        bid = None
         if hit:
-            text, terms = hit["text"], hit["terms"]
+            text, terms, bid = hit["text"], hit["terms"], hit["id"]
         else:
             query, results = await search_recipes(data)
             text = await generate_recipe(data, query, format_results_for_prompt(results))
@@ -328,11 +330,49 @@ async def api_recipe(p: Params, x_device: str | None = Header(default=None)):
             text, terms = extract_shopping_terms(text)
             if not text.strip():
                 raise RuntimeError("Не получилось составить рецепт под эти параметры")
-            book.add(data, extract_dish_title(text) or "Рецепт", text, terms)       # новый рецепт пополняет книгу
-        return {"title": extract_dish_title(text) or "Рецепт", "text": text,
+            bid = book.add(data, extract_dish_title(text) or "Рецепт", text, terms)       # новый рецепт пополняет книгу
+        return {"title": extract_dish_title(text) or "Рецепт", "text": text, "card": f"/api/bookimg/{bid}.png" if bid else None,
                 "shopping": _mark_home(dev_id, with_amounts(links_for(terms), amounts_from_recipe_text(text)))}
 
     return _start_job(dev_id, work, sp)
+
+
+# ---------------- книга рецептов ----------------
+
+BOOK_PAGE = 8
+
+
+@app.get("/api/book")
+def api_book(meal: str = "", tag: str = "", q: str = "", max_min: int = 0, max_kcal: int = 0, appliance: str = "", servings: int = 0,
+             main: str = "", page: int = 0, x_device: str | None = Header(default=None)):
+    """Листать общую книгу рецептов: разделы, хештеги, слово, время, калории, техника, порции, основной ингредиент. Без лимитов (ИИ не вызывается)."""
+    _dev(x_device)
+    page = max(0, min(page, 500))
+    rows, total = book.search(meal=meal or None, tag=tag[:30] or None, q=q[:40] or None, max_min=max_min if 0 < max_min <= 600 else None,
+                              max_kcal=max_kcal if 0 < max_kcal <= 5000 else None, appliance=appliance or None,
+                              servings=servings if 1 <= servings <= 6 else None, main=main or None, limit=BOOK_PAGE, offset=page * BOOK_PAGE)
+    counts = book.counts_by_meal()
+    return {"items": [{"id": r["id"], "title": r["title"], "text": r["text"], "tags": r["tags"], "kcal": r["kcal"], "minutes": r["minutes"],
+                       "meal": r["meal"], "servings": r["servings"], "card": f"/api/bookimg/{r['id']}.png"} for r in rows],
+            "total": total, "pages": max(1, -(-total // BOOK_PAGE)), "page": page,
+            "meta": {"total": book.total(), "today": book.added_today(), "meals": [{"key": m, "title": book.MEAL_TITLES[m], "count": counts.get(m, 0)} for m in book.MEALS],
+                     "tags": [[t, n] for t, n in book.top_tags(12)], "mains": list(book.MAINS)}}
+
+
+@functools.lru_cache(maxsize=300)
+def _book_card(book_id: int) -> bytes | None:
+    import cards
+    r = book.get(book_id)
+    return cards.make_card(r["title"], r["text"]) if r else None
+
+
+@app.get("/api/bookimg/{book_id}.png")
+def api_bookimg(book_id: int):
+    """Карточка рецепта из книги (рисуется на лету, кэшируется)."""
+    png = _book_card(book_id) if 0 < book_id < 10**9 else None
+    if not png:
+        raise HTTPException(404, "Рецепта нет")
+    return Response(content=png, media_type="image/png", headers={"Cache-Control": "public, max-age=86400"})
 
 
 @app.post("/api/daymenu")
