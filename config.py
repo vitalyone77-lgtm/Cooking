@@ -135,6 +135,7 @@ PAYMENT_PROVIDER_TOKEN = os.getenv("PAYMENT_PROVIDER_TOKEN", "")
 PAYANYWAY_MNT_ID = os.getenv("PAYANYWAY_MNT_ID", "").strip()
 PAYANYWAY_CODE = os.getenv("PAYANYWAY_CODE", "").strip()
 PAYANYWAY_URL = os.getenv("PAYANYWAY_URL", "https://www.payanyway.ru/assistant.htm")
+PAYANYWAY_SIGN_FORM = os.getenv("PAYANYWAY_SIGN_FORM", "1")   # 0 — не подписывать форму оплаты (на счёте самозанятого подпись формы не включена, с подписью Монета отвечает «Неправильная подпись»)
 PAYANYWAY_TEST = os.getenv("PAYANYWAY_TEST", "1")          # 1 — тестовый режим (по умолчанию), 0 — боевой: включить, когда проверено
 # Кому из Telegram приходят тревоги (потолок, баланс DeepSeek) и кто может /grant: id через запятую
 ADMIN_TG_IDS = [int(x) for x in os.getenv("ADMIN_TG_IDS", "").replace(" ", "").split(",") if x.strip().lstrip("-").isdigit()]

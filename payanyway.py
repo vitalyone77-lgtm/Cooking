@@ -87,9 +87,12 @@ def get_order(oid: str) -> dict | None:
 def form_fields(order: dict) -> dict:
     o = plans.offer(order["plan"]) or {"title": order["plan"]}
     sig = form_signature(str(config.PAYANYWAY_MNT_ID), order["id"], order["amount"], "RUB", "", order["test"], config.PAYANYWAY_CODE)
-    return {"MNT_ID": str(config.PAYANYWAY_MNT_ID), "MNT_TRANSACTION_ID": order["id"], "MNT_CURRENCY_CODE": "RUB", "MNT_AMOUNT": order["amount"],
-            "MNT_TEST_MODE": str(order["test"]), "MNT_DESCRIPTION": f"Кухонный помощник: подписка «{plans.PREMIUM_NAME}», {o['title'].lower()}",
-            "MNT_SIGNATURE": sig, "moneta.locale": "ru"}
+    fields = {"MNT_ID": str(config.PAYANYWAY_MNT_ID), "MNT_TRANSACTION_ID": order["id"], "MNT_CURRENCY_CODE": "RUB", "MNT_AMOUNT": order["amount"],
+              "MNT_TEST_MODE": str(order["test"]), "MNT_DESCRIPTION": f"Кухонный помощник: подписка «{plans.PREMIUM_NAME}», {o['title'].lower()}",
+              "moneta.locale": "ru"}
+    if str(config.PAYANYWAY_SIGN_FORM).strip().lower() not in ("0", "false", "no", "off"):
+        fields["MNT_SIGNATURE"] = sig
+    return fields
 
 
 def pay_page(order: dict) -> str:
