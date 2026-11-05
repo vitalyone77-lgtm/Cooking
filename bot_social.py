@@ -69,7 +69,7 @@ async def _draft(bot, chat_id: int, variant: int = 0) -> None:
     except Exception as e:  # noqa: BLE001
         await bot.send_message(chat_id, f"😔 Не получилось составить рецепт: {e}", parse_mode=None)
         return
-    draft = {"title": d["title"], "text": d["text"], "body": d["body"], "variant": variant}
+    draft = {"title": d["title"], "text": d["text"], "body": d["body"], "variant": variant, "section": d["section"]}
     accounts.sess_set(f"soc:draft:{chat_id}", draft)
     auto = config.SOCIAL_IMAGES and images.configured()
     await bot.send_message(chat_id, f"Черновик ({_where()}):\n\n{d['text'][:3500]}", parse_mode=None,
