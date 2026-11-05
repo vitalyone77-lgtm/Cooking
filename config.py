@@ -176,6 +176,8 @@ SOCIAL_IMAGES = (_si == "true") if _si else IMAGE_PROVIDER in ("card", "free")
 # Как картинка попадает в запись ВК: link (ссылка на страницу рецепта, ВК показывает превью-карточку; работает с ключом сообщества)
 # или upload (загрузка фото в ВК, нужен ПОЛЬЗОВАТЕЛЬСКИЙ ключ: ключ сообщества получает отказ, код 27)
 VK_IMAGE_MODE = os.getenv("VK_IMAGE_MODE", "link").strip().lower()
+# Постоянные картинки направлений из альбома сообщества: zavtrak=457239028,obed=457239029 (см. design/vk/sections)
+VK_SECTION_PHOTOS = os.getenv("VK_SECTION_PHOTOS", "").strip()
 VK_PHOTO_TOKEN = os.getenv("VK_PHOTO_TOKEN", "").strip()      # ключ пользователя с правом photos: только для загрузки фото на стену (ключу сообщества ВК это запрещает)
 PARTNER_PASSWORD = os.getenv("PARTNER_PASSWORD", "")
 PARTNER_SHARE_PCT = int(os.getenv("PARTNER_SHARE_PCT", "50"))     # доля партнёра от выручки, %

@@ -27,14 +27,24 @@ from shopping import extract_dish_title, extract_shopping_terms
 
 logger = logging.getLogger(__name__)
 
-# разделы «рецепта дня»: чередуются по дате (завтрак, обед, ужин, перекус, десерт), у каждого свои хештеги
+# разделы «рецепта дня»: чередуются по дате, у каждого свои хештеги и картинка в альбоме сообщества
 SECTIONS = [
     ("завтрак", "быстрый и сытный завтрак на каждый день, например каша, сырники, омлет или запеканка", "#завтрак #завтракдома #быстрыйзавтрак"),
     ("обед", "обед из доступных продуктов: суп или горячее с гарниром", "#обед #супы #обеддома"),
     ("ужин", "ужин за 30 минут, сытный, но не тяжёлый", "#ужин #ужиндома #быстрыйужин"),
     ("перекус", "лёгкий перекус или закуска, которую можно взять с собой", "#перекус #закуски #пп"),
     ("десерт", "десерт или выпечка без лишних хлопот, можно с меньшим количеством сахара", "#десерт #выпечка #сладкое"),
+    ("суп", "домашний суп на каждый день из доступных продуктов", "#супы #суп #первоеблюдо"),
+    ("по КБЖУ", "блюдо с понятным КБЖУ и хорошим количеством белка, не больше 500 ккал на порцию", "#пп #правильноепитание #подсчеткалорий"),
+    ("подготовка к забегу", "еда перед длинной тренировкой или забегом: много сложных углеводов, легко усваивается", "#бег #подготовкакзабегу #питаниебегуна"),
+    ("набор массы", "сытное блюдо для набора мышечной массы: много белка и калорий", "#наборнамассу #спортпит #белок"),
+    ("сбалансированное блюдо", "сбалансированное блюдо из простых продуктов, без крайностей", "#сбалансированноепитание #здороваяеда #простыерецепты"),
+    ("аюрведа", "тёплое аюрведическое блюдо со специями", "#аюрведа #специи #вегетарианское"),
 ]
+SECTION_CUISINE = {"подготовка к забегу": "athlete_endurance", "набор массы": "mass_gain", "сбалансированное блюдо": "balanced",
+                   "по КБЖУ": "balanced", "аюрведа": "ayurveda"}
+SECTION_PHOTO = {"завтрак": "zavtrak", "обед": "obed", "ужин": "uzhin", "перекус": "perekus", "десерт": "desert", "суп": "supy", "по КБЖУ": "kbzhu",
+                 "подготовка к забегу": "zabeg", "набор массы": "massa", "сбалансированное блюдо": "balans", "аюрведа": "ayurveda"}
 BASE_TAGS = "#рецепты #рецептдня #едадома #чтоприготовить #кбжу"
 
 
@@ -45,7 +55,18 @@ def section_for(variant: int = 0, day: "date | None" = None) -> tuple[str, str, 
 
 
 def hashtags(section_tags: str) -> str:
-    return f"{BASE_TAGS} {section_tags}"
+    """Общие хештеги и хештеги раздела. Первый тег раздела ещё и с адресом сообщества: по нажатию ВК ищет только внутри него."""
+    group = normalize_group(config.VK_GROUP_ID).lower()
+    own = f" {section_tags.split()[0]}@{group}" if group and not group.isdigit() else ""
+    return f"{BASE_TAGS} {section_tags}{own}"
+
+
+def section_photo(section: str | None, gid: int) -> str | None:
+    """Вложение с постоянной картинкой раздела из альбома сообщества или None, если её номер не задан."""
+    code = SECTION_PHOTO.get(section or "", section)
+    pairs = dict(p.split("=", 1) for p in config.VK_SECTION_PHOTOS.split(",") if "=" in p)
+    pid = pairs.get(code or "", "").strip()
+    return f"photo-{gid}_{pid}" if pid.isdigit() else None
 HISTORY_KEY = "social:history"
 LAST_KEY = "social:last"
 RETRY_PAUSE = 3          # секунд до повторной попытки, если ВК не взял превью ссылки
@@ -143,7 +164,7 @@ async def build_post(variant: int = 0) -> tuple[str, str]:
 async def build_post_full(variant: int = 0) -> dict:
     """-> {"title", "body" (рецепт без ссылок, для страницы), "text" (пост)}. RuntimeError, если ИИ не ответил."""
     section, hint, tags = section_for(variant)
-    data = {"cuisine": "classic", "macro_goal": "", "preferred": "", "excluded": "", "time": "30 мин", "servings": 2,
+    data = {"cuisine": SECTION_CUISINE.get(section, "classic"), "macro_goal": "", "preferred": "", "excluded": "", "time": "30 мин", "servings": 2,
             "portion": "normal", "appliance": ["stove"], "appliance_labels": ["Плита"],
             "variety_hint": hint, "avoid_titles": _history()}
     query, results = await search_recipes(data)
@@ -233,15 +254,21 @@ async def post_tg(bot, text: str, image: bytes | None = None) -> int:
     return msg.message_id
 
 
-async def publish(bot, title: str, text: str, image: bytes | None = None, body: str | None = None) -> dict:
+async def publish(bot, title: str, text: str, image: bytes | None = None, body: str | None = None, section: str | None = None) -> dict:
     """Публикует везде, где настроено (с картинкой, если она есть). -> {"vk": id|None, "tg": id|None, "errors": [...]}.
     В ВК картинка идёт настоящей фотографией (см. vk_photo_attachment), а если не загрузилась, то ссылкой на страницу рецепта."""
     out = {"vk": None, "tg": None, "errors": []}
     if configured_vk():
         attachment = None
+        if section and config.VK_SECTION_PHOTOS:
+            try:
+                async with httpx.AsyncClient(timeout=30) as client:
+                    attachment = section_photo(section, await group_numeric_id(client))
+            except (httpx.HTTPError, ValueError, RuntimeError):
+                logger.warning("ВК: не удалось узнать номер сообщества для картинки раздела")
         if not image and config.VK_IMAGE_MODE != "upload":
             image = cards.make_card(title, body or text)      # запись всегда с картинкой: своя карточка, если другой нет
-        if image:
+        if image and not attachment:
             try:
                 attachment = await vk_photo_attachment(image)
             except RuntimeError as e:
@@ -293,7 +320,7 @@ async def daily_job(bot) -> None:
         d = await build_post_full()
         title, text = d["title"], d["text"]
         image = await build_image(title, d["body"]) if (config.SOCIAL_IMAGES and images.configured()) else None
-        res = await publish(bot, title, text, image, d["body"])
+        res = await publish(bot, title, text, image, d["body"], d["section"])
     except Exception as e:  # noqa: BLE001
         logger.exception("Рецепт дня не опубликован")
         await _tell_admins(bot, f"⚠️ Рецепт дня не опубликован: {e}")

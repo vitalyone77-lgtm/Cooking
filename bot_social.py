@@ -137,7 +137,7 @@ async def _publish(callback: CallbackQuery, with_image: bool) -> None:
     await callback.message.edit_reply_markup()
     accounts.sess_set(f"soc:draft:{chat_id}", {})          # второе нажатие ничего не опубликует
     _images.pop(chat_id, None)
-    res = await social.publish(callback.bot, draft["title"], draft["text"], img, draft.get("body"))
+    res = await social.publish(callback.bot, draft["title"], draft["text"], img, draft.get("body"), draft.get("section"))
     lines = []
     if res["vk"]:
         lines.append(f"✅ ВКонтакте: запись №{res['vk']} опубликована")
