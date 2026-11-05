@@ -79,7 +79,32 @@ def draw_card(folder, name, title, sub, color, icons):
     img.save(os.path.join(HERE, name + ".png"), "PNG", optimize=True)
 
 
+def draw_cover(folder):
+    """Обложка альбома: всё важное по центру, потому что ВК обрезает края обложки."""
+    img = Image.new("RGB", (W, H), BG)
+    d = ImageDraw.Draw(img)
+    row = [("1f373", "#FBE3C4"), ("1f372", "#E6F0EA"), ("1f35b", "#F6E7B8"), ("1f370", "#F8DCE4"), ("1f45f", "#DCE6F5")]
+    r, gap = 92, 26
+    x = (W - (len(row) * r * 2 + (len(row) - 1) * gap)) // 2
+    for code, color in row:
+        d.ellipse((x, 190, x + r * 2, 190 + r * 2), fill=color)
+        ic = icon(folder, code, 124)
+        img.paste(ic, (x + r - 62, 190 + r - 62), ic)
+        x += r * 2 + gap
+    title, sub = "Рецепты на каждый день", "завтраки, обеды, ужины, десерты, спорт"
+    tf, sf = ImageFont.truetype(BOLD, 78), ImageFont.truetype(REG, 38)
+    d.text(((W - d.textlength(title, font=tf)) / 2, 415), title, font=tf, fill=INK)
+    d.text(((W - d.textlength(sub, font=sf)) / 2, 520), sub, font=sf, fill=MUTED)
+    mark = "Кухонный помощник"
+    mf = ImageFont.truetype(REG, 30)
+    mx = (W - d.textlength(mark, font=mf) - 34) / 2
+    d.ellipse((mx, 601, mx + 20, 621), fill=GREEN)
+    d.text((mx + 34, 590), mark, font=mf, fill=MUTED)
+    img.save(os.path.join(HERE, "00_oblozhka_albuma.png"), "PNG", optimize=True)
+
+
 if __name__ == "__main__":
     for row in SETS:
         draw_card(sys.argv[1], *row)
+    draw_cover(sys.argv[1])
     print("готово", len(SETS))
