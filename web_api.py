@@ -9,6 +9,7 @@ ai.py, search.py, prompts.py, day_menu.py, week_menu.py, favorites.py, shopping.
 устройство привязано к аккаунту (accounts.py): лимиты, подписка, полка и избранное — общие с ботом.
 """
 import asyncio
+import base64
 import contextvars
 import functools
 import httpx
@@ -23,7 +24,7 @@ import secrets
 import time
 import uuid
 from pathlib import Path
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 
 from fastapi import FastAPI, Header, HTTPException, Request, Response, UploadFile, File, Form as FForm
 from fastapi.middleware.gzip import GZipMiddleware
@@ -620,12 +621,15 @@ class VkIn(BaseModel):
     access_token: str = Field(min_length=10, max_length=4096)
 
 
-@app.post("/api/vk/login")
-def vk_login(body: VkIn, x_device: str | None = Header(default=None)):
-    """Вход через VK ID: виджет отдал токен, сервер спрашивает у ВК, чей он. Номер из браузера не принимаем: верим только ответу ВК."""
-    if not config.VK_LOGIN:
-        raise HTTPException(404, "Вход через ВКонтакте выключен")
-    dev_id = _dev(x_device)
+VK_START_TTL = 600
+
+
+def _vk_redirect() -> str:
+    return (config.WEB_APP_URL or "https://menu.ymayaka.ru").rstrip("/") + "/api/vk/callback"
+
+
+def _vk_link(dev_id: int, access_token: str) -> None:
+    """Сервер спрашивает у ВК, чей это токен, и привязывает устройство. Номер из браузера не принимаем: верим только ответу ВК."""
     hist = [t for t in _link_log.get(dev_id, []) if time.time() - t < 3600]
     if len(hist) >= 10:
         raise HTTPException(429, "Слишком много попыток входа — попробуй через час.")
@@ -633,7 +637,7 @@ def vk_login(body: VkIn, x_device: str | None = Header(default=None)):
     _prune(_link_log, 3600)
     try:
         resp = httpx.post(config.VK_ID_API_URL.rstrip("/") + "/oauth2/user_info",
-                          data={"client_id": config.VK_CLIENT_ID, "access_token": body.access_token}, timeout=10)
+                          data={"client_id": config.VK_CLIENT_ID, "access_token": access_token}, timeout=10)
         data = resp.json()
     except (httpx.HTTPError, ValueError):
         raise HTTPException(502, "ВКонтакте не ответил — попробуй ещё раз")
@@ -646,15 +650,111 @@ def vk_login(body: VkIn, x_device: str | None = Header(default=None)):
     except ValueError as e:
         raise HTTPException(409, str(e))
     usage.event("site_link_vk", accounts.VK_OFFSET + int(vk_id))
+
+
+@app.post("/api/vk/login")
+def vk_login(body: VkIn, x_device: str | None = Header(default=None)):
+    """Вход токеном из браузера: нужен только старым вкладкам, новые идут через /api/vk/start."""
+    if not config.VK_LOGIN:
+        raise HTTPException(404, "Вход через ВКонтакте выключен")
+    _vk_link(_dev(x_device), body.access_token)
     return {"ok": True}
 
 
+@app.post("/api/vk/start")
+def vk_start(x_device: str | None = Header(default=None)):
+    """Начало входа: ссылка на страницу ВК. Всё хранится на сервере, поэтому вход работает и через приложение ВК на телефоне."""
+    if not config.VK_LOGIN:
+        raise HTTPException(404, "Вход через ВКонтакте выключен")
+    dev_id = _dev(x_device)
+    if not _stat_ok(f"vk{dev_id}"):
+        raise HTTPException(429, "Слишком много попыток входа — попробуй через час.")
+    state, verifier = secrets.token_urlsafe(32), secrets.token_urlsafe(48)
+    challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).rstrip(b"=").decode()
+    accounts.sess_set(f"vkst:{state}", {"dev": dev_id, "v": verifier, "ts": time.time()})
+    url = config.VK_ID_API_URL.rstrip("/") + "/authorize?" + urlencode({
+        "response_type": "code", "client_id": config.VK_CLIENT_ID, "scope": "vkid.personal_info", "redirect_uri": _vk_redirect(),
+        "state": state, "code_challenge": challenge, "code_challenge_method": "s256"})
+    resp = JSONResponse({"url": url, "state": state})
+    resp.set_cookie("vk_st", state, max_age=VK_START_TTL, httponly=True, secure=True, samesite="lax", path="/api/vk")
+    return resp
+
+
+def _vk_page(title: str, text: str, form: str = "") -> HTMLResponse:
+    return HTMLResponse(f"<!doctype html><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'><meta name=robots content=noindex>"
+                        f"<title>{escape(title)}</title><body style='font-family:system-ui,sans-serif;max-width:480px;margin:40px auto;padding:0 16px'>"
+                        f"<h1 style='font-size:22px'>{escape(title)}</h1><p>{escape(text)}</p>{form}<p><a href='/'>На главную</a></p></body>",
+                        headers={"Cache-Control": "no-store"})
+
+
+def _vk_pending(state: str) -> dict | None:
+    p = accounts.sess_get(f"vkst:{state}") if state else None
+    return p if p and not p.get("done") and time.time() - p.get("ts", 0) <= VK_START_TTL else None
+
+
+def _vk_finish(state: str, p: dict, code: str, device_id: str) -> None:
+    """Код один раз меняем на токен (с проверочным значением, которое знает только сервер) и привязываем устройство."""
+    accounts.sess_set(f"vkst:{state}", {"dev": p["dev"], "done": True, "linked": False, "ts": p["ts"]})      # повтор этого кода невозможен
+    try:
+        resp = httpx.post(config.VK_ID_API_URL.rstrip("/") + "/oauth2/auth", data={
+            "grant_type": "authorization_code", "code": code, "code_verifier": p["v"], "client_id": config.VK_CLIENT_ID,
+            "device_id": device_id, "redirect_uri": _vk_redirect(), "state": state}, timeout=10)
+        data = resp.json()
+    except (httpx.HTTPError, ValueError):
+        raise HTTPException(502, "ВКонтакте не ответил — попробуй ещё раз")
+    token = data.get("access_token") if isinstance(data, dict) else None
+    if not token or data.get("state") not in (None, state):
+        raise HTTPException(400, "ВКонтакте не подтвердил вход — попробуй ещё раз")
+    _vk_link(p["dev"], str(token))
+    accounts.sess_set(f"vkst:{state}", {"dev": p["dev"], "done": True, "linked": True, "ts": p["ts"]})
+
+
 @app.get("/api/vk/callback", response_class=HTMLResponse)
-def vk_callback():
-    """Адрес возврата, который зарегистрирован в приложении VK ID. Виджет работает без перехода, страница нужна на всякий случай."""
-    return HTMLResponse("<!doctype html><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>"
-                        "<title>Вход</title><body style='font-family:sans-serif;padding:24px'>Можно закрыть это окно и вернуться на сайт."
-                        "<p><a href='/'>На главную</a></p></body>")
+def vk_callback(request: Request, code: str = "", state: str = "", device_id: str = "", payload: str = "", error: str = ""):
+    """Адрес возврата из VK ID. Тот же браузер: сразу вход. Другой (приложение ВК открыло своё окно): только после подтверждения человеком,
+    иначе чужая присланная ссылка могла бы привязать ваш ВК к чужому устройству."""
+    if payload:
+        try:
+            pl = json.loads(payload)
+            code, state, device_id = str(pl.get("code") or code), str(pl.get("state") or state), str(pl.get("device_id") or device_id)
+        except (ValueError, AttributeError):
+            pass
+    if error:
+        return _vk_page("Вход не выполнен", "ВКонтакте не разрешил вход. Попробуйте ещё раз с сайта.")
+    if not code and not state:
+        return _vk_page("Вход", "Можно закрыть это окно и вернуться на сайт.")
+    p = _vk_pending(state)
+    if not p or not code or not device_id:
+        return _vk_page("Ссылка устарела", "Начните вход ещё раз на сайте.")
+    if not hmac.compare_digest(request.cookies.get("vk_st", ""), state):
+        accounts.sess_set(f"vkst:{state}", {**p, "code": code, "device": device_id})
+        return _vk_page("Подтвердите вход", "Нажимайте, только если вы сами сейчас начали вход на сайте Кухонного помощника. Если ссылку прислал кто-то другой, закройте эту страницу.",
+                        f"<form method=post action='/api/vk/confirm'><input type=hidden name=state value='{escape(state, quote=True)}'>"
+                        "<button style='font-size:18px;padding:12px 24px;border-radius:12px;border:0;background:#2f6b4f;color:#fff'>Да, это я, войти</button></form>")
+    try:
+        _vk_finish(state, p, code, device_id)
+    except HTTPException as e:
+        return _vk_page("Вход не выполнен", str(e.detail))
+    return RedirectResponse("/?vk=ok", status_code=303)
+
+
+@app.post("/api/vk/confirm", response_class=HTMLResponse)
+def vk_confirm(state: str = FForm("")):
+    p = _vk_pending(state)
+    if not p or not p.get("code"):
+        return _vk_page("Ссылка устарела", "Начните вход ещё раз на сайте.")
+    try:
+        _vk_finish(state, p, p["code"], p["device"])
+    except HTTPException as e:
+        return _vk_page("Вход не выполнен", str(e.detail))
+    return _vk_page("Вход выполнен", "Вернитесь в браузер, где вы открывали сайт: профиль откроется сам. Эту страницу можно закрыть.")
+
+
+@app.get("/api/vk/status")
+def vk_status(state: str = "", x_device: str | None = Header(default=None)):
+    """Вкладка ждёт, пока вход завершится в другом окне. Узнать статус может только устройство, начавшее вход."""
+    p = accounts.sess_get(f"vkst:{state}") if state else None
+    return {"linked": bool(p and p.get("dev") == _dev(x_device) and p.get("linked"))}
 
 
 class PayIn(BaseModel):

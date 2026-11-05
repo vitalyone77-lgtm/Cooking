@@ -107,6 +107,7 @@ textarea{width:100%;min-height:64px;padding:10px 14px;border:1.5px solid var(--l
 .dy-res .item{padding:10px 0}.dy-food{display:block;width:100%;text-align:left;background:none;border:0;padding:6px 0;color:var(--text);font:inherit;min-height:44px}.dy-food small{display:block;color:var(--muted);font-size:14px}
 .chips[data-name=cuisine],.chips[data-name=appliance]{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}.chips[data-name=cuisine] .chip,.chips[data-name=appliance] .chip{width:100%;padding:4px 6px;font-size:15px;line-height:1.2}.chips[data-name=cuisine] .chip:last-child:nth-child(odd){grid-column:1/-1}
 @media (min-width:520px){.chips[data-name=appliance]{grid-template-columns:repeat(4,minmax(0,1fr))}}
+.chip.alt{border:1.5px dashed var(--primary)}
 .chips.tight{gap:6px;margin:8px 0 0}.dy-table{width:100%;border-collapse:collapse;font-size:14px}.dy-table td,.dy-table th{padding:4px 6px 4px 0;text-align:left;border-top:1px solid var(--line);font-variant-numeric:tabular-nums}
 .buyhead{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:4px 0 8px;color:var(--muted);font-size:15px}
 .opt{display:flex;gap:12px;align-items:flex-start;min-height:44px;padding:8px 0;cursor:pointer}.opt input{width:24px;height:24px;accent-color:var(--primary);flex:none}
@@ -465,10 +466,10 @@ select{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--lin
     h+='<div class="seg" data-name="mode">'+[["recipe","Рецепт"],["day","Меню на день"],["week","План на "+m.week_days+" дня"]].map(function(x){var kk={day:"daymenu",week:"week"}[x[0]];
       if(kk&&kindLocked(kk))return '<button class="chip locked" data-gate="'+kk+'">'+lockIc()+x[1]+'</button>';
       return '<button class="chip" data-key="'+x[0]+'" aria-pressed="'+(F.mode===x[0])+'">'+x[1]+'</button>';}).join("")+'</div>';
-    h+='<label class="f">Тип питания</label>'+chips(m.cuisines,F.cuisine,"cuisine",false);
+    h+='<label class="f">Тип питания</label>'+chips(m.cuisines,F.cuisine,"cuisine",false).replace(/<\/div>$/,(ME&&ME.photo_on?'<button class="chip alt" data-photo-pick="1">📷 По фото</button>':'')+'</div>');
     if(F.cuisine==="macro_goal") h+='<label class="f" for="macro">Цель по КБЖУ</label><input type="text" id="macro" maxlength="200" placeholder="500 ккал, белки 40 г" value="'+esc(F.macro||ME.goal_text||"")+'">';
     if(F.mode!=="recipe") h+='<label class="f">Приёмы пищи</label>'+chips(m.meals,F.meals,"meals",true);
-    h+='<label class="f" for="pref">Что использовать или какое блюдо хочется</label><input type="text" id="pref" maxlength="300" placeholder="курица, рис или «хочу плов»" value="'+esc(F.pref||"")+'">'+(ME&&ME.photo_on?'<button class="btn ghost" data-photo-pick="1">📷 Рецепт по фото продуктов</button><input type="file" id="photo-in" accept="image/*" hidden>':'');
+    h+='<label class="f" for="pref">Что использовать или какое блюдо хочется</label><input type="text" id="pref" maxlength="300" placeholder="курица, рис или «хочу плов»" value="'+esc(F.pref||"")+'">'+(ME&&ME.photo_on?'<input type="file" id="photo-in" accept="image/*" hidden>':'');
     h+='<label class="f" for="exc">Что исключить</label><input type="text" id="exc" maxlength="300" placeholder="орехи, грибы, лук" value="'+esc(F.exc||"")+'">';
     if(ME.never)h+='<p class="sub" style="margin:6px 0 0">Всегда исключаю по вашему профилю: '+esc(ME.never)+'</p>';
     h+='<label class="f">Время на готовку</label>'+chips(times,F.time,"time",false);
@@ -633,26 +634,25 @@ select{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--lin
   }
   // код входа создаём заранее (кнопка — настоящая ссылка t.me, её не блокирует браузер), живёт 10 минут
   // вход через VK ID: кнопка из SDK ВКонтакте, код обменивается в браузере, сервер проверяет токен у ВК
-  var VK_SDK="https://unpkg.com/@vkid/sdk@<3.0.0/dist-sdk/umd/index.js",VK_LOADING=null;
-  function vkSdk(){
-    if(window.VKIDSDK)return Promise.resolve(window.VKIDSDK);
-    if(!VK_LOADING)VK_LOADING=new Promise(function(ok,no){var s=document.createElement("script");s.src=VK_SDK;s.onload=function(){ok(window.VKIDSDK);};s.onerror=function(){VK_LOADING=null;no(new Error("sdk"));};document.head.appendChild(s);});
-    return VK_LOADING;
+  var VKST=null;
+  function vkStart(){
+    if(VKST&&Date.now()-VKST.ts<8*60*1000)return Promise.resolve(VKST);
+    return call("POST","/api/vk/start").then(function(j){VKST={url:j.url,state:j.state,ts:Date.now()};return VKST;});
   }
   function vkMount(){
     var box=document.getElementById("vk-btn");if(!box||!ME||!ME.vk_app)return;
-    vkSdk().then(function(V){
-      if(!V)throw new Error("sdk");
-      V.Config.init({app:Number(ME.vk_app),redirectUrl:ME.vk_redirect,responseMode:V.ConfigResponseMode.Callback,source:V.ConfigSource.LOWCODE,scope:""});
-      new V.OneTap().render({container:box,showAlternativeLogin:true,oauthList:["ok_ru","mail_ru"]})
-        .on(V.WidgetEvents.ERROR,function(){toast("Не удалось войти через ВКонтакте, попробуй ещё раз");})
-        .on(V.OneTapInternalEvents.LOGIN_SUCCESS,function(p){
-          V.Auth.exchangeCode(p.code,p.device_id)
-            .then(function(d){return call("POST","/api/vk/login",{access_token:d.access_token});})
-            .then(function(){toast("✅ Вход выполнен через ВКонтакте");return loadMe().then(function(){show("profile");});})
-            .catch(function(e){toast((e&&e.message)||"Не удалось войти через ВКонтакте");});
-        });
-    }).catch(function(){box.innerHTML='<p class="sub" style="margin:0">Кнопка ВКонтакте не загрузилась. Проверьте интернет и обновите страницу.</p>';});
+    vkStart().then(function(v){box.innerHTML='<a class="btn" data-vk-go="1" href="'+esc(v.url)+'">Войти через ВКонтакте</a><div id="vk-wait"></div>';})
+      .catch(function(e){box.innerHTML='<p class="sub" style="margin:0">'+esc(e.message)+'</p>';});
+  }
+  // вход мог завершиться в окне приложения ВК: эта вкладка ждёт и сама открывает профиль
+  function vkWait(){
+    var state=VKST&&VKST.state,n=0;
+    (function poll(){
+      if((cur!=="profile"&&cur!=="settings")||!state||n++>120)return;
+      sleep(2500).then(function(){return call("GET","/api/vk/status?state="+encodeURIComponent(state));}).then(function(s){
+        if(s.linked){VKST=null;toast("✅ Вход выполнен через ВКонтакте");loadMe().then(function(){show("profile");});}else poll();
+      }).catch(function(){poll();});
+    })();
   }
   var LINK=null;
   function linkCode(){
@@ -791,7 +791,7 @@ select{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--lin
       if(on("diary"))g+='<h2 style="margin-top:14px">Примерный расход калорий</h2><p class="sub" style="margin:0 0 8px">Формула Миффлина — Сан Жеора. Пол, возраст, рост и вес не сохраняем, только итог.</p>'+
         '<div class="goalgrid"><div><label for="en-sex">Пол</label><select class="bk-sel" id="en-sex"><option value="m">Мужской</option><option value="f">Женский</option></select></div><div><label for="en-age">Возраст</label><input type="text" inputmode="numeric" id="en-age"></div><div><label for="en-h">Рост, см</label><input type="text" inputmode="numeric" id="en-h"></div><div><label for="en-w">Вес, кг</label><input type="text" inputmode="decimal" id="en-w"></div></div>'+
         '<label for="en-act" style="display:block;margin-top:8px">Активность</label><select class="bk-sel" id="en-act" style="width:100%"><option value="sedentary">Сидячая работа, почти без тренировок</option><option value="office_sport">Офис и спорт 1–3 раза в неделю</option><option value="sport">Спорт 4–5 раз в неделю</option><option value="active">Активная работа на ногах или ежедневный спорт</option></select><button class="btn ghost" data-dy-calc="1">Посчитать</button>';
-      h+=accordion("🎯 Цели","меняются редко","",g,false);
+      h+=accordion("🎯 Задать цель","","",g,false);
     }
     if(on("never")&&p.never_allowed)h+=accordion("🚫 Исключить продукты","","",'<p class="sub" style="margin:10px 0 0">Если какие-то продукты никогда не хотите видеть в своём меню, напишите их через запятую. Бот и сайт уберут их из рецептов, меню и планов.</p><textarea id="pf-never" maxlength="300" placeholder="кинза, грибы, печень" style="margin-top:10px">'+esc(p.never||"")+'</textarea><p class="sub" style="margin:6px 0 0">ИИ может ошибаться: проверяйте рецепты и готовность блюд.</p><button class="btn" data-pf-save="never">Сохранить</button>',false);
     return h;
@@ -949,6 +949,7 @@ select{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--lin
     if(b=t.closest("[data-bk-search]")){BK.q=(document.getElementById("bk-q")||{}).value||"";BK.page=0;show("book");return;}
     if(b=t.closest("[data-bk-reset]")){BK=JSON.parse(JSON.stringify(BK0));show("book");return;}
     if(b=t.closest("[data-tab-go]")){show(b.getAttribute("data-tab-go"));return;}
+    if(b=t.closest("[data-vk-go]")){vkWait();return;}
     if(b=t.closest("[data-link-go]")){linkWait();return;}   // ссылка откроется сама, ждём подтверждения
     if(b=t.closest("[data-unlink]")){if(confirm("Выйти из профиля на этом устройстве? В Telegram всё останется."))call("POST","/api/unlink").then(function(){ocClear();return loadMe();}).then(function(){show("profile");}).catch(fail);return;}
     if(b=t.closest("[data-shelf-del]")){call("DELETE","/api/shelf?item="+encodeURIComponent(b.getAttribute("data-shelf-del"))).then(function(){show("profile");}).catch(fail);return;}
@@ -1001,6 +1002,8 @@ select{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--lin
         return call("POST","/api/link/claim",{code:lg}).then(function(){ocClear();toast("✅ Вход выполнен — профиль общий с Telegram");},function(e){toast(e.message);})
           .then(loadMe).then(function(){show("profile");});
       }
+      var vkq=null;try{vkq=new URLSearchParams(location.search).get("vk");}catch(e){}
+      if(vkq){try{history.replaceState(null,"",location.pathname);}catch(e){}return loadMe().then(function(){toast("✅ Вход выполнен через ВКонтакте");show("profile");});}
       return loadMe().then(function(){show("new");});
     }).catch(function(e){main.innerHTML='<div class="card err">'+esc(errText(e))+'</div>';});
 })();
