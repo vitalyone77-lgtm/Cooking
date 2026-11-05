@@ -334,23 +334,16 @@ async def last_open(callback: CallbackQuery, state: FSMContext):
 
 async def show_ready_menus(message: Message, state: FSMContext):
     """
-    Средняя кнопка нижнего меню: открывает ГОТОВЫЕ меню. Если есть только одно (дневное или
-    на несколько дней) — открывает его сразу; если оба — даёт выбор; если ни одного — предлагает собрать.
+    Средняя кнопка нижнего меню: всё готовое в одном месте: последний рецепт, меню на день, план, избранное и книга.
     """
     await state.clear()
     await ensure_reply_kb(message)
     chat_id = message.chat.id
     has_day = day_menu.has_menu(chat_id)
     has_week = week_menu.has_plan(chat_id)
-    if has_day and not has_week:
-        text, markup = day_menu.build_summary_view(chat_id)
-        await message.answer(text, reply_markup=markup)
-    elif has_week and not has_day:
-        text, markup = week_menu.build_status_view(chat_id)
-        await message.answer(text, reply_markup=markup)
-    else:
-        title = "🗂 Готовые меню — что открыть?" if has_day else "🗂 Готовых меню пока нет. Собрать?"
-        await message.answer(title, reply_markup=kb.ready_hub_kb(has_day, has_week, config.WEEK_MENU_DAYS))
+    title = ("🗂 Что открыть? Рецепты блюд лежат внутри меню и плана." if has_day or has_week
+             else "🗂 Собранных меню пока нет. Рецепты можно открыть здесь или собрать меню:")
+    await message.answer(title, reply_markup=kb.ready_hub_kb(has_day, has_week, config.WEEK_MENU_DAYS, bool(get_last_recipe(chat_id))))
 
 
 # ---------- Старт ----------

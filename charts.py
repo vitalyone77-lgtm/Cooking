@@ -55,7 +55,7 @@ def _segments(d: dict) -> list[tuple[str, float]]:
 
 def diary_chart(series: list[dict], tdee: int | None = None, weights: list[dict] | None = None) -> bytes:
     """series: [{"day": "2026-11-04", "kcal": 1800, "protein", "fat", "carb", "n": 3}, ...] по порядку; weights: [{"day", "kg"}]. -> PNG.
-    Сверху калории: столбик раскрашен по долям белков, жиров и углеводов. Снизу отдельной панелью вес, с той же шкалой дат."""
+    Столбик калорий раскрашен по долям белков, жиров и углеводов, поверх линия веса со своей шкалой справа: видно, как вес отвечает на еду."""
     n = len(series)
     img = Image.new("RGB", (W, H), BG)
     draw = ImageDraw.Draw(img)
@@ -80,8 +80,8 @@ def diary_chart(series: list[dict], tdee: int | None = None, weights: list[dict]
         sub += f"  ·  Б {shares['protein']}%  Ж {shares['fat']}%  У {shares['carb']}%"
     draw.text((60, 76), sub, font=cards._font(26), fill=MUTED)
 
-    left, right = 120, 1140
-    top, bottom = 130, (390 if has_w else 520)
+    left, right = 120, (1060 if has_w else 1140)
+    top, bottom = 130, 520
     ymax = max([d["kcal"] for d in bars] + [tdee or 0, 1000]) * 1.12
     ymax = int(-(-ymax // 500) * 500)
     Y = lambda v: bottom - (bottom - top) * v / ymax
@@ -121,40 +121,25 @@ def diary_chart(series: list[dict], tdee: int | None = None, weights: list[dict]
         draw.text((right - tw - 6, Y(tdee) - 30), t, font=f_small, fill=INK)
 
     axis = bottom
-    if has_w:                                                   # вес отдельной панелью: своя шкала, те же даты
-        wtop, wbottom = 428, 520
+    if has_w:                                                   # вес по правой шкале поверх столбиков
         lo, hi = min(w["kg"] for w in wts), max(w["kg"] for w in wts)
         if hi - lo < 1:
             lo, hi = lo - 0.5, hi + 0.5
         pad = (hi - lo) * 0.15
         lo, hi = lo - pad, hi + pad
-        YW = lambda v: wbottom - (wbottom - wtop) * (v - lo) / (hi - lo)
-        for v in (lo + pad, hi - pad):
-            draw.line((left, YW(v), right, YW(v)), fill=LINE, width=2)
-            draw.text((left - 12 - draw.textlength(f"{v:.1f}", font=f_small), YW(v) - 12), f"{v:.1f}", font=f_small, fill=MUTED)
-        draw.text((left, wtop - 32), "Вес, кг", font=f_small, fill=INK)
+        YW = lambda v: bottom - (bottom - top) * (v - lo) / (hi - lo)
+        for v in (lo + pad, (lo + hi) / 2, hi - pad):
+            draw.text((right + 12, YW(v) - 12), f"{v:.1f}", font=f_small, fill=MUTED)
+        draw.text((right + 12, top - 34), "вес, кг", font=f_small, fill=INK)
         first = datetime.date.fromisoformat(series[0]["day"])
         pts = []
         for w in wts:
             idx = (datetime.date.fromisoformat(w["day"]) - first).days
             pts.append((left + slot * (idx + 0.5) / step, YW(w["kg"]), w["kg"], idx))
-        if len(pts) >= 3 and pts[-1][3] - pts[0][3] >= 14:      # линия тренда (по методу наименьших квадратов)
-            mx, my = sum(p[3] for p in pts) / len(pts), sum(p[2] for p in pts) / len(pts)
-            den = sum((p[3] - mx) ** 2 for p in pts)
-            k = sum((p[3] - mx) * (p[2] - my) for p in pts) / den if den else 0
-            x0, x1 = pts[0][0], pts[-1][0]
-            y0, y1 = YW(my + k * (pts[0][3] - mx)), YW(my + k * (pts[-1][3] - mx))
-            steps = max(int((x1 - x0) // 24), 1)
-            for s in range(steps):
-                if s % 2 == 0:
-                    draw.line((x0 + (x1 - x0) * s / steps, y0 + (y1 - y0) * s / steps, x0 + (x1 - x0) * (s + 1) / steps,
-                               y0 + (y1 - y0) * (s + 1) / steps), fill=MUTED, width=3)
-        draw.line([(x, y) for x, y, _, _ in pts], fill=INK, width=3, joint="curve")
+        draw.line([(x, y) for x, y, _, _ in pts], fill=BG, width=9, joint="curve")   # светлая подложка: линия видна поверх столбиков
+        draw.line([(x, y) for x, y, _, _ in pts], fill=INK, width=4, joint="curve")
         for x, y, _, _ in pts:
-            draw.ellipse((x - 6, y - 6, x + 6, y + 6), fill=BG, outline=INK, width=3)
-        lastp = pts[-1]
-        draw.text((min(lastp[0] + 10, right - 60), lastp[1] - 30), f"{lastp[2]:g}", font=f_small, fill=INK)
-        axis = wbottom
+            draw.ellipse((x - 7, y - 7, x + 7, y + 7), fill=BG, outline=INK, width=4)
 
     f_day = cards._font(20 if nb > 14 else 22)
     every = 1 if nb <= 14 else 2 if nb <= 20 else 3
@@ -177,6 +162,10 @@ def diary_chart(series: list[dict], tdee: int | None = None, weights: list[dict]
         draw.rounded_rectangle((x, ly + 4, x + 22, ly + 22), radius=4, fill=col)
         draw.text((x + 30, ly), name, font=f_small, fill=INK)
         x += 30 + int(draw.textlength(name, font=f_small)) + 30
+    if has_w:
+        draw.line((x, ly + 13, x + 34, ly + 13), fill=INK, width=4)
+        draw.ellipse((x + 10, ly + 6, x + 24, ly + 20), fill=BG, outline=INK, width=3)
+        draw.text((x + 44, ly), "вес", font=f_small, fill=INK)
     draw.text((left, H - 64), REFERENCE, font=cards._font(20), fill=MUTED)
     draw.text((left, H - 36), "Оценка приблизительная и не заменяет совет врача или диетолога.", font=cards._font(20), fill=MUTED)
     out = BytesIO()

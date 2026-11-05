@@ -12,7 +12,7 @@ BTN_CREATE = "🍳 Создать"
 BTN_READY = "🗂 Готовые меню"
 BTN_PROFILE = "👤 Профиль"
 # Версия нижнего меню: если у человека в чате старая (или клавиатура пропала) — бот пришлёт новую один раз
-KB_VERSION = 2
+KB_VERSION = 3
 
 # Тексты кнопок ПРОШЛЫХ версий: у людей, у которых старая клавиатура ещё висит в чате,
 # нажатие должно работать, а клавиатура — обновиться на новую.
@@ -26,8 +26,7 @@ LEGACY_BTN_HELP = "❓ Справка"
 
 def main_reply_kb() -> ReplyKeyboardMarkup:
     """
-    Меню внизу экрана: одна строка из трёх кнопок. Не «постоянное» (is_persistent=False): справа от смайлика
-    Telegram показывает значок ⊞ — им меню сворачивают и открывают снова (открытое — значок-стрелка).
+    Меню внизу экрана: одна строка из трёх кнопок. Постоянное: на компьютере свёрнутое меню легко потерять.
     """
     return ReplyKeyboardMarkup(
         keyboard=[[
@@ -36,7 +35,7 @@ def main_reply_kb() -> ReplyKeyboardMarkup:
             KeyboardButton(text=BTN_PROFILE),
         ]],
         resize_keyboard=True,
-        is_persistent=False,
+        is_persistent=True,
         input_field_placeholder="Нажми «Создать» или напиши, что хочешь приготовить",
     )
 
@@ -68,8 +67,8 @@ def cuisine_kb(with_extras: bool = True, last_title: str | None = None, fridge: 
         return b.as_markup()
     if fridge:      # в одной строке с аюрведой: рецепт по фото продуктов
         b.button(text="📷 По фото продуктов", callback_data="fridge:start")
-    b.button(text="⭐ Избранное", callback_data="favorites:open")
-    b.button(text="📖 Книга рецептов", callback_data="book:open")
+    b.button(text="⭐ Избранное", callback_data="favorites:open", style="primary")     # другой цвет: отдельный раздел и разделитель в меню
+    b.button(text="📖 Книга рецептов", callback_data="book:open", style="primary")
     b.button(text="📅 Меню на день", callback_data="daymenu:start")
     b.button(text=f"📆 Меню на {config.WEEK_MENU_DAYS} дня", callback_data="weekmenu:start")
     if last_title:
@@ -91,8 +90,11 @@ def help_hub_kb() -> InlineKeyboardMarkup:
     return b.as_markup()
 
 
-def ready_hub_kb(has_day: bool, has_week: bool, week_days: int) -> InlineKeyboardMarkup:
+def ready_hub_kb(has_day: bool, has_week: bool, week_days: int, has_last: bool = False) -> InlineKeyboardMarkup:
+    """«Готовые меню»: собранные меню и план, а рядом всё, где лежат готовые рецепты."""
     b = InlineKeyboardBuilder()
+    if has_last:
+        b.button(text="🍳 Последний рецепт", callback_data="last:open")
     if has_day:
         b.button(text="📅 Меню на день", callback_data="ready:day")
     if has_week:
@@ -101,7 +103,9 @@ def ready_hub_kb(has_day: bool, has_week: bool, week_days: int) -> InlineKeyboar
         b.button(text="➕ Собрать меню на день", callback_data="daymenu:start")
     if not has_week:
         b.button(text=f"➕ Собрать план на {week_days} дня", callback_data="weekmenu:start")
-    b.adjust(1)
+    b.button(text="⭐ Избранное", callback_data="favorites:open", style="primary")
+    b.button(text="📖 Книга рецептов", callback_data="book:open", style="primary")
+    b.adjust(*([1] * (int(has_last) + 2)), 2)
     return b.as_markup()
 
 

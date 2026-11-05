@@ -58,6 +58,7 @@ import payinfo
 import plans
 import profile_ctx
 import shoplists
+import vision
 from cuisines import CUISINE_LABELS, PORTION_LABELS, PORTION_ORDER
 from keyboards import MEAL_LABELS, sort_meals, CUISINE_BUTTONS
 from search import search_recipes, format_results_for_prompt
@@ -561,7 +562,7 @@ def me(x_device: str | None = Header(default=None)):
     feat = {f: plans.has_feature(uid, f) for f in ("memory", "pdf", "cart", "noads")}
     out = {"linked": bool(tg), "plan": plans.plan_of(uid), "status": plans.status_text(uid), "left": left,
            "paywall": plans.paywall(), "memory": memory, "shelf_on": shelf_on, "bot": config.BOT_USERNAME, "feat": feat, "via": ("vk" if tg and tg >= accounts.VK_OFFSET else "tg" if tg else ""),
-           "diary_on": plans.diary_on(uid), "seller": payinfo.seller(),
+           "diary_on": plans.diary_on(uid), "seller": payinfo.seller(), "photo_on": plans.feature_on(uid, "photo_recipe"),
            "vk_app": (config.VK_CLIENT_ID if config.VK_LOGIN else ""),
            "pay_rub": bool(tg) and payanyway.allowed_for(uid),
            "pay_offers": ([{"key": o["key"], "title": o["title"], "rub": o["rub"], "days": o["days"]} for o in plans.pay_offers_for(uid)]
@@ -774,7 +775,7 @@ def profile_put(body: ProfileIn, x_device: str | None = Header(default=None)):
     uid = _need_consent(_dev(x_device))
     fields = body.model_dump(exclude_unset=True)
     if "never" in fields and not plans.has_feature(uid, "memory"):
-        raise HTTPException(402, "Список «никогда не использовать» — в тарифе «Повар» 💎")
+        raise HTTPException(402, "Исключение продуктов входит в тариф «Повар» 💎")
     if "feats" in fields and not plans.has_feature(uid, "memory"):      # «не использовать» и «полка» входят в тариф
         fields["feats"] = [f for f in (fields["feats"] or []) if f not in ("never", "shelf")]
     try:
@@ -918,6 +919,36 @@ def energy_calc(body: EnergyIn, x_device: str | None = Header(default=None)):
     accounts.energy_set(uid, body.activity, tdee)
     usage.event("diary_calc", uid)
     return {"tdee": tdee}
+
+
+# ---------- рецепт по фото продуктов ----------
+
+PHOTO_TYPES = {"image/jpeg", "image/png", "image/webp"}
+PHOTO_MAX_BYTES = 10_000_000
+
+
+@app.post("/api/photo")
+async def photo_items(image: UploadFile = File(...), x_device: str | None = Header(default=None)):
+    """Продукты на фото: список подставляется в поле «Что использовать», человек его правит. Новая функция, включается в админке."""
+    dev_id = _dev(x_device)
+    if not plans.feature_on(_uid(dev_id), "photo_recipe"):
+        raise HTTPException(403, "Рецепт по фото пока недоступен")
+    if (image.content_type or "") not in PHOTO_TYPES:
+        raise HTTPException(400, "Нужна фотография: jpg, png или webp")
+    blob = await image.read(PHOTO_MAX_BYTES + 1)
+    if not blob or len(blob) > PHOTO_MAX_BYTES:
+        raise HTTPException(400, "Фото больше 10 МБ, снимите ещё раз")
+    sp = _spend(dev_id, "photo")
+    try:
+        items = await vision.photo_items([(blob, image.content_type)])
+    except vision.VisionError:
+        _refund(dev_id, sp)
+        raise HTTPException(502, "Не получилось разобрать фото, попробуйте ещё раз поближе и при хорошем свете")
+    if not items:
+        _refund(dev_id, sp)
+        raise HTTPException(422, "Не вижу на фото продуктов, попробуйте снять поближе")
+    usage.event("photo_recipe", _uid(dev_id))
+    return {"items": items}
 
 
 # ---------- список покупок по ссылке ----------

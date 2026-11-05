@@ -84,28 +84,19 @@ def _profile_view(uid: int) -> tuple[str, InlineKeyboardMarkup]:
     lines.append(f"🔔 Напоминания: {'включены' if reminders_enabled(uid) else 'выключены'}")
     if consent:
         lines.append("")
-        lines.append(f"🚫 Не использовать: {g['never'] or 'не задано'}" + ("" if mem else "  🔒 тариф «Повар»"))
+        lines.append(f"🚫 Исключённые продукты: {g['never'] or 'нет'}" + ("" if mem else "  🔒 тариф «Повар»"))
         lines.append(f"🎯 Цель на день: {accounts.goal_text(uid) or 'не задана'}")
-        ws = accounts.weights_list(uid, 30)
-        if ws:
-            vals = [w["kg"] for w in ws]
-            delta = vals[-1] - vals[0]
-            goal = f", цель {g['weight_goal']:g}" if g["weight_goal"] else ""
-            lines.append(f"⚖️ Вес: {vals[-1]:g} кг{goal}; за период {delta:+.1f} кг (график картинкой: кнопка «📊 График»)")
-        else:
-            lines.append("⚖️ Вес: не записан")
     else:
         lines += ["", "ℹ️ " + accounts.CONSENT_TEXT]
-    lines += ["", "_Аллергии и продукты, которые не нужны на один раз, пиши в анкете в строке «Исключить» — я предложу их кнопкой «Как в прошлый раз»._"]
+    lines += ["", "_Если какие-то продукты никогда не хотите видеть в своём меню, добавьте их в «Исключить продукты»._",
+              "_ИИ может ошибаться: проверяйте рецепты и готовность блюд._"]
     rows: list[list[tuple[str, str]]] = []
     if consent:
-        rows.append([("🚫 Не использовать" if mem else "💎 Не использовать", "pf:never"), ("🎯 Цель КБЖУ", "pf:goal")])
-        rows.append([("⚖️ Вес", "pf:weight")] + ([("🧮 Расход", "dy:calc")] if diary_on else [("📊 График", "dy:ch:30")] if accounts.weights_list(uid, 2) else [])
-                    + ([("🏠 Моя полка", "pf:shelf")] if shelf_on else []))
-        rows.append([("⚙️ Функции", "pf:fts"), ("🗑 Удалить мои данные", "pf:del")])
+        rows.append([("🚫 Исключить продукты" if mem else "💎 Исключить продукты", "pf:never"), ("🎯 Цели и вес", "pf:goals")])
+        if shelf_on:
+            rows.append([("🏠 Моя полка", "pf:shelf")])
     else:
         rows.append([("✅ Согласен", "pf:consent")])
-    rows.append([("🌐 Открыть сайт", "pf:site")])
     if plans.paywall():
         if plans.trial_available(uid):
             rows.append([("🎁 Попробовать бесплатно", "pf:trial")])
@@ -113,10 +104,35 @@ def _profile_view(uid: int) -> tuple[str, InlineKeyboardMarkup]:
     devs = accounts.devices_of(uid)
     rows.append([("🔕 Напоминания" if reminders_enabled(uid) else "🔔 Напоминания", "pf:rem")]
                 + ([(f"🔓 Выйти на сайте ({devs})", "pf:unall")] if devs else []))
-    rows.append([("❓ Справка", "help:open"), ("⬅️ Профиль" if diary_on else "⬅️ Меню", "pf:main" if diary_on else "menu:open")])
+    rows.append(([("🧩 Функции", "pf:fts")] if consent else []) + [("🌐 Без VPN", "pf:site")] + ([("🗑 Удалить", "pf:del")] if consent else []))
+    rows.append([("❓ Справка", "help:open")] + ([("⬅️ Профиль", "pf:main")] if diary_on else []))
     b = InlineKeyboardBuilder()
     for row in rows:
         b.row(*[InlineKeyboardButton(text=t, callback_data=d) for t, d in row])
+    return "\n".join(lines), b.as_markup()
+
+
+def _goals_view(uid: int) -> tuple[str, InlineKeyboardMarkup]:
+    """«Цели и вес»: всё, что меняется редко, одной кнопкой."""
+    g = accounts.goals_get(uid)
+    ws = accounts.weights_list(uid, 30)
+    en = accounts.energy_get(uid)
+    lines = ["🎯 Цели и вес", "", f"Цель на день: {accounts.goal_text(uid) or 'не задана'}"]
+    if ws:
+        goal = f", цель {g['weight_goal']:g}" if g["weight_goal"] else ""
+        lines.append(f"Вес: {ws[-1]['kg']:g} кг{goal}")
+    else:
+        lines.append("Вес: не записан")
+    diary = "diary" in g["feats"]
+    if diary:
+        lines.append(f"Расход: примерно {en['tdee']} ккал в день" if en else "Расход: не посчитан")
+    b = InlineKeyboardBuilder()
+    b.row(InlineKeyboardButton(text="🎯 Цель на день", callback_data="pf:goal"), InlineKeyboardButton(text="⚖️ Вес", callback_data="pf:weight"))
+    if diary:
+        b.row(InlineKeyboardButton(text="🧮 Посчитать расход", callback_data="dy:calc"))
+    elif len(ws) >= 2:
+        b.row(InlineKeyboardButton(text="📊 График веса", callback_data="dy:ch:30"))
+    b.row(InlineKeyboardButton(text="⬅️ Назад", callback_data="pf:set"))
     return "\n".join(lines), b.as_markup()
 
 
@@ -164,7 +180,6 @@ def _profile_main(uid: int, days: int = 30) -> tuple[str, InlineKeyboardMarkup, 
     b.row(InlineKeyboardButton(text="📒 Записать еду", callback_data="dy:open"), InlineKeyboardButton(text="⚖️ Вес", callback_data="pf:weight"))
     b.row(InlineKeyboardButton(text=f"📅 {days} дн. ▸ {_next_period(days)}", callback_data=f"pf:p:{_next_period(days)}"),
           InlineKeyboardButton(text="⚙️ Настройки", callback_data="pf:set"))
-    b.row(InlineKeyboardButton(text="⬅️ Меню", callback_data="menu:open"))
     return "\n".join(lines), b.as_markup(), png
 
 
@@ -225,6 +240,16 @@ async def profile_main(callback: CallbackQuery, state: FSMContext):
 async def profile_settings(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
     await show_profile(callback, state, edit=True, settings=True)
+
+
+@router.callback_query(F.data == "pf:goals")
+async def profile_goals(callback: CallbackQuery, state: FSMContext):
+    if not await _need_consent(callback):
+        return
+    await state.clear()
+    await callback.answer()
+    text, markup = _goals_view(callback.message.chat.id)
+    await callback.message.edit_text(text, reply_markup=markup, parse_mode=None)
 
 
 @router.callback_query(F.data.startswith("pf:p:"))
@@ -384,8 +409,8 @@ async def profile_never(callback: CallbackQuery, state: FSMContext):
     await state.set_state(ProfileForm.never)
     await callback.answer()
     await callback.message.edit_text(
-        "🚫 Напиши через запятую, какие продукты никогда не использовать, например: «кинза, грибы, печень». "
-        "Я исключу их из всех рецептов. Чтобы очистить список, напиши «нет». Диагнозы писать не нужно.",
+        "🚫 Если какие-то продукты никогда не хотите видеть в своём меню, напишите их через запятую, например: «кинза, грибы, печень». "
+        "Я исключу их из всех рецептов. Чтобы очистить список, напишите «нет».\n\nИИ может ошибаться: проверяйте рецепты и готовность блюд.",
         reply_markup=_cancel_kb(), parse_mode=None)
 
 
@@ -493,7 +518,7 @@ async def profile_delete_yes(callback: CallbackQuery, state: FSMContext):
 
 
 # ---------- функции профиля: включаются галочками ----------
-FEATURE_LABELS = {"diary": "📒 Дневник питания", "shelf": "🏠 Полка (что есть дома)", "never": "🚫 Список «не использовать»",
+FEATURE_LABELS = {"diary": "📒 Дневник питания", "shelf": "🏠 Полка (что есть дома)", "never": "🚫 Исключить продукты",
                   "macro": "🎯 Цель КБЖУ", "weight": "⚖️ Вес и график"}
 NEEDS_MEMORY = {"shelf", "never"}
 

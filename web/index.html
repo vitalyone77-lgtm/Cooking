@@ -105,6 +105,8 @@ textarea{width:100%;min-height:64px;padding:10px 14px;border:1.5px solid var(--l
 .dychart{width:100%;height:auto;display:block;margin-top:8px}.dy-legend{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:14px;margin:8px 0 0}.sw{display:inline-block;width:12px;height:12px;border-radius:3px;margin-right:6px;vertical-align:-1px}
 .dy-tip{min-height:22px;font-size:14px;color:var(--muted);margin:4px 0 0}.pcard details{margin-top:10px}.pcard summary{cursor:pointer;min-height:40px;line-height:40px;font-weight:600}
 .dy-res .item{padding:10px 0}.dy-food{display:block;width:100%;text-align:left;background:none;border:0;padding:6px 0;color:var(--text);font:inherit;min-height:44px}.dy-food small{display:block;color:var(--muted);font-size:14px}
+.chips[data-name=cuisine],.chips[data-name=appliance]{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}.chips[data-name=cuisine] .chip,.chips[data-name=appliance] .chip{width:100%;padding:4px 6px;font-size:15px;line-height:1.2}.chips[data-name=cuisine] .chip:last-child:nth-child(odd){grid-column:1/-1}
+@media (min-width:520px){.chips[data-name=appliance]{grid-template-columns:repeat(4,minmax(0,1fr))}}
 .chips.tight{gap:6px;margin:8px 0 0}.dy-table{width:100%;border-collapse:collapse;font-size:14px}.dy-table td,.dy-table th{padding:4px 6px 4px 0;text-align:left;border-top:1px solid var(--line);font-variant-numeric:tabular-nums}
 .buyhead{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:4px 0 8px;color:var(--muted);font-size:15px}
 .opt{display:flex;gap:12px;align-items:flex-start;min-height:44px;padding:8px 0;cursor:pointer}.opt input{width:24px;height:24px;accent-color:var(--primary);flex:none}
@@ -383,6 +385,15 @@ select{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--lin
     if(cart){cart.style.display=(st==="ВкусВилл")?"":"none";
       if(st==="ВкусВилл"){ if(isLocked("cart")){cart.innerHTML='<button class="btn locked" data-gate="cart">'+lockIc()+'Корзина ВкусВилла с ценами</button>';} else loadCart(cart);}}
   }
+  // рецепт по фото: продукты с фото попадают в поле «Что использовать», их можно поправить перед подбором
+  document.addEventListener("change",function(ev){
+    var inp=ev.target;if(!inp||inp.id!=="photo-in"||!inp.files||!inp.files[0])return;
+    var fd=new FormData(),btn=document.querySelector("[data-photo-pick]");fd.append("image",inp.files[0]);
+    saveText();if(btn){btn.disabled=true;btn.textContent="📷 Смотрю, что на фото…";}
+    fetch("/api/photo",{method:"POST",headers:{"X-Device":dev},body:fd}).then(function(r){return r.json().catch(function(){return {};}).then(function(j){if(!r.ok)throw new Error(typeof j.detail==="string"?j.detail:"Не получилось разобрать фото");return j;});})
+      .then(function(j){F.pref=j.items.join(", ");viewNew();toast("Проверьте список продуктов и нажмите «Подобрать»");})
+      .catch(function(e){alert(e.message);viewNew();});
+  });
   // список по ссылке: отправить другому человеку, галочки общие, открывается без бота и входа
   function listShare(b){
     var box=b.closest(".storebox"),cart=box&&box.querySelector("[data-cart]"),items=[];
@@ -457,7 +468,7 @@ select{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--lin
     h+='<label class="f">Тип питания</label>'+chips(m.cuisines,F.cuisine,"cuisine",false);
     if(F.cuisine==="macro_goal") h+='<label class="f" for="macro">Цель по КБЖУ</label><input type="text" id="macro" maxlength="200" placeholder="500 ккал, белки 40 г" value="'+esc(F.macro||ME.goal_text||"")+'">';
     if(F.mode!=="recipe") h+='<label class="f">Приёмы пищи</label>'+chips(m.meals,F.meals,"meals",true);
-    h+='<label class="f" for="pref">Что использовать или какое блюдо хочется</label><input type="text" id="pref" maxlength="300" placeholder="курица, рис или «хочу плов»" value="'+esc(F.pref||"")+'">';
+    h+='<label class="f" for="pref">Что использовать или какое блюдо хочется</label><input type="text" id="pref" maxlength="300" placeholder="курица, рис или «хочу плов»" value="'+esc(F.pref||"")+'">'+(ME&&ME.photo_on?'<button class="btn ghost" data-photo-pick="1">📷 Рецепт по фото продуктов</button><input type="file" id="photo-in" accept="image/*" hidden>':'');
     h+='<label class="f" for="exc">Что исключить</label><input type="text" id="exc" maxlength="300" placeholder="орехи, грибы, лук" value="'+esc(F.exc||"")+'">';
     if(ME.never)h+='<p class="sub" style="margin:6px 0 0">Всегда исключаю по вашему профилю: '+esc(ME.never)+'</p>';
     h+='<label class="f">Время на готовку</label>'+chips(times,F.time,"time",false);
@@ -772,7 +783,7 @@ select{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--lin
       '<label class="opt"><input type="checkbox" data-feat="weight"'+(on("weight")?' checked':'')+'><span>Вес и график</span></label>'+
       '<label class="opt"><input type="checkbox" data-feat="macro"'+(on("macro")?' checked':'')+'><span>Цель по калориям и БЖУ</span></label>'+
       '<label class="opt"><input type="checkbox" data-feat="shelf"'+(on("shelf")?' checked':'')+'><span>Полка: что уже есть дома'+(p.never_allowed?'':' '+lockIc()+'тариф «'+esc(ME.name||"Повар")+'»')+'</span></label>'+
-      '<label class="opt"><input type="checkbox" data-feat="never"'+(on("never")?' checked':'')+'><span>Список «никогда не использовать»'+(p.never_allowed?'':' '+lockIc()+'тариф «'+esc(ME.name||"Повар")+'»')+'</span></label>',true);
+      '<label class="opt"><input type="checkbox" data-feat="never"'+(on("never")?' checked':'')+'><span>Исключить продукты навсегда'+(p.never_allowed?'':' '+lockIc()+'тариф «'+esc(ME.name||"Повар")+'»')+'</span></label>',true);
     if(on("macro")||on("diary")||on("weight")){
       var g='';
       if(on("macro")||on("diary"))g+='<h2 style="margin-top:12px">Цель на день</h2><div class="goalgrid"><div><label for="pf-kcal">Калории</label><input type="text" inputmode="numeric" id="pf-kcal" value="'+(p.kcal||"")+'"></div><div><label for="pf-protein">Белки, г</label><input type="text" inputmode="numeric" id="pf-protein" value="'+(p.protein||"")+'"></div><div><label for="pf-fat">Жиры, г</label><input type="text" inputmode="numeric" id="pf-fat" value="'+(p.fat||"")+'"></div><div><label for="pf-carb">Углеводы, г</label><input type="text" inputmode="numeric" id="pf-carb" value="'+(p.carb||"")+'"></div></div><p class="sub" style="margin:8px 0 0">Цель подставляется на шаге «Цель по КБЖУ».</p><button class="btn" data-pf-save="macro">Сохранить</button>';
@@ -782,7 +793,7 @@ select{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--lin
         '<label for="en-act" style="display:block;margin-top:8px">Активность</label><select class="bk-sel" id="en-act" style="width:100%"><option value="sedentary">Сидячая работа, почти без тренировок</option><option value="office_sport">Офис и спорт 1–3 раза в неделю</option><option value="sport">Спорт 4–5 раз в неделю</option><option value="active">Активная работа на ногах или ежедневный спорт</option></select><button class="btn ghost" data-dy-calc="1">Посчитать</button>';
       h+=accordion("🎯 Цели","меняются редко","",g,false);
     }
-    if(on("never")&&p.never_allowed)h+=accordion("🚫 Никогда не использовать","","",'<textarea id="pf-never" maxlength="300" placeholder="кинза, грибы, печень" style="margin-top:10px">'+esc(p.never||"")+'</textarea><p class="sub" style="margin:6px 0 0">Бот и сайт исключат эти продукты из рецептов, меню и планов. Диагнозы писать не нужно.</p><button class="btn" data-pf-save="never">Сохранить</button>',false);
+    if(on("never")&&p.never_allowed)h+=accordion("🚫 Исключить продукты","","",'<p class="sub" style="margin:10px 0 0">Если какие-то продукты никогда не хотите видеть в своём меню, напишите их через запятую. Бот и сайт уберут их из рецептов, меню и планов.</p><textarea id="pf-never" maxlength="300" placeholder="кинза, грибы, печень" style="margin-top:10px">'+esc(p.never||"")+'</textarea><p class="sub" style="margin:6px 0 0">ИИ может ошибаться: проверяйте рецепты и готовность блюд.</p><button class="btn" data-pf-save="never">Сохранить</button>',false);
     return h;
   }
 
@@ -803,25 +814,40 @@ select{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--lin
       out.push({day:ch[0].day,kcal:Math.round(mean("kcal")),protein:mean("protein"),fat:mean("fat"),carb:mean("carb"),n:got.length,week:step>1});}
     return out;
   }
-  function dyTip(b){var dd=b.day.slice(8)+"."+b.day.slice(5,7);return (b.week?"Неделя с "+dd+", в среднем: ":dd+": ")+(b.n?dyN(b.kcal)+" ккал, Б "+Math.round(b.protein)+" г, Ж "+Math.round(b.fat)+" г, У "+Math.round(b.carb)+" г":"нет записей");}
-  function dyChart(series,target){
-    var bars=dyBuckets(series),W=340,H=170,pl=38,pr=6,pt=8,pb=20;
+  function dyTip(b,kg){var dd=b.day.slice(8)+"."+b.day.slice(5,7);return (b.week?"Неделя с "+dd+", в среднем: ":dd+": ")+(b.n?dyN(b.kcal)+" ккал, Б "+Math.round(b.protein)+" г, Ж "+Math.round(b.fat)+" г, У "+Math.round(b.carb)+" г":"нет записей о еде")+(kg&&!b.week?", вес "+kg+" кг":"");}
+  // один график: столбик калорий раскрашен по БЖУ, поверх линия веса со своей шкалой справа
+  function dyChart(series,target,weights){
+    var bars=dyBuckets(series),step=series.length>31?7:1,ws=weights||[],W=340,H=190,pl=38,pr=ws.length?30:6,pt=14,pb=20,kgBy={};
+    ws.forEach(function(w){kgBy[w.day]=w.kg;});
     var top=Math.max.apply(null,bars.map(function(b){return b.kcal;}).concat([(target&&target.kcal)||0,1000]))*1.1;top=Math.ceil(top/500)*500;
     var Y=function(v){return pt+(H-pt-pb)*(1-v/top);},slot=(W-pl-pr)/bars.length,bw=Math.max(2,slot-Math.min(4,slot*0.34));
-    var s='<svg viewBox="0 0 '+W+' '+H+'" class="dychart" role="img" aria-label="Калории по дням, столбик раскрашен по долям белков, жиров и углеводов">';
+    var s='<svg viewBox="0 0 '+W+' '+H+'" class="dychart" role="img" aria-label="Калории по дням и вес. Столбик раскрашен по долям белков, жиров и углеводов">';
     [0,top/2,top].forEach(function(v){var y=Y(v).toFixed(1);s+='<line x1="'+pl+'" x2="'+(W-pr)+'" y1="'+y+'" y2="'+y+'" stroke="var(--line)"/><text x="'+(pl-5)+'" y="'+(Number(y)+4)+'" text-anchor="end" fill="var(--muted)" font-size="10">'+dyN(v)+'</text>';});
     bars.forEach(function(b,i){
       var x=pl+slot*i+(slot-bw)/2,y=Y(0);
       if(b.n)dySegs(b).forEach(function(g,j,a){var h=(H-pt-pb)*g[1]/top,gap=(j<a.length-1&&h>3)?1.5:0;s+='<rect x="'+x.toFixed(1)+'" y="'+(y-h+gap).toFixed(1)+'" width="'+bw.toFixed(1)+'" height="'+Math.max(0,h-gap).toFixed(1)+'" fill="var('+g[0]+')"'+(j===a.length-1?' rx="'+Math.min(2,bw/3).toFixed(1)+'"':'')+'/>';y-=h;});
-      s+='<rect x="'+(pl+slot*i).toFixed(1)+'" y="'+pt+'" width="'+slot.toFixed(1)+'" height="'+(H-pt-pb)+'" fill="transparent" data-dy-tip="'+esc(dyTip(b))+'"><title>'+esc(dyTip(b))+'</title></rect>';
     });
     if(target&&target.kcal){var ty=Y(target.kcal).toFixed(1);s+='<line x1="'+pl+'" x2="'+(W-pr)+'" y1="'+ty+'" y2="'+ty+'" stroke="var(--text)" stroke-dasharray="4 3"/>';}
+    if(ws.length){
+      var vals=ws.map(function(w){return w.kg;}),lo=Math.min.apply(null,vals),hi=Math.max.apply(null,vals);if(hi-lo<1){lo-=0.5;hi+=0.5;}var pad=(hi-lo)*0.15;lo-=pad;hi+=pad;
+      var YW=function(v){return pt+(H-pt-pb)*(1-(v-lo)/(hi-lo));},first=Date.parse(series[0].day+"T00:00:00Z");
+      var pts=ws.map(function(w){var idx=(Date.parse(w.day+"T00:00:00Z")-first)/864e5;return [pl+slot*(idx+0.5)/step,YW(w.kg)];}),line=pts.map(function(p){return p[0].toFixed(1)+","+p[1].toFixed(1);}).join(" ");
+      [lo+pad,hi-pad].forEach(function(v){s+='<text x="'+(W-pr+4)+'" y="'+(YW(v)+4).toFixed(1)+'" fill="var(--muted)" font-size="10">'+v.toFixed(1)+'</text>';});
+      s+='<text x="'+(W-pr+4)+'" y="9" fill="var(--text)" font-size="10">кг</text><polyline fill="none" stroke="var(--surface)" stroke-width="4.5" points="'+line+'"/><polyline fill="none" stroke="var(--text)" stroke-width="2" points="'+line+'"/>';
+      pts.forEach(function(p){s+='<circle cx="'+p[0].toFixed(1)+'" cy="'+p[1].toFixed(1)+'" r="3" fill="var(--surface)" stroke="var(--text)" stroke-width="1.5"/>';});
+    }
+    bars.forEach(function(b,i){var tip=esc(dyTip(b,kgBy[b.day]));s+='<rect x="'+(pl+slot*i).toFixed(1)+'" y="'+pt+'" width="'+slot.toFixed(1)+'" height="'+(H-pt-pb)+'" fill="transparent" data-dy-tip="'+tip+'"><title>'+tip+'</title></rect>';});
     var lab=function(b){return b.day.slice(8)+"."+b.day.slice(5,7);};
     s+='<text x="'+pl+'" y="'+(H-5)+'" fill="var(--muted)" font-size="10">'+lab(bars[0])+'</text><text x="'+(W-pr)+'" y="'+(H-5)+'" text-anchor="end" fill="var(--muted)" font-size="10">'+lab(bars[bars.length-1])+'</text></svg>';
     return s;
   }
+  // сверху график, под ним запись еды и веса
   function diaryCards(d){
-    var t=d.today,tg=d.target,h='<div class="card pcard"><h2>Сегодня</h2><p class="dy-hero"><b>'+dyN(t.kcal)+'</b> ккал'+(tg?' из ≈'+dyN(tg.kcal)+' <span class="sub">('+esc(tg.title)+')</span>':'')+'</p>';
+    var t=d.today,tg=d.target,ws=d.weights||[],logged=d.stats&&d.stats.logged,h='<div class="card pcard"><h2>Калории и вес</h2><div class="chips tight">'+[7,30,90].map(function(n){return '<button class="chip mini" aria-pressed="'+(DY.days===n)+'" data-dy-days="'+n+'">'+n+' дн.</button>';}).join("")+'</div>';
+    if(logged||ws.length){
+      h+=dyChart(d.series,tg,ws)+'<p class="dy-tip" id="dy-tip" aria-live="polite">Нажмите на столбик, чтобы увидеть цифры.</p><div class="dy-legend">'+MACROS.map(function(m){return '<span><i class="sw" style="background:var('+m[2]+')"></i>'+m[3]+'</span>';}).join("")+'<span><i class="sw" style="background:var(--m-x)"></i>без БЖУ</span>'+(ws.length?'<span>⚬ вес</span>':'')+(tg?'<span>┄ '+esc(tg.title)+'</span>':'')+'</div>';
+    } else h+='<p class="sub" style="margin:10px 0 0">График появится после первой записи.</p>';
+    h+='<h2 style="margin-top:16px">Сегодня</h2><p class="dy-hero"><b>'+dyN(t.kcal)+'</b> ккал'+(tg?' из ≈'+dyN(tg.kcal)+' <span class="sub">('+esc(tg.title)+')</span>':'')+'</p>';
     if(tg)h+='<div class="dy-bar" role="img" aria-label="Съедено '+Math.round(t.kcal/tg.kcal*100)+'%"><i style="width:'+Math.min(100,Math.round(t.kcal/tg.kcal*100))+'%"></i></div>';
     h+='<p class="sub" style="margin:0">Б '+Math.round(t.protein)+' г · Ж '+Math.round(t.fat)+' г · У '+Math.round(t.carb)+' г'+(tg?'':' · <button class="chip mini" data-tab-go="settings">Задать цель</button>')+'</p>';
     h+='<form data-dy-form="1" class="row" style="margin-top:12px"><input type="text" id="dy-q" maxlength="60" placeholder="Что съели? борщ или «пицца 450»" aria-label="Что съели"><button class="btn" style="width:auto;margin:0">Найти</button></form><div id="dy-res" class="dy-res"></div>';
@@ -829,16 +855,9 @@ select{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--lin
     if((d.frequent||[]).length)h+='<div class="chips tight">'+d.frequent.map(function(f){return '<button class="chip mini" data-dy-food="'+esc(f.id)+'">⭐ '+esc(f.name)+'</button>';}).join("")+'</div>';
     h+=weightInput();
     if(t.items.length)h+='<details><summary>Записи за сегодня: '+t.items.length+'</summary>'+t.items.map(function(i){return '<div class="item" style="display:flex;justify-content:space-between;align-items:center;gap:8px"><span>'+esc(i.title)+' — '+dyN(i.kcal)+' ккал</span><button class="chip mini" data-dy-del="'+i.id+'" aria-label="Удалить запись">✕</button></div>';}).join("")+'</details>';
-    h+='<p class="sub" style="margin:10px 0 0;font-size:13px">Калории оценочные. Не врач и не диетолог.</p></div>';
-    h+='<div class="card pcard"><h2>Калории и БЖУ</h2><div class="chips tight">'+[7,30,90].map(function(n){return '<button class="chip mini" aria-pressed="'+(DY.days===n)+'" data-dy-days="'+n+'">'+n+' дн.</button>';}).join("")+'</div>';
-    var logged=d.stats&&d.stats.logged;
-    if(logged){
-      h+=dyChart(d.series,tg)+'<p class="dy-tip" id="dy-tip" aria-live="polite">Нажмите на столбик, чтобы увидеть цифры.</p><div class="dy-legend">'+MACROS.map(function(m){return '<span><i class="sw" style="background:var('+m[2]+')"></i>'+m[3]+'</span>';}).join("")+'<span><i class="sw" style="background:var(--m-x)"></i>без БЖУ</span></div>';
-      h+='<p class="sub" style="margin:8px 0 0">В среднем '+dyN(d.stats.avg_kcal)+' ккал в день'+(d.shares?': белки '+d.shares.protein+'%, жиры '+d.shares.fat+'%, углеводы '+d.shares.carb+'% калорий':'')+'.</p><p class="sub" style="margin:4px 0 0;font-size:13px">'+esc(d.reference)+'</p>';
-      h+='<details><summary>Таблицей</summary><table class="dy-table"><tr><th>Дата</th><th>Ккал</th><th>Б</th><th>Ж</th><th>У</th></tr>'+d.series.filter(function(x){return x.n;}).reverse().map(function(x){return '<tr><td>'+esc(x.day.slice(8)+"."+x.day.slice(5,7))+'</td><td>'+dyN(x.kcal)+'</td><td>'+Math.round(x.protein)+'</td><td>'+Math.round(x.fat)+'</td><td>'+Math.round(x.carb)+'</td></tr>';}).join("")+'</table></details>';
-    } else h+='<p class="sub" style="margin:10px 0 0">График появится после первой записи.</p>';
-    if((d.weights||[]).length){h+='<h2 style="margin-top:14px">Вес</h2>'+weightChart(d.weights,d.weight_goal)+'<details><summary>Записи веса</summary>'+weightRows(d.weights)+'</details>';}
-    return h+'</div>';
+    if(logged)h+='<details><summary>Средние и таблица</summary><p class="sub" style="margin:0">В среднем '+dyN(d.stats.avg_kcal)+' ккал в день'+(d.shares?': белки '+d.shares.protein+'%, жиры '+d.shares.fat+'%, углеводы '+d.shares.carb+'% калорий':'')+'.</p><p class="sub" style="margin:4px 0 8px;font-size:13px">'+esc(d.reference)+'</p><table class="dy-table"><tr><th>Дата</th><th>Ккал</th><th>Б</th><th>Ж</th><th>У</th></tr>'+d.series.filter(function(x){return x.n;}).reverse().map(function(x){return '<tr><td>'+esc(x.day.slice(8)+"."+x.day.slice(5,7))+'</td><td>'+dyN(x.kcal)+'</td><td>'+Math.round(x.protein)+'</td><td>'+Math.round(x.fat)+'</td><td>'+Math.round(x.carb)+'</td></tr>';}).join("")+'</table></details>';
+    if(ws.length)h+='<details><summary>Записи веса'+(d.weight_goal?' · цель '+d.weight_goal+' кг':'')+'</summary>'+weightRows(ws)+'</details>';
+    return h+'<p class="sub" style="margin:10px 0 0;font-size:13px">Калории оценочные. Не врач и не диетолог.</p></div>';
   }
   function dyFoodList(items,why,q){
     items.forEach(function(f){DY.foods[f.id]=f;});
@@ -947,6 +966,7 @@ select{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--lin
     if(b=t.closest("[data-dy-eat]")){var rr=window.__r[b.getAttribute("data-dy-eat")];if(!rr)return;b.disabled=true;call("POST","/api/diary/recipe",{title:rr.title,text:rr.text}).then(function(j){toast("В дневник: "+dyN(j.kcal)+" ккал. Оценка примерная.");b.disabled=false;}).catch(function(e){b.disabled=false;alert(e.message);});return;}
     if(b=t.closest("[data-dy-calc]")){call("POST","/api/energy",{sex:val("en-sex"),age:val("en-age"),height:val("en-h"),weight:val("en-w"),activity:val("en-act")}).then(function(j){toast("Примерный расход: "+dyN(j.tdee)+" ккал в день");return profileReload();}).catch(function(e){alert(e.message);});return;}
     if(b=t.closest("[data-list-share]")){listShare(b);return;}
+    if(b=t.closest("[data-photo-pick]")){var pi=document.getElementById("photo-in");if(pi)pi.click();return;}
     if(b=t.closest("[data-store-pick]")){pickStore(b);return;}
     if(b=t.closest("[data-miss-open]")){var pn=b.parentNode.querySelector(".misspanel");pn.style.display=pn.style.display==="none"?"":"none";return;}
     if(b=t.closest("[data-miss-go]")){missingGo(b);return;}
