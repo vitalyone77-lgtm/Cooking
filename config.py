@@ -156,7 +156,7 @@ VK_API_URL = os.getenv("VK_API_URL", "https://api.vk.com")
 # виджет обменивает код в браузере, а сервер проверяет токен запросом к VK.
 BOOK_REPEAT_DAYS = int(os.getenv("BOOK_REPEAT_DAYS", "14"))     # один и тот же рецепт из книги одному человеку не чаще, чем раз в столько дней
 VK_CLIENT_ID = os.getenv("VK_CLIENT_ID", "54875605")
-VK_ID_API_URL = os.getenv("VK_ID_API_URL", "https://id.vk.com")
+VK_ID_API_URL = os.getenv("VK_ID_API_URL", "https://id.vk.ru")      # вход ВК живёт на vk.ru: с id.vk.com телефон не видит сессию и ходит по кругу
 VK_LOGIN = os.getenv("VK_LOGIN", "true").strip().lower() not in ("0", "false", "no", "off")
 TG_CHANNEL_ID = os.getenv("TG_CHANNEL_ID", "")                   # @имя_канала или число; бот должен быть админом канала
 SOCIAL_AUTOPOST = os.getenv("SOCIAL_AUTOPOST", "false").lower() == "true"   # false: только вручную через /postvk

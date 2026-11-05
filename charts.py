@@ -16,6 +16,14 @@ WEEKDAYS = ["пн", "вт", "ср", "чт", "пт", "сб", "вс"]
 MACRO_COLORS = {"protein": "#2a78d6", "fat": "#eb6834", "carb": "#1baf7a"}     # проверено на различимость при цветовой слепоте
 NO_MACRO = "#C9C2B8"
 REFERENCE = "Ориентир для взрослых (AMDR, США): белки 10–35%, жиры 20–35%, углеводы 45–65% калорий."
+ATHLETE_NOTE = "Спортсменам нормы часто считают иначе, на кг веса: уточняйте у специалиста. Свой ориентир можно вписать в настройках, мы его не советуем."
+
+
+def reference_text(ref: dict | None = None) -> str:
+    """Подпись к графику: ориентир, который человек задал сам, или общий."""
+    if ref:
+        return f"Ваш ориентир: белки {ref['protein']:g}%, жиры {ref['fat']:g}%, углеводы {ref['carb']:g}% калорий."
+    return REFERENCE
 
 
 def _dashed(draw, x1, x2, y, color, width=3, dash=14, gap=9):
@@ -53,7 +61,7 @@ def _segments(d: dict) -> list[tuple[str, float]]:
     return out
 
 
-def diary_chart(series: list[dict], tdee: int | None = None, weights: list[dict] | None = None) -> bytes:
+def diary_chart(series: list[dict], tdee: int | None = None, weights: list[dict] | None = None, ref: dict | None = None) -> bytes:
     """series: [{"day": "2026-11-04", "kcal": 1800, "protein", "fat", "carb", "n": 3}, ...] по порядку; weights: [{"day", "kg"}]. -> PNG.
     Столбик калорий раскрашен по долям белков, жиров и углеводов, поверх линия веса со своей шкалой справа: видно, как вес отвечает на еду."""
     n = len(series)
@@ -166,7 +174,7 @@ def diary_chart(series: list[dict], tdee: int | None = None, weights: list[dict]
         draw.line((x, ly + 13, x + 34, ly + 13), fill=INK, width=4)
         draw.ellipse((x + 10, ly + 6, x + 24, ly + 20), fill=BG, outline=INK, width=3)
         draw.text((x + 44, ly), "вес", font=f_small, fill=INK)
-    draw.text((left, H - 64), REFERENCE, font=cards._font(20), fill=MUTED)
+    draw.text((left, H - 64), reference_text(ref), font=cards._font(20), fill=MUTED)
     draw.text((left, H - 36), "Оценка приблизительная и не заменяет совет врача или диетолога.", font=cards._font(20), fill=MUTED)
     out = BytesIO()
     img.save(out, "PNG")

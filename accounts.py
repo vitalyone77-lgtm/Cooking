@@ -55,6 +55,7 @@ CREATE TABLE IF NOT EXISTS book_seen(uid TEXT, book_id INTEGER, ts REAL, PRIMARY
 CREATE TABLE IF NOT EXISTS alias(src TEXT PRIMARY KEY, dst TEXT, ts REAL);
 CREATE TABLE IF NOT EXISTS pay_orders(id TEXT PRIMARY KEY, uid TEXT, plan TEXT, days INTEGER, amount TEXT, test INTEGER, ts REAL, status TEXT, op TEXT);
 CREATE INDEX IF NOT EXISTS pay_orders_uid ON pay_orders(uid, ts);
+CREATE TABLE IF NOT EXISTS macro_ref(uid TEXT PRIMARY KEY, p REAL, f REAL, c REAL);
 CREATE TABLE IF NOT EXISTS shop_lists(id TEXT PRIMARY KEY, uid TEXT, title TEXT, items TEXT, done TEXT, ts REAL);
 CREATE INDEX IF NOT EXISTS shop_lists_uid ON shop_lists(uid, ts);
 CREATE TABLE IF NOT EXISTS ai_foods(id INTEGER PRIMARY KEY AUTOINCREMENT, key TEXT UNIQUE, name TEXT, grams REAL, kcal100 REAL, p100 REAL, f100 REAL, c100 REAL, label TEXT, ts REAL);
@@ -493,7 +494,7 @@ def fav_import(rows: list[tuple]) -> None:
             c.close()
 
 
-_MERGE_TABLES = ("favs", "shelf", "weights", "goals", "energy", "consents", "promo_used", "refs", "book_seen")
+_MERGE_TABLES = ("favs", "shelf", "weights", "goals", "energy", "consents", "promo_used", "refs", "book_seen", "macro_ref")
 
 
 def _merge_accounts(c, src: str, dst: str) -> None:
@@ -731,7 +732,8 @@ def delete_my_data(uid) -> dict:
     out = {"weights": _q("DELETE FROM weights WHERE uid=?", (uid,)), "goals": _q("DELETE FROM goals WHERE uid=?", (uid,)),
            "shelf": _q("DELETE FROM shelf WHERE uid=?", (uid,)), "consent": _q("DELETE FROM consents WHERE uid=?", (uid,)),
            "diary": _q("DELETE FROM diary WHERE uid=?", (uid,)), "energy": _q("DELETE FROM energy WHERE uid=?", (uid,)),
-           "book_seen": _q("DELETE FROM book_seen WHERE uid=?", (uid,)), "shop_lists": _q("DELETE FROM shop_lists WHERE uid=?", (uid,))}
+           "book_seen": _q("DELETE FROM book_seen WHERE uid=?", (uid,)), "shop_lists": _q("DELETE FROM shop_lists WHERE uid=?", (uid,)),
+           "macro_ref": _q("DELETE FROM macro_ref WHERE uid=?", (uid,))}
     return out
 
 
@@ -830,6 +832,26 @@ def diary_frequent(uid, limit: int = 4) -> list[str]:
         name = t.split(" (")[0]
         count[name] = count.get(name, 0) + 1
     return [n for n, _ in sorted(count.items(), key=lambda kv: -kv[1])[:limit]]
+
+
+def macro_ref_get(uid) -> dict | None:
+    """Свой ориентир БЖУ в процентах калорий: человек вписывает его сам, приложение его не советует."""
+    r = _q("SELECT p, f, c FROM macro_ref WHERE uid=?", (str(uid),), one=True)
+    return {"protein": r[0], "fat": r[1], "carb": r[2]} if r else None
+
+
+def macro_ref_set(uid, protein, fat, carb) -> dict | None:
+    """Все поля пустые: убрать ориентир. ValueError — понятный текст. Значения не оцениваем, проверяем только, что это проценты."""
+    if all(v in (None, "") for v in (protein, fat, carb)):
+        _q("DELETE FROM macro_ref WHERE uid=?", (str(uid),))
+        return None
+    p, f, c = (_num(v, 0, 100, as_float=True) for v in (protein, fat, carb))
+    if None in (p, f, c):
+        raise ValueError("Нужны все три числа: белки, жиры и углеводы")
+    if not 99 <= p + f + c <= 101:
+        raise ValueError("Сумма процентов должна быть 100")
+    _q("INSERT INTO macro_ref(uid, p, f, c) VALUES(?,?,?,?) ON CONFLICT(uid) DO UPDATE SET p=excluded.p, f=excluded.f, c=excluded.c", (str(uid), p, f, c))
+    return {"protein": p, "fat": f, "carb": c}
 
 
 def diary_stats(series: list[dict]) -> dict:

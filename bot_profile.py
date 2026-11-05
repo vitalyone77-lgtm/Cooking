@@ -14,6 +14,7 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMar
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 import accounts
+import charts
 import payanyway
 import ui
 import config
@@ -129,7 +130,9 @@ def _goals_view(uid: int) -> tuple[str, InlineKeyboardMarkup]:
     b = InlineKeyboardBuilder()
     b.row(InlineKeyboardButton(text="🎯 Цель на день", callback_data="pf:goal"), InlineKeyboardButton(text="⚖️ Вес", callback_data="pf:weight"))
     if diary:
-        b.row(InlineKeyboardButton(text="🧮 Посчитать расход", callback_data="dy:calc"))
+        b.row(InlineKeyboardButton(text="🧮 Посчитать расход", callback_data="dy:calc"), InlineKeyboardButton(text="📊 Свой ориентир БЖУ", callback_data="pf:mref"))
+        ref = accounts.macro_ref_get(uid)
+        lines.append(charts.reference_text(ref) if ref else "Свой ориентир БЖУ: не задан")
     elif len(ws) >= 2:
         b.row(InlineKeyboardButton(text="📊 График веса", callback_data="dy:ch:30"))
     b.row(InlineKeyboardButton(text="⬅️ Назад", callback_data="pf:set"))
@@ -173,7 +176,7 @@ def _profile_main(uid: int, days: int = 30) -> tuple[str, InlineKeyboardMarkup, 
     lines.append("Оценка приблизительная, не врач и не диетолог.")
     png = None
     if st["logged"] or len(weights) >= 2:
-        png = charts.diary_chart(series, en["tdee"] if en else None, weights)
+        png = charts.diary_chart(series, en["tdee"] if en else None, weights, accounts.macro_ref_get(uid))
     else:
         lines.insert(2, "График появится, когда будут записи о еде или вес за разные дни.")
     b = InlineKeyboardBuilder()
@@ -457,6 +460,39 @@ async def profile_set_goal(message: Message, state: FSMContext):
         return
     usage.event("profile_edit", uid)
     await show_profile(message, state, mode="tracked", settings=True)
+
+
+@router.callback_query(F.data == "pf:mref")
+async def profile_macro_ref(callback: CallbackQuery, state: FSMContext):
+    if not await _need_consent(callback):
+        return
+    await state.set_state(ProfileForm.macro_ref)
+    await callback.answer()
+    await callback.message.edit_text(
+        "📊 Свой ориентир БЖУ покажем рядом с графиком. Напишите три числа, проценты калорий, сумма 100: белки, жиры, углеводы. Например: 25 25 50. "
+        "Чтобы убрать, напишите «нет».\n\n" + charts.ATHLETE_NOTE + " Данные ориентировочные и не заменяют врача или специалиста.",
+        reply_markup=_cancel_kb(), parse_mode=None)
+
+
+@router.message(ProfileForm.macro_ref, F.text)
+async def profile_set_macro_ref(message: Message, state: FSMContext):
+    uid = message.chat.id
+    await ui.drop(message)
+    nums = re.findall(r"\d+(?:[.,]\d+)?", message.text or "")
+    try:
+        if (message.text or "").strip().lower() in ("нет", "убрать", "очистить"):
+            accounts.macro_ref_set(uid, None, None, None)
+        elif len(nums) != 3:
+            raise ValueError("Нужно три числа: белки, жиры, углеводы. Например: 25 25 50")
+        else:
+            accounts.macro_ref_set(uid, *nums)
+    except ValueError as e:
+        await ui.show(message, f"😔 {e}", _cancel_kb(), mode="tracked")
+        return
+    await state.clear()
+    usage.event("profile_edit", uid)
+    text, markup = _goals_view(uid)
+    await ui.show(message, text, markup, mode="tracked")
 
 
 @router.callback_query(F.data == "pf:weight")

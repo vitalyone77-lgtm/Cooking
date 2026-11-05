@@ -851,7 +851,7 @@ def _need_consent(dev_id: int) -> str:
 def _profile_json(uid: str) -> dict:
     g = accounts.goals_get(uid)
     return {**g, "consent": True, "goal_text": accounts.goal_text(uid), "weights": accounts.weights_list(uid),
-            "never_allowed": plans.has_feature(uid, "memory")}
+            "never_allowed": plans.has_feature(uid, "memory"), "my_ref": accounts.macro_ref_get(uid)}
 
 
 @app.get("/api/profile")
@@ -947,8 +947,8 @@ def diary_get(days: int = 30, x_device: str | None = Header(default=None)):
     target = {"kcal": g["kcal"], "title": "цель"} if g["kcal"] else {"kcal": en["tdee"], "title": "расход"} if en else None
     by_name = {f["name"]: f for f in foods.FOODS}
     return {"days": days, "today": accounts.diary_day(uid), "target": target, "energy": en, "series": series, "stats": accounts.diary_stats(series),
-            "shares": charts.macro_shares(series), "reference": charts.REFERENCE, "note": accounts.DIARY_NOTE,
-            "weights": [w for w in accounts.weights_list(uid, days + 5) if w["day"] >= series[0]["day"]], "weight_goal": g["weight_goal"],
+            "shares": charts.macro_shares(series), "reference": charts.reference_text(accounts.macro_ref_get(uid)), "athlete_note": charts.ATHLETE_NOTE, "note": accounts.DIARY_NOTE,
+            "weights": [w for w in accounts.weights_list(uid, days + 5) if w["day"] >= series[0]["day"]], "weight_goal": g["weight_goal"], "goal_grams": {k: g[k] for k in ("protein", "fat", "carb")},
             "frequent": [_food_json(by_name[n]) for n in accounts.diary_frequent(uid) if n in by_name],
             "activities": [{"key": k, "title": v[1]} for k, v in accounts.ACTIVITY.items()]}
 
@@ -1006,6 +1006,22 @@ def diary_recipe(body: DiaryRecipeIn, x_device: str | None = Header(default=None
 def diary_del(entry_id: int, x_device: str | None = Header(default=None)):
     uid = _need_diary(_dev(x_device))
     return {"ok": accounts.diary_delete(uid, entry_id)}
+
+
+class MacroRefIn(BaseModel):
+    protein: int | float | str | None = None
+    fat: int | float | str | None = None
+    carb: int | float | str | None = None
+
+
+@app.post("/api/macro-ref")
+def macro_ref(body: MacroRefIn, x_device: str | None = Header(default=None)):
+    """Свой ориентир БЖУ в процентах: человек вписывает его сам, мы только показываем. Все поля пустые: убрать."""
+    uid = _need_diary(_dev(x_device))
+    try:
+        return {"my_ref": accounts.macro_ref_set(uid, body.protein, body.fat, body.carb)}
+    except ValueError as e:
+        raise HTTPException(400, str(e))
 
 
 @app.post("/api/energy")
