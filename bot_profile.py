@@ -707,6 +707,8 @@ def _sub_view(uid: int) -> tuple[str, InlineKeyboardMarkup]:
         b.button(text=f"🧪 {chk['title']} — {chk['rub']} ₽", callback_data=f"pf:pw:{chk['key']}")
     if not config.PAYMENT_STARS_ENABLED and not config.PAYMENT_PROVIDER_TOKEN and not payanyway.enabled():
         lines.append("Оплата скоро появится 🙂")
+    if payanyway.enabled():
+        b.button(text="📄 Условия оплаты и возврата", url=(config.WEB_APP_URL or "https://menu.ymayaka.ru").rstrip("/") + "/oplata")
     b.button(text="🎟 Промокод", callback_data="pf:promo")
     b.button(text="⬅️ Профиль", callback_data="pf:back")
     b.adjust(1)

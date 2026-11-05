@@ -166,14 +166,14 @@ def _photo_error(data: dict) -> None:
 
 async def vk_photo_attachment(image: bytes) -> str:
     """Загрузить картинку для записи на стену. -> «photo-НОМЕР_ID_КЛЮЧ». RuntimeError без ключа в тексте.
-    Ключ сообщества не может грузить фото на стену (photos.getWallUploadServer, код 27), поэтому сначала идём через альбом сообщений
-    (photos.getMessagesUploadServer): такая фотография прикрепляется к записи. Ключ пользователя (VK_IMAGE_MODE=upload) грузит на стену."""
+    Ключ сообщества не может грузить фото на стену (photos.getWallUploadServer, код 27), для этого нужен ключ пользователя (VK_PHOTO_TOKEN).
+    Без него идём через альбом сообщений (photos.getMessagesUploadServer): ВК принимает такое вложение, но на стене его может не показать."""
     try:
         async with httpx.AsyncClient(timeout=60) as client:
             gid = await group_numeric_id(client)
             base = config.VK_API_URL.rstrip("/") + "/method/"
-            common = {"access_token": config.VK_GROUP_TOKEN, "v": config.VK_API_VERSION}
-            wall = config.VK_IMAGE_MODE == "upload"
+            common = {"access_token": config.VK_PHOTO_TOKEN or config.VK_GROUP_TOKEN, "v": config.VK_API_VERSION}
+            wall = config.VK_IMAGE_MODE == "upload" or bool(config.VK_PHOTO_TOKEN)
             server = (await client.post(base + ("photos.getWallUploadServer" if wall else "photos.getMessagesUploadServer"),
                                         data={("group_id" if wall else "peer_id"): (gid if wall else 0), **common})).json()
             _photo_error(server)

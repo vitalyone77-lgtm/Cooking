@@ -105,7 +105,8 @@ def pay_page(order: dict) -> str:
             f"<h1 style='font-size:22px'>Переходим к оплате</h1><p>Подписка «{escape(plans.PREMIUM_NAME)}», {escape(str(order['amount']))} ₽.</p>"
             f"<form method=post action='{escape(config.PAYANYWAY_URL, quote=True)}' id=f>{fields}"
             "<button type=submit style='font-size:18px;padding:12px 24px;border-radius:12px;border:0;background:#2d6a4f;color:#fff'>Перейти к оплате</button></form>"
-            "<script>setTimeout(function(){document.getElementById('f').submit();},300);</script></body></html>")
+            "<p style='font-size:14px;margin-top:18px'><a href='/oplata'>Условия оплаты и возврата</a></p>"
+            "<script>setTimeout(function(){document.getElementById('f').submit();},1200);</script></body></html>")
 
 
 def success_response(p: dict, info: dict | None) -> str:

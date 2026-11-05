@@ -137,7 +137,7 @@ select{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--lin
   <button class="tab" role="tab" data-tab="help"><span class="ic">❓</span>Справка</button>
 </nav>
 <div id="print-area"></div>
-<p class="devnote" style="text-align:center;font-size:13px;color:var(--muted);margin:24px 16px 32px">Сайт разработан <a href="https://dev.pump-um.ru/" target="_blank" rel="noopener" style="color:inherit">dev.pump-um.ru</a></p>
+<p class="devnote" style="text-align:center;font-size:13px;color:var(--muted);margin:24px 16px 32px"><a href="/oplata" style="color:inherit">Оплата и возврат</a> · Сайт разработан <a href="https://dev.pump-um.ru/" target="_blank" rel="noopener" style="color:inherit">dev.pump-um.ru</a></p>
 <script>
 (function(){
   var main=document.getElementById("main"), META=null, ME={}, dev="", cur="new", wake=null;
@@ -606,6 +606,9 @@ select{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--lin
         if(m.paywall&&m.plan!=="premium"&&m.trial)pay+='<button class="btn" data-gate-trial="1">Попробовать тариф «'+esc(m.name||"Повар")+'» '+(m.trial_days||7)+' дней бесплатно</button>';
         if(m.pay_rub&&m.plan!=="premium")pay+='<h2 style="margin-top:12px">Оплатить подписку</h2><p class="sub" style="margin:0 0 4px">Картой или через СБП.</p>'+(m.pay_offers||[]).map(function(o){return '<button class="btn" data-pay="'+esc(o.key)+'">💳 '+esc(o.title)+' — '+o.rub+' ₽</button>';}).join("");
         if(m.paywall&&m.plan!=="premium")pay+='<a class="btn ghost" href="'+botLink("pay")+'" target="_blank" rel="noopener">Оформить подписку в Telegram</a>';
+        pay+='<a class="btn ghost" href="/oplata" target="_blank" rel="noopener">Условия оплаты и возврата</a>';
+        var sl=m.seller||{},sr=[["Самозанятый",sl.name],["ИНН",sl.inn],["Телефон",sl.phone],["Эл. почта",sl.email],["Адрес",sl.address]].filter(function(x){return x[1];});
+        if(sr.length)pay+='<p class="sub" style="margin:12px 0 0;font-size:14px">'+sr.map(function(x){return esc(x[0])+': '+esc(x[1]);}).join("<br>")+'</p>';
         h+=accordion("💎 Подписка и оплата","","",'<div style="padding-top:10px">'+pay+'</div>',false);
         return (m.via==="vk"?linkCode():Promise.resolve(null)).then(function(L){
           var acc='<p class="sub" style="margin:10px 0 0">Вход выполнен через '+(m.via==="vk"?"ВКонтакте":"Telegram")+'.</p>';
