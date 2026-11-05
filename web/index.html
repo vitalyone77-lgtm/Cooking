@@ -607,7 +607,7 @@ select{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--lin
         if(m.pay_rub&&m.plan!=="premium")pay+='<h2 style="margin-top:12px">Оплатить подписку</h2><p class="sub" style="margin:0 0 4px">Картой или через СБП.</p>'+(m.pay_offers||[]).map(function(o){return '<button class="btn" data-pay="'+esc(o.key)+'">💳 '+esc(o.title)+' — '+o.rub+' ₽</button>';}).join("");
         if(m.paywall&&m.plan!=="premium")pay+='<a class="btn ghost" href="'+botLink("pay")+'" target="_blank" rel="noopener">Оформить подписку в Telegram</a>';
         pay+='<a class="btn ghost" href="/oplata" target="_blank" rel="noopener">Условия оплаты и возврата</a>';
-        var sl=m.seller||{},sr=[["Самозанятый",sl.name],["ИНН",sl.inn],["Телефон",sl.phone],["Эл. почта",sl.email],["Адрес",sl.address]].filter(function(x){return x[1];});
+        var sl=m.seller||{},sr=[["Самозанятый",sl.name],["ИНН",sl.inn],["Телефон",sl.phone],["Эл. почта",sl.email]].filter(function(x){return x[1];});
         if(sr.length)pay+='<p class="sub" style="margin:12px 0 0;font-size:14px">'+sr.map(function(x){return esc(x[0])+': '+esc(x[1]);}).join("<br>")+'</p>';
         h+=accordion("💎 Подписка и оплата","","",'<div style="padding-top:10px">'+pay+'</div>',false);
         return (m.via==="vk"?linkCode():Promise.resolve(null)).then(function(L){
