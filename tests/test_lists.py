@@ -504,6 +504,89 @@ plans.paywall, plans.trial_available = _pw, _tr
 check("на сайте подсказка и полупрозрачность", "function hintHTML" in html and "opacity:.6" in html and "hintHTML()+" in html)
 check("про поиск в книге людям не рассказываем", "сначала ищет в книге" not in html and "сначала поищет" not in open("bot_book.py", encoding="utf-8").read() and "Нашёл в книге" not in open("bot.py", encoding="utf-8").read())
 
+# ---------- рейтинг ----------
+import book as _bk2
+_rcp = "Суп дня\n\nПродукты:\n- вода — 300 г\n- морковь — 100 г\n\nКалорийность: 100 ккал | Б: 1 г | Ж: 1 г | У: 10 г\n\n" + "Варить долго и аккуратно. " * 20
+_a = _bk2.add({"cuisine": "classic", "servings": 2}, "Суп рейтинга", _rcp, ["вода"])
+_b = _bk2.add({"cuisine": "classic", "servings": 2}, "Каша рейтинга", _rcp.replace("Суп дня", "Каша дня"), ["вода"])
+check("рецепты для рейтинга добавлены", _a and _b, str((_a, _b)))
+accounts.claim_login_code(accounts.new_login_code(7100), web_db.device_id(cl.post("/api/device").json()["device"])) if False else None
+check("рейтинг: гостю нельзя", cl.post(f"/api/book/{_a}/vote", json={"v": 1}, headers={"X-Device": cl.post("/api/device").json()["device"]}).status_code == 403)
+_v = cl.post(f"/api/book/{_b}/vote", json={"v": 1}, headers=H).json()
+check("рейтинг: 👍 засчитан", _v == {"up": 1, "down": 0, "my": 1}, str(_v))
+_ids = [r["id"] for r in _bk2.search(q="морковь")[0]]
+check("рейтинг: выше оценка, выше в списке", _ids[:2] == [_b, _a], str(_ids))
+check("рейтинг: повторное нажатие снимает", cl.post(f"/api/book/{_b}/vote", json={"v": 1}, headers=H).json()["up"] == 0)
+check("рейтинг: чужое значение отклоняется", cl.post(f"/api/book/{_b}/vote", json={"v": 5}, headers=H).status_code == 400)
+check("рейтинг: нет рецепта — 404", cl.post("/api/book/999999/vote", json={"v": 1}, headers=H).status_code == 404)
+for _u in ("r1", "r2", "r3"):
+    _bk2.vote(_a, _u, -1)
+_found = _bk2.find("новый", {"cuisine": "classic", "servings": 2, "portion": "normal", "appliance": [], "time": "Не важно"})
+check("рейтинг: плохой рецепт бот сам не предлагает", not _found or _found["id"] != _a, str(_found)[:100])
+check("в API книги есть рейтинг", "rating" in cl.get("/api/book?q=морковь", headers=H).json()["items"][0])
+
+# ---------- состав ----------
+_fake_lb = {"products": [{"name": "Йогурт", "ingredients": ["молоко"], "additives": [], "attention": ["сахар"]}], "compare": ""}
+
+
+async def _lb_ok(images):
+    _lb_ok.n = len(images)
+    return _fake_lb
+
+
+vision.check_label = _lb_ok
+_files = [("images", ("a.jpg", b"1", "image/jpeg")), ("images", ("b.jpg", b"2", "image/jpeg")), ("images", ("c.jpg", b"3", "image/jpeg"))]
+r = cl.post("/api/label", files=_files, headers=H)
+check("состав: не больше двух фото и ответ", r.status_code == 200 and _lb_ok.n == 2 and r.json()["products"][0]["name"] == "Йогурт", r.text[:200])
+check("состав: не картинка отклоняется", cl.post("/api/label", files=[("images", ("a.txt", b"1", "text/plain"))], headers=H).status_code == 400)
+check("состав: кнопка в профиле и в списке, вид есть", html.count('data-tab-go="label"') >= 2 and "function viewLabel" in html)
+
+# ---------- партнёр ----------
+import partners as _pt
+try:
+    _pt.ensure("<bad>")
+    _ok = False
+except ValueError:
+    _ok = True
+check("партнёр: негодный код отклоняется", _ok)
+_p = _pt.ensure("testpartner")
+check("партнёр: повторно та же ссылка", _pt.ensure("testpartner")["token"] == _p["token"] and len(_p["token"]) > 15)
+r = cl.get("/p/testpartner", follow_redirects=False)
+check("партнёр: именная ссылка ведёт на сайт и считает переход", r.status_code == 302 and "ref=testpartner" in r.headers["location"] and _pt.get("testpartner")["clicks"] == 1)
+check("партнёр: чужая ссылка не падает", cl.get("/p/nope1", follow_redirects=False).status_code == 302)
+_dv = cl.post("/api/device").json()["device"]
+check("партнёр: гость запомнен", cl.post("/api/ref", json={"ref": "testpartner"}, headers={"X-Device": _dv}).status_code == 200)
+accounts.claim_login_code(accounts.new_login_code(7300), web_db.device_id(_dv))
+check("партнёр: при входе источник переходит на аккаунт", accounts._q("SELECT ref FROM refs WHERE uid='7300'", one=True)[0] == "testpartner")
+accounts.apply_payment("pw:p1", 7300, 1000, "RUB", 30, "month")
+accounts.apply_payment("pwtest:p2", 7300, 500, "RUBTEST", 30, "month")
+accounts.apply_payment("tg:p3", 7300, 200, "XTR", 30, "month")
+_s = _pt.stats(_pt.get("testpartner"))
+check("партнёр: считаются только рубли, (1000 − 4%) × 80%", _s["gross"] == 1000 and _s["tax"] == 40 and _s["due"] == 768 and _s["buyers"] == 1, str(_s))
+_pt.payout("testpartner", 100)
+check("партнёр: выплата уменьшает остаток", _pt.stats(_pt.get("testpartner"))["balance"] == 668)
+pg = cl.get("/partner/" + _p["token"])
+check("партнёр: кабинет по секретной ссылке, закрыт от поиска", pg.status_code == 200 and "668" in pg.text and "noindex" in pg.text, pg.text[:100])
+check("партнёр: без секрета кабинета нет", cl.get("/partner/testpartner").status_code == 404)
+
+# ---------- тестовый аккаунт ----------
+_dv2 = cl.post("/api/device").json()["device"]
+accounts.sess_set("prev:codeguest12", {"mode": "guest", "ts": time.time()})
+accounts.sess_set("prev:codeacct123", {"mode": "account", "uid": 7400, "ts": time.time()})
+check("тест: неверный код отклоняется", cl.post("/api/preview/claim", json={"code": "неверныйкод1"}, headers={"X-Device": _dv2}).status_code == 400)
+check("тест: уже вошедший браузер не подменяется", cl.post("/api/preview/claim", json={"code": "codeacct123"}, headers=H).status_code == 409)
+check("тест: гость", cl.post("/api/preview/claim", json={"code": "codeguest12"}, headers={"X-Device": _dv2}).json()["mode"] == "guest")
+_mg = cl.get("/api/me", headers={"X-Device": _dv2}).json()
+check("тест: для гостя подписка как будто включена и есть подсказка", _mg["paywall"] is True and _mg["plan"] == "anon" and _mg["hint"]["action"] == "login", str(_mg)[:200])
+_dv3 = cl.post("/api/device").json()["device"]
+check("тест: код одноразовый", cl.post("/api/preview/claim", json={"code": "codeguest12"}, headers={"X-Device": _dv3}).status_code == 400)
+check("тест: аккаунт", cl.post("/api/preview/claim", json={"code": "codeacct123"}, headers={"X-Device": _dv3}).json()["mode"] == "account")
+_ma = cl.get("/api/me", headers={"X-Device": _dv3}).json()
+check("тест: новый вошедший, тариф бесплатный, можно попробовать", _ma["plan"] == "free" and _ma["linked"] and _ma["trial"] is True, str(_ma)[:200])
+import payanyway as _pw2
+_chk = plans.is_preview("7400") and _pw2.__name__
+check("другие люди не затронуты", cl.get("/api/me", headers=H).json()["paywall"] is False and plans.plan_of("7001") == "open")
+
 import helpdata
 check("в справке есть дневник и отправка списка", any(k == "diary" for k, _, _ in helpdata.SECTIONS) and any("ссылкой на страницу" in t for _, _, t in helpdata.SECTIONS))
 print()

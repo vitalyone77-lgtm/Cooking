@@ -99,8 +99,10 @@ def list_view(uid, page: int = 0) -> tuple[str, InlineKeyboardMarkup]:
         page, (rows, total) = pages - 1, _query(f, (pages - 1) * PAGE)
     lines = [f"📖 Книга рецептов: {summary(f)}", f"Найдено: {total}" + (f" (страница {page + 1} из {pages})" if pages > 1 else "")]
     b = InlineKeyboardBuilder()
+    rating = book.votes([r["id"] for r in rows])
     for r in rows:
-        extra = " · ".join(x for x in (f"{r['kcal']} ккал" if r["kcal"] else "", f"{r['minutes']} мин" if r["minutes"] else "") if x)
+        ups = rating[r["id"]]["up"]
+        extra = " · ".join(x for x in (f"👍 {ups}" if ups else "", f"{r['kcal']} ккал" if r["kcal"] else "", f"{r['minutes']} мин" if r["minutes"] else "") if x)
         title = r["title"] if len(r["title"]) <= 34 else r["title"][:32] + "…"
         b.row(InlineKeyboardButton(text=f"🍽 {title}" + (f" · {extra}" if extra else ""), callback_data=f"bk:v:{r['id']}"))
     if not rows:
@@ -279,6 +281,26 @@ async def got_word(message: Message, state: FSMContext):
     await ui.show(message, text, markup, mode="tracked")
 
 
+def _vote_row(book_id: int, v: dict) -> list[InlineKeyboardButton]:
+    return [InlineKeyboardButton(text=("✅ " if v["my"] == 1 else "") + f"👍 {v['up']}", callback_data=f"bk:r:{book_id}:1"),
+            InlineKeyboardButton(text=("✅ " if v["my"] == -1 else "") + f"👎 {v['down']}", callback_data=f"bk:r:{book_id}:-1")]
+
+
+@router.callback_query(F.data.startswith("bk:r:"))
+async def rate_recipe(callback: CallbackQuery):
+    """Оценка рецепта: чем выше рейтинг, тем выше рецепт в книге."""
+    _, _, bid, val = callback.data.split(":")
+    if not book.get(bid):
+        await callback.answer("Рецепт не найден", show_alert=True)
+        return
+    v = book.vote(int(bid), callback.message.chat.id, int(val))
+    await callback.answer("Спасибо за оценку" if v["my"] else "Оценка снята")
+    kb = callback.message.reply_markup
+    if kb:
+        rows = [_vote_row(int(bid), v) if row and (row[0].callback_data or "").startswith("bk:r:") else row for row in kb.inline_keyboard]
+        await callback.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
+
+
 @router.callback_query(F.data.startswith("bk:v:"))
 async def view_recipe(callback: CallbackQuery):
     """Рецепт из книги: карточка-картинка и текст с обычными кнопками (готовить, список покупок, PDF). Отмечаем показ, чтобы бот не предлагал его снова."""
@@ -297,6 +319,7 @@ async def view_recipe(callback: CallbackQuery):
         logger.exception("Карточка рецепта не отправилась")
     markup = recipe_kb(r["text"], uid) if recipe_kb else None
     if markup:
+        markup.inline_keyboard.append(_vote_row(r["id"], book.votes([r["id"]], uid)[r["id"]]))
         markup.inline_keyboard.append([InlineKeyboardButton(text="📖 К книге", callback_data="bk:l:0")])
     await callback.message.answer(r["text"] + "\n\n" + " ".join(r["tags"]), reply_markup=markup)
 

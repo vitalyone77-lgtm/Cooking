@@ -148,7 +148,7 @@ def _refusal(uid, kind: str, n: int, days: int) -> str:
     import plans
     anon = plans.is_anon(uid)
     if n == 0:
-        what = {"daymenu": "Меню на день", "week": "План на 3 дня", "photo": "Распознавание фото"}.get(kind, "Эта функция")
+        what = {"daymenu": "Меню на день", "week": "План на 3 дня", "photo": "Распознавание фото", "label": "Проверка состава"}.get(kind, "Эта функция")
         return (f"{what} доступно после входа в профиль" if anon
                 else f"{what} — в подписке 💎")
     if days == 1:
@@ -157,7 +157,7 @@ def _refusal(uid, kind: str, n: int, days: int) -> str:
         text = f"План на 3 дня можно составлять раз в {days} дн. Текущий план открывается в «Готовых меню»."
     else:
         text = f"Лимит на {days} дн. исчерпан. Скоро снова будет доступно."
-    if anon and plans.paywall():
+    if anon and plans.paywall_for(uid):
         text += " Войдите в профиль, и подборов станет больше."
     elif plans.can_upsell(uid):
         text += " С подпиской 💎 — больше подборов каждый день."
@@ -270,7 +270,7 @@ def event(name: str, uid) -> None:
 
 
 # примерная стоимость одного подбора ИИ, ₽ (замеры токенов DeepSeek, с запасом)
-GEN_COST_RUB = {"recipe": 0.3, "daymenu": 0.7, "week": 0.6, "weekday": 0.7, "missing": 0.3, "reminder": 0.3, "photo": 0.1}
+GEN_COST_RUB = {"recipe": 0.3, "daymenu": 0.7, "week": 0.6, "weekday": 0.7, "missing": 0.3, "reminder": 0.3, "photo": 0.1, "label": 0.3}
 
 
 def _rows(sql: str, args=()) -> list:

@@ -109,6 +109,8 @@ textarea{width:100%;min-height:64px;padding:10px 14px;border:1.5px solid var(--l
 .chips[data-name=cuisine],.chips[data-name=appliance]{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}.chips[data-name=cuisine] .chip,.chips[data-name=appliance] .chip{width:100%;padding:4px 6px;font-size:15px;line-height:1.2}.chips[data-name=cuisine] .chip:last-child:nth-child(odd){grid-column:1/-1}
 @media (min-width:520px){.chips[data-name=appliance]{grid-template-columns:repeat(4,minmax(0,1fr))}}
 .chip.alt{border:1.5px dashed var(--primary)}
+.phead{display:flex;align-items:center;justify-content:space-between;gap:10px}.phead h1{margin:0}.lcheck{flex:none;min-height:44px;padding:0 12px 0 10px;border-radius:99px;border:0;background:var(--accent);color:var(--text);font-size:14px;font-weight:600}
+.rate{display:flex;gap:8px;margin:10px 0 0}.rate .chip[aria-pressed=true]{background:var(--soft);color:var(--primary);border-color:var(--primary)}
 .chips.tight{gap:6px;margin:8px 0 0}.dy-table{width:100%;border-collapse:collapse;font-size:14px}.dy-table td,.dy-table th{padding:4px 6px 4px 0;text-align:left;border-top:1px solid var(--line);font-variant-numeric:tabular-nums}
 .buyhead{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:4px 0 8px;color:var(--muted);font-size:15px}
 .opt{display:flex;gap:12px;align-items:flex-start;min-height:44px;padding:8px 0;cursor:pointer}.opt input{width:24px;height:24px;accent-color:var(--primary);flex:none}
@@ -591,7 +593,7 @@ select{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--lin
   // в профиле только то, чем пользуются каждый день; цели, функции, оплата и вход лежат в «Настройках»
   function viewProfile(){
     return loadMe().then(function(m){
-      var h='<h1>Профиль</h1>';
+      var h='<div class="phead" style="margin-bottom:12px"><h1>Профиль</h1><button class="lcheck" data-tab-go="label">🔬 Проверить состав</button></div>';
       if(!m.linked){
         return linkCode().then(function(L){
         if(m.vk_app)h+='<div class="card pcard"><h2>Войти через ВКонтакте</h2><p class="sub" style="margin:0 0 10px">Подходит, если Telegram не открывается без VPN. Избранное и профиль сохранятся в вашем аккаунте.</p><div id="vk-btn"></div></div>';
@@ -682,6 +684,30 @@ select{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--lin
     })();
   }
 
+  function rateBtns(v){v=v||{up:0,down:0,my:0};return '<button class="chip mini" data-vote="1" aria-pressed="'+(v.my===1)+'">👍 '+v.up+'</button><button class="chip mini" data-vote="-1" aria-pressed="'+(v.my===-1)+'">👎 '+v.down+'</button>';}
+  // ---- проверка состава: одно фото или сравнение двух, фото уменьшаем в браузере, чтобы было дешевле и быстрее ----
+  var LBL={files:[null,null]};
+  function viewLabel(){
+    LBL.files=[null,null];
+    return '<button class="chip mini" data-tab-go="profile">← Профиль</button><h1 style="margin-top:10px">🔬 Проверка состава</h1><p class="sub">Сфотографируйте состав на упаковке. Два фото: сравню продукты между собой.</p>'+
+      '<div class="card pcard"><label class="f" for="lb0">Первый продукт</label><input type="file" id="lb0" data-lb="0" accept="image/*" capture="environment"><label class="f" for="lb1" style="margin-top:12px">Второй продукт, если сравниваете</label><input type="file" id="lb1" data-lb="1" accept="image/*" capture="environment"><button class="btn" data-lb-go="1">Проверить</button></div><div id="lb-res"></div>'+
+      '<p class="sub" style="font-size:13px">ИИ читает этикетку и может ошибаться. Сверяйтесь с упаковкой, особенно при аллергии. Это не медицинский совет.</p>';
+  }
+  function lbShrink(file){return new Promise(function(ok){
+    var im=new Image(),u=URL.createObjectURL(file);
+    im.onload=function(){var k=Math.min(1,1400/Math.max(im.width,im.height)),c=document.createElement("canvas");c.width=Math.round(im.width*k);c.height=Math.round(im.height*k);c.getContext("2d").drawImage(im,0,0,c.width,c.height);URL.revokeObjectURL(u);c.toBlob(function(b){ok(b||file);},"image/jpeg",0.82);};
+    im.onerror=function(){URL.revokeObjectURL(u);ok(file);};im.src=u;});}
+  function lbList(t,a){return a&&a.length?'<p style="margin:8px 0 2px"><strong>'+t+'</strong></p><ul style="margin:0;padding-left:20px">'+a.map(function(x){return '<li>'+esc(x)+'</li>';}).join("")+'</ul>':"";}
+  function lbGo(btn){
+    var fs=LBL.files.filter(Boolean),box=document.getElementById("lb-res");
+    if(!fs.length){alert("Добавьте хотя бы одно фото");return;}
+    btn.disabled=true;box.innerHTML='<p class="sub">Читаю состав…</p>';
+    Promise.all(fs.map(lbShrink)).then(function(bl){var fd=new FormData();bl.forEach(function(b,i){fd.append("images",b,"label"+i+".jpg");});return fetch("/api/label",{method:"POST",headers:{"X-Device":dev},body:fd});})
+      .then(function(r){return r.json().catch(function(){return {};}).then(function(j){if(!r.ok)throw new Error(typeof j.detail==="string"?j.detail:"Не получилось прочитать состав");return j;});})
+      .then(function(j){btn.disabled=false;box.innerHTML=(j.compare?'<div class="card pcard"><h2>Сравнение</h2><p style="margin:0">'+esc(j.compare)+'</p></div>':'')+j.products.map(function(p){return '<div class="card pcard"><h2>'+esc(p.name||"Продукт")+'</h2>'+lbList("Состав",p.ingredients)+lbList("Добавки",p.additives)+lbList("На что обратить внимание",p.attention)+'</div>';}).join("");return loadMe();})
+      .catch(function(e){btn.disabled=false;box.innerHTML='<div class="card pcard">'+esc(e.message)+'</div>';});
+  }
+  document.addEventListener("change",function(ev){var t=ev.target;if(t&&t.getAttribute&&t.getAttribute("data-lb")!==null&&t.files)LBL.files[+t.getAttribute("data-lb")]=t.files[0]||null;});
   // ---- «Книга рецептов»: общая книга, листать без лимитов, рядом с «Любимыми» ----
   var BK0={meal:"",tag:"",q:"",max_min:"",max_kcal:"",appliance:"",servings:"",main:"",page:0}, BK=JSON.parse(JSON.stringify(BK0));
   function bkQuery(){var p=[];Object.keys(BK).forEach(function(k){if(k==="page"){if(BK.page)p.push("page="+BK.page);}else if(BK[k]!=="")p.push(k+"="+encodeURIComponent(BK[k]));});return p.join("&");}
@@ -703,18 +729,19 @@ select{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--lin
       if(!d.items.length)h+='<div class="card empty">Под такие условия в книге пока ничего нет. Ослабьте условия или нажмите «Создать»: помощник составит новый рецепт, и он тоже попадёт в книгу.<br><button class="btn" data-tab-go="new" style="margin-top:10px">🍳 Создать рецепт</button></div>';
       d.items.forEach(function(r){
         var sub=[r.kcal?r.kcal+" ккал":"",r.minutes?r.minutes+" мин":"",r.servings?r.servings+" порц.":""].filter(Boolean).join(" · ");
-        h+=accordion(esc(r.title),sub,"",'<img class="rcard" src="'+esc(r.card)+'" alt="" loading="lazy"><div class="sub">'+esc((r.tags||[]).join(" "))+'</div>'+recipeHTML(r.text)+actions(r.title,r.text),false);
+        if(r.rating&&r.rating.up)sub="👍 "+r.rating.up+(sub?" · "+sub:"");
+        h+=accordion(esc(r.title),sub,"",'<img class="rcard" src="'+esc(r.card)+'" alt="" loading="lazy"><div class="sub">'+esc((r.tags||[]).join(" "))+'</div>'+recipeHTML(r.text)+'<div class="rate" data-rate="'+r.id+'">'+rateBtns(r.rating)+'</div>'+actions(r.title,r.text),false);
       });
       if(d.pages>1)h+='<div class="row" style="margin-top:12px">'+(d.page>0?'<button class="btn ghost" data-bk-page="'+(d.page-1)+'">◀ Назад</button>':'')+(d.page<d.pages-1?'<button class="btn" data-bk-page="'+(d.page+1)+'">Дальше ▶</button>':'')+'</div>';
       return h;
     });
   }
-  var VIEWS={menus:viewMenus,favs:viewFavs,book:viewBook,profile:viewProfile,settings:viewSettings,help:viewHelp};
+  var VIEWS={menus:viewMenus,favs:viewFavs,book:viewBook,profile:viewProfile,settings:viewSettings,label:viewLabel,help:viewHelp};
   function offlineBanner(){return '<div class="card" style="padding:12px 16px;margin:0 0 12px;border-left:4px solid var(--primary)"><strong>📴 Нет интернета.</strong> Показываю сохранённое с прошлого раза: меню, план, избранное, рецепты и таймеры работают. Новые подборы — когда появится сеть.</div>';}
   window.addEventListener("online",function(){if(OFFLINE&&(cur==="menus"||cur==="favs"))show(cur);});
   function show(tab){
     cur=tab;ls("tab",tab);
-    Array.prototype.forEach.call(document.querySelectorAll(".tab"),function(t){t.setAttribute("aria-selected",t.getAttribute("data-tab")===(tab==="settings"?"profile":tab));});
+    Array.prototype.forEach.call(document.querySelectorAll(".tab"),function(t){t.setAttribute("aria-selected",t.getAttribute("data-tab")===(tab==="settings"||tab==="label"?"profile":tab));});
     if(tab==="new"){viewNew();window.scrollTo(0,0);return;}
     main.innerHTML='<div class="skeleton"></div><div class="skeleton"></div><div class="skeleton"></div>';
     OFFLINE=false;
@@ -762,7 +789,7 @@ select{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--lin
   function buyRow(name,amount,home,extra){var k=buyKey(name),on=!!buyState()[k];
     return '<div class="item'+(on?' done':'')+'"><div class="buyline"><label class="buyrow"><input type="checkbox" data-buy="'+esc(k)+'"'+(on?' checked':'')+'><span class="bn"><strong>'+esc(name)+'</strong>'+(amount?' — '+esc(amount):'')+'</span></label>'+home+'</div>'+extra+'</div>';}
   function buyHead(items){var st=buyState(),n=items.filter(function(i){return st[buyKey(i.name)];}).length;
-    return '<p class="sub storenote" style="margin:0 0 8px"></p><div class="buyhead"><span class="bcount">Куплено '+n+' из '+items.length+'</span><span class="chips tight" style="display:inline-flex"><button class="chip mini" data-list-share="1">🔗 Поделиться</button><button class="chip mini" data-buy-reset="1">Сбросить</button></span></div>';}
+    return '<p class="sub storenote" style="margin:0 0 8px"></p><div class="buyhead"><span class="bcount">Куплено '+n+' из '+items.length+'</span><span class="chips tight" style="display:inline-flex"><button class="chip mini" data-tab-go="label">🔬 Состав</button><button class="chip mini" data-list-share="1">🔗 Поделиться</button><button class="chip mini" data-buy-reset="1">Сбросить</button></span></div>';}
   function buyRecount(box){if(!box)return;var all=box.querySelectorAll("[data-buy]"),n=0;Array.prototype.forEach.call(all,function(c){if(c.checked)n++;});var el=box.querySelector(".bcount");if(el)el.textContent="Куплено "+n+" из "+all.length;}
 
   // ---- профиль: функции, цель КБЖУ, вес ----
@@ -982,6 +1009,8 @@ select{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--lin
     if(b=t.closest("[data-dy-eat]")){var rr=window.__r[b.getAttribute("data-dy-eat")];if(!rr)return;b.disabled=true;call("POST","/api/diary/recipe",{title:rr.title,text:rr.text}).then(function(j){toast("В дневник: "+dyN(j.kcal)+" ккал. Оценка примерная.");b.disabled=false;}).catch(function(e){b.disabled=false;alert(e.message);});return;}
     if(b=t.closest("[data-dy-calc]")){call("POST","/api/energy",{sex:val("en-sex"),age:val("en-age"),height:val("en-h"),weight:val("en-w"),activity:val("en-act")}).then(function(j){toast("Примерный расход: "+dyN(j.tdee)+" ккал в день");return profileReload();}).catch(function(e){alert(e.message);});return;}
     if(b=t.closest("[data-ref-save]")){call("POST","/api/macro-ref",{protein:val("ref-p"),fat:val("ref-f"),carb:val("ref-c")}).then(function(){toast("Сохранил");return profileReload();}).catch(function(e){alert(e.message);});return;}
+    if(b=t.closest("[data-lb-go]")){lbGo(b);return;}
+    if(b=t.closest("[data-vote]")){var rb=b.closest("[data-rate]");call("POST","/api/book/"+rb.getAttribute("data-rate")+"/vote",{v:+b.getAttribute("data-vote")}).then(function(v){rb.innerHTML=rateBtns(v);}).catch(function(e){if(e.status===403)gateOpen("rate");else alert(e.message);});return;}
     if(b=t.closest("[data-list-share]")){listShare(b);return;}
     if(b=t.closest("[data-photo-pick]")){var pi=document.getElementById("photo-in");if(pi)pi.click();return;}
     if(b=t.closest("[data-store-pick]")){pickStore(b);return;}
@@ -1018,6 +1047,9 @@ select{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--lin
         return call("POST","/api/link/claim",{code:lg}).then(function(){ocClear();toast("✅ Вход выполнен — профиль общий с Telegram");},function(e){toast(e.message);})
           .then(loadMe).then(function(){show("profile");});
       }
+      var uq=new URLSearchParams(location.search),rfq=uq.get("ref"),tq=uq.get("test");
+      if(rfq){call("POST","/api/ref",{ref:rfq}).catch(function(){});try{history.replaceState(null,"",location.pathname);}catch(e){}}
+      if(tq){try{history.replaceState(null,"",location.pathname);}catch(e){}return call("POST","/api/preview/claim",{code:tq}).then(function(j){toast(j.mode==="account"?"🧪 Чистый аккаунт: подписка как будто включена":"🧪 Чистый гость: подписка как будто включена");},function(e){alert(e.message);}).then(loadMe).then(function(){show("new");});}
       var vkq=null;try{vkq=new URLSearchParams(location.search).get("vk");}catch(e){}
       if(vkq){try{history.replaceState(null,"",location.pathname);}catch(e){}return loadMe().then(function(){toast("✅ Вход выполнен через ВКонтакте");show("profile");});}
       return loadMe().then(function(){show("new");});

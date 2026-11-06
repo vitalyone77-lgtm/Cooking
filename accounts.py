@@ -55,6 +55,9 @@ CREATE TABLE IF NOT EXISTS book_seen(uid TEXT, book_id INTEGER, ts REAL, PRIMARY
 CREATE TABLE IF NOT EXISTS alias(src TEXT PRIMARY KEY, dst TEXT, ts REAL);
 CREATE TABLE IF NOT EXISTS pay_orders(id TEXT PRIMARY KEY, uid TEXT, plan TEXT, days INTEGER, amount TEXT, test INTEGER, ts REAL, status TEXT, op TEXT);
 CREATE INDEX IF NOT EXISTS pay_orders_uid ON pay_orders(uid, ts);
+CREATE TABLE IF NOT EXISTS book_votes(book_id INTEGER, uid TEXT, vote INTEGER, ts REAL, PRIMARY KEY(book_id, uid));
+CREATE TABLE IF NOT EXISTS partners(code TEXT PRIMARY KEY, token TEXT UNIQUE, share REAL, tax REAL, clicks INTEGER, ts REAL);
+CREATE TABLE IF NOT EXISTS partner_payouts(id INTEGER PRIMARY KEY AUTOINCREMENT, code TEXT, amount REAL, ts REAL);
 CREATE TABLE IF NOT EXISTS macro_ref(uid TEXT PRIMARY KEY, p REAL, f REAL, c REAL);
 CREATE TABLE IF NOT EXISTS shop_lists(id TEXT PRIMARY KEY, uid TEXT, title TEXT, items TEXT, done TEXT, ts REAL);
 CREATE INDEX IF NOT EXISTS shop_lists_uid ON shop_lists(uid, ts);
@@ -499,7 +502,7 @@ def fav_import(rows: list[tuple]) -> None:
             c.close()
 
 
-_MERGE_TABLES = ("favs", "shelf", "weights", "goals", "energy", "consents", "promo_used", "refs", "book_seen", "macro_ref")
+_MERGE_TABLES = ("favs", "shelf", "weights", "goals", "energy", "consents", "promo_used", "refs", "book_seen", "macro_ref", "book_votes")
 
 
 def _merge_accounts(c, src: str, dst: str) -> None:
@@ -537,6 +540,8 @@ def _link(c, dev_id: int, tg_id: int) -> None:
 def _merge_device(c, dev_id: int, tg_id: int) -> None:
     """Устройство привязали к Telegram: его избранное (сделанное без входа) переходит в аккаунт."""
     c.execute("UPDATE OR IGNORE favs SET uid=? WHERE uid=?", (str(tg_id), f"w{dev_id}"))
+    c.execute("UPDATE OR IGNORE refs SET uid=? WHERE uid=?", (str(tg_id), f"w{dev_id}"))      # откуда пришёл гость: важно для партнёрской доли
+    c.execute("DELETE FROM refs WHERE uid=?", (f"w{dev_id}",))
 
 
 def sess_items(prefix: str) -> list[tuple[str, dict]]:
@@ -738,7 +743,7 @@ def delete_my_data(uid) -> dict:
            "shelf": _q("DELETE FROM shelf WHERE uid=?", (uid,)), "consent": _q("DELETE FROM consents WHERE uid=?", (uid,)),
            "diary": _q("DELETE FROM diary WHERE uid=?", (uid,)), "energy": _q("DELETE FROM energy WHERE uid=?", (uid,)),
            "book_seen": _q("DELETE FROM book_seen WHERE uid=?", (uid,)), "shop_lists": _q("DELETE FROM shop_lists WHERE uid=?", (uid,)),
-           "macro_ref": _q("DELETE FROM macro_ref WHERE uid=?", (uid,))}
+           "macro_ref": _q("DELETE FROM macro_ref WHERE uid=?", (uid,)), "book_votes": _q("DELETE FROM book_votes WHERE uid=?", (uid,))}
     from stores import prefs
     prefs.forget(uid)
     return out

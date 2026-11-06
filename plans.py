@@ -74,7 +74,8 @@ def _parse_limits(spec: str) -> dict[str, tuple[int, int]]:
 
 
 # виды, которых может не быть в старых строках лимитов (.env или админка) — без них фото было бы без ограничений
-KIND_DEFAULTS = {"photo": {"open": (5, 1), "free": (1, 1), "premium": (5, 1), "anon": (0, 1)}}
+KIND_DEFAULTS = {"photo": {"open": (5, 1), "free": (1, 1), "premium": (5, 1), "anon": (0, 1)},
+                 "label": {"open": (3, 1), "free": (1, 1), "premium": (10, 1), "anon": (0, 1)}}
 
 
 def limits_of(plan: str) -> dict[str, tuple[int, int]]:
@@ -117,8 +118,38 @@ def is_tester(uid) -> bool:
     return str(uid) in testers()
 
 
+PREVIEW_KEY = "preview:uids"
+_preview_cache: dict = {"ts": 0.0, "uids": set()}
+
+
+def _preview_uids() -> set:
+    if time.time() - _preview_cache["ts"] > SETTINGS_TTL:
+        try:
+            _preview_cache["uids"] = set((accounts.sess_get(PREVIEW_KEY) or {}).get("uids", []))
+        except Exception:  # noqa: BLE001
+            pass
+        _preview_cache["ts"] = time.time()
+    return _preview_cache["uids"]
+
+
+def is_preview(uid) -> bool:
+    """Тестовый аккаунт владельца: для него подписка как будто включена, для всех остальных ничего не меняется."""
+    return str(uid) in _preview_uids()
+
+
+def preview_add(uid) -> None:
+    uids = set((accounts.sess_get(PREVIEW_KEY) or {}).get("uids", [])) | {str(uid)}
+    accounts.sess_set(PREVIEW_KEY, {"uids": sorted(uids)})
+    accounts.sess_mark_forever(PREVIEW_KEY)
+    _preview_cache["uids"], _preview_cache["ts"] = uids, time.time()
+
+
+def paywall_for(uid) -> bool:
+    return paywall() or is_preview(uid)
+
+
 def plan_of(uid) -> str:
-    if not paywall():
+    if not paywall_for(uid):
         return "open"
     if is_anon(uid):
         return "anon"
@@ -174,14 +205,14 @@ def limit(uid, kind: str) -> tuple[int, int] | None:
 
 def has_feature(uid, feature: str) -> bool:
     """memory / pdf / cart / noads — при включённой подписке только для неё (если отмечены в PREMIUM_FEATURES)."""
-    if not paywall() or feature not in (cfg("PREMIUM_FEATURES") or []):
+    if not paywall_for(uid) or feature not in (cfg("PREMIUM_FEATURES") or []):
         return True
     return plan_of(uid) == "premium"
 
 
 def can_upsell(uid) -> bool:
     """Есть ли смысл показывать «Оформить подписку» (подписка включена и её ещё нет)."""
-    return paywall() and plan_of(uid) != "premium"
+    return paywall_for(uid) and plan_of(uid) != "premium"
 
 
 def offers() -> list[dict]:
@@ -220,7 +251,7 @@ def pay_offers_for(uid) -> list[dict]:
     """Тарифы для оплаты картой: обычные + «Проверка оплаты» для тестировщиков."""
     out = [o for o in offers() if o["rub"]]
     chk = check_offer()
-    if chk and is_tester(uid):
+    if chk and (is_tester(uid) or is_preview(uid)):
         out.append(chk)
     return out
 
@@ -244,7 +275,7 @@ def promo_days(code: str) -> int:
 def maybe_start_trial(uid) -> float | None:
     """Первый упор в лимит бесплатного плана — включаем пробный полный доступ (один раз на аккаунт)."""
     days = int(cfg("TRIAL_DAYS") or 0)
-    if not paywall() or is_anon(uid) or days <= 0:
+    if not paywall_for(uid) or is_anon(uid) or days <= 0:
         return None
     return accounts.start_trial(uid, days)
 
@@ -252,12 +283,12 @@ def maybe_start_trial(uid) -> float | None:
 def trial_available(uid) -> bool:
     """Можно ли предложить «попробовать тариф»: подписка включена, человек вошёл, пробный ещё не использован."""
     days = int(cfg("TRIAL_DAYS") or 0)
-    return bool(paywall() and not is_anon(uid) and days > 0 and plan_of(uid) != "premium" and accounts.trial_available(uid))
+    return bool(paywall_for(uid) and not is_anon(uid) and days > 0 and plan_of(uid) != "premium" and accounts.trial_available(uid))
 
 
 def next_step(uid) -> dict | None:
     """Мягкая подсказка, что можно сделать дальше: {"text", "action": login | trial | sub}. Пока подписка выключена, лимиты у всех одни, подсказывать нечего."""
-    if not paywall():
+    if not paywall_for(uid):
         return None
     if is_anon(uid):
         return {"text": "Войдите в профиль: рецептов в день станет больше. Это бесплатно.", "action": "login"}

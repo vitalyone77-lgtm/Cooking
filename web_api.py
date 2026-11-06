@@ -54,6 +54,7 @@ import cards
 import charts
 import food_ai
 import foods
+import partners
 import payanyway
 import payinfo
 import plans
@@ -355,17 +356,34 @@ BOOK_PAGE = 8
 def api_book(meal: str = "", tag: str = "", q: str = "", max_min: int = 0, max_kcal: int = 0, appliance: str = "", servings: int = 0,
              main: str = "", page: int = 0, x_device: str | None = Header(default=None)):
     """Листать общую книгу рецептов: разделы, хештеги, слово, время, калории, техника, порции, основной ингредиент. Без лимитов (ИИ не вызывается)."""
-    _dev(x_device)
+    dev_id = _dev(x_device)
     page = max(0, min(page, 500))
     rows, total = book.search(meal=meal or None, tag=tag[:30] or None, q=q[:40] or None, max_min=max_min if 0 < max_min <= 600 else None,
                               max_kcal=max_kcal if 0 < max_kcal <= 5000 else None, appliance=appliance or None,
                               servings=servings if 1 <= servings <= 6 else None, main=main or None, limit=BOOK_PAGE, offset=page * BOOK_PAGE)
     counts = book.counts_by_meal()
+    rating = book.votes([r["id"] for r in rows], _uid(dev_id))
     return {"items": [{"id": r["id"], "title": r["title"], "text": r["text"], "tags": r["tags"], "kcal": r["kcal"], "minutes": r["minutes"],
-                       "meal": r["meal"], "servings": r["servings"], "card": f"/api/bookimg/{r['id']}.png"} for r in rows],
+                       "meal": r["meal"], "servings": r["servings"], "card": f"/api/bookimg/{r['id']}.png", "rating": rating[r["id"]]} for r in rows],
             "total": total, "pages": max(1, -(-total // BOOK_PAGE)), "page": page,
             "meta": {"total": book.total(), "today": book.added_today(), "meals": [{"key": m, "title": book.MEAL_TITLES[m], "count": counts.get(m, 0)} for m in book.MEALS],
                      "tags": [[t, n] for t, n in book.top_tags(12)], "mains": list(book.MAINS)}}
+
+
+class VoteIn(BaseModel):
+    v: int
+
+
+@app.post("/api/book/{book_id}/vote")
+def api_book_vote(book_id: int, body: VoteIn, x_device: str | None = Header(default=None)):
+    """Оценка рецепта. Только после входа: иначе рейтинг легко накрутить новыми устройствами."""
+    uid = _need_account(_dev(x_device))
+    if not book.get(book_id):
+        raise HTTPException(404, "Рецепт не найден")
+    try:
+        return book.vote(book_id, uid, body.v)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
 
 
 @functools.lru_cache(maxsize=300)
@@ -563,8 +581,8 @@ def me(x_device: str | None = Header(default=None)):
     left = {k: list(v) for k in ("recipe", "daymenu", "week") if (v := usage.left(uid, k))}
     feat = {f: plans.has_feature(uid, f) for f in ("memory", "pdf", "cart", "noads")}
     out = {"linked": bool(tg), "plan": plans.plan_of(uid), "status": plans.status_text(uid), "left": left,
-           "paywall": plans.paywall(), "memory": memory, "shelf_on": shelf_on, "bot": config.BOT_USERNAME, "feat": feat, "via": ("vk" if tg and tg >= accounts.VK_OFFSET else "tg" if tg else ""),
-           "hint": plans.next_step(uid), "stores": _stores_json(uid), "both_linked": bool(tg) and accounts.has_vk_merged(tg), "diary_on": plans.diary_on(uid), "seller": payinfo.seller(), "photo_on": plans.feature_on(uid, "photo_recipe"),
+           "paywall": plans.paywall_for(uid), "memory": memory, "shelf_on": shelf_on, "bot": config.BOT_USERNAME, "feat": feat, "via": ("vk" if tg and tg >= accounts.VK_OFFSET else "tg" if tg else ""),
+           "hint": plans.next_step(uid), "preview": plans.is_preview(uid), "stores": _stores_json(uid), "both_linked": bool(tg) and accounts.has_vk_merged(tg), "diary_on": plans.diary_on(uid), "seller": payinfo.seller(), "photo_on": plans.feature_on(uid, "photo_recipe"),
            "vk_app": (config.VK_CLIENT_ID if config.VK_LOGIN else ""),
            "pay_rub": bool(tg) and payanyway.allowed_for(uid),
            "pay_offers": ([{"key": o["key"], "title": o["title"], "rub": o["rub"], "days": o["days"]} for o in plans.pay_offers_for(uid)]
@@ -1085,6 +1103,83 @@ async def photo_items(image: UploadFile = File(...), x_device: str | None = Head
         raise HTTPException(422, "Не вижу на фото продуктов, попробуйте снять поближе")
     usage.event("photo_recipe", _uid(dev_id))
     return {"items": items}
+
+
+@app.post("/api/label")
+async def label_check(images: list[UploadFile] = File(...), x_device: str | None = Header(default=None)):
+    """Проверка состава: одно фото или сравнение двух. Лимит в день, ответ только описывает состав, советов о здоровье не даёт."""
+    dev_id = _dev(x_device)
+    files = []
+    for im in images[:2]:
+        if (im.content_type or "") not in PHOTO_TYPES:
+            raise HTTPException(400, "Нужна фотография: jpg, png или webp")
+        blob = await im.read(PHOTO_MAX_BYTES + 1)
+        if not blob or len(blob) > PHOTO_MAX_BYTES:
+            raise HTTPException(400, "Фото больше 10 МБ, снимите ещё раз")
+        files.append((blob, im.content_type))
+    sp = _spend(dev_id, "label")
+    try:
+        res = await vision.check_label(files)
+    except vision.VisionError:
+        _refund(dev_id, sp)
+        raise HTTPException(502, "Не получилось прочитать состав, попробуйте ещё раз")
+    if not res["products"]:
+        _refund(dev_id, sp)
+        raise HTTPException(422, "Не вижу состав на фото: снимите ближе, чтобы текст был резким")
+    usage.event("label_check", _uid(dev_id))
+    return res
+
+
+# ---------- тестовый аккаунт владельца и партнёры ----------
+
+class PreviewIn(BaseModel):
+    code: str = Field(min_length=8, max_length=64)
+
+
+@app.post("/api/preview/claim")
+def preview_claim(body: PreviewIn, x_device: str | None = Header(default=None)):
+    """Одноразовая ссылка владельца из /testacc: чистый гость или чистый аккаунт, для которого подписка как будто включена."""
+    dev_id = _dev(x_device)
+    key = f"prev:{body.code}"
+    rec = accounts.sess_get(key)
+    if not rec or not rec.get("mode") or time.time() - rec.get("ts", 0) > 3600:
+        raise HTTPException(400, "Ссылка устарела, возьмите новую в боте: /testacc")
+    if accounts.tg_of_device(dev_id):
+        raise HTTPException(409, "Откройте ссылку в режиме инкогнито: этот браузер уже вошёл в ваш профиль")
+    accounts.sess_set(key, {})
+    if rec["mode"] == "account":
+        accounts.claim_login_code(accounts.new_login_code(rec["uid"]), dev_id)
+        plans.preview_add(rec["uid"])
+    else:
+        plans.preview_add(_uid(dev_id))
+    return {"ok": True, "mode": rec["mode"]}
+
+
+class RefIn(BaseModel):
+    ref: str = Field(min_length=1, max_length=40)
+
+
+@app.post("/api/ref")
+def set_ref(body: RefIn, x_device: str | None = Header(default=None)):
+    """Откуда пришёл человек на сайт. Запоминается только первый источник, при входе переходит на аккаунт."""
+    accounts.set_ref(_uid(_dev(x_device)), body.ref)
+    return {"ok": True}
+
+
+@app.get("/p/{code}")
+def partner_link(code: str):
+    """Именная ссылка партнёра."""
+    if partners.CODE_RE.match(code) and partners.click(code):
+        return RedirectResponse(f"/?ref={code}", status_code=302)
+    return RedirectResponse("/", status_code=302)
+
+
+@app.get("/partner/{token}", response_class=HTMLResponse)
+def partner_cabinet(token: str):
+    p = partners.by_token(token)
+    if not p:
+        raise HTTPException(404, "Страница не найдена")
+    return HTMLResponse(partners.page(p), headers={"Cache-Control": "no-store", "X-Robots-Tag": "noindex"})
 
 
 # ---------- список покупок по ссылке ----------

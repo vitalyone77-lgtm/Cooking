@@ -13,7 +13,6 @@
 Сумма всегда с двумя знаками (120.00); пустой MNT_SUBSCRIBER_ID в подписи пустая строка.
 """
 import hashlib
-import json
 import hmac
 import logging
 import secrets
@@ -58,7 +57,7 @@ def notify_signature(p: dict, code: str) -> str:
 
 def allowed_for(uid) -> bool:
     """Кнопка оплаты показывается, когда оплата настроена и подписка включена (или человек в списке тестировщиков)."""
-    return enabled() and (plans.paywall() or plans.is_tester(uid))
+    return enabled() and (plans.paywall() or plans.is_tester(uid) or plans.is_preview(uid))
 
 
 def create_order(uid, plan_key: str) -> dict:
@@ -66,7 +65,7 @@ def create_order(uid, plan_key: str) -> dict:
     if not enabled():
         raise ValueError("Оплата картой ещё не подключена")
     o = plans.offer(plan_key)
-    if not o or not o["rub"] or o["rub"] <= 0 or (o["key"] == plans.CHECK_KEY and not plans.is_tester(uid)):
+    if not o or not o["rub"] or o["rub"] <= 0 or (o["key"] == plans.CHECK_KEY and not (plans.is_tester(uid) or plans.is_preview(uid))):
         raise ValueError("Такого тарифа нет")
     n = accounts._q("SELECT COUNT(*) FROM pay_orders WHERE uid=? AND status='new' AND ts > ?", (str(uid), time.time() - 3600), one=True)[0]
     if n >= MAX_NEW_PER_HOUR:
@@ -110,17 +109,14 @@ def pay_page(order: dict) -> str:
 
 
 def success_response(p: dict, info: dict | None) -> str:
-    """Ответ на уведомление: XML с кодом 200 и номенклатурой. Без номенклатуры Self.PayAnyWay не регистрирует доход самозанятого и чек не формируется."""
+    """Ответ на уведомление: XML с кодом 200. Для самозанятых поддержка велела не передавать INVENTORY, а описывать покупку в MNT_DESCRIPTION."""
     g = lambda k: str(p.get(k, "") or "")
     o = plans.offer(info["plan"]) if info else None
     name = f"Подписка «{plans.PREMIUM_NAME}»" + (f", {o['title'].lower()}" if o else "")
-    inventory = json.dumps([{"name": name, "price": float(Decimal(info["amount"])) if info else 0, "quantity": 1,
-                             "vatTag": 1105, "pm": "full_payment", "po": "service"}], ensure_ascii=False)
     sig = _md5("200" + g("MNT_ID") + g("MNT_TRANSACTION_ID") + config.PAYANYWAY_CODE)
-    return ('<?xml version="1.0" encoding="UTF-8"?>' + chr(10) + '<MNT_RESPONSE>'
+    return ('<?xml version="1.0" encoding="UTF-8"?>' + chr(10) + "<MNT_RESPONSE>"
             f"<MNT_ID>{escape(g('MNT_ID'))}</MNT_ID><MNT_TRANSACTION_ID>{escape(g('MNT_TRANSACTION_ID'))}</MNT_TRANSACTION_ID>"
-            f"<MNT_RESULT_CODE>200</MNT_RESULT_CODE><MNT_SIGNATURE>{sig}</MNT_SIGNATURE>"
-            f"<MNT_ATTRIBUTES><ATTRIBUTE><KEY>INVENTORY</KEY><VALUE>{escape(inventory)}</VALUE></ATTRIBUTE></MNT_ATTRIBUTES></MNT_RESPONSE>")
+            f"<MNT_RESULT_CODE>200</MNT_RESULT_CODE><MNT_DESCRIPTION>{escape(name)}</MNT_DESCRIPTION><MNT_SIGNATURE>{sig}</MNT_SIGNATURE></MNT_RESPONSE>")
 
 
 def handle_notification(p: dict) -> tuple[str, dict | None]:

@@ -2,7 +2,7 @@
    открывался без интернета (оболочка + сохранённое избранное из localStorage).
    Динамику (/api, /admin, /go, /uploads) НЕ кэшируем никогда. Страницу берём из сети, из кэша — только
    когда сети нет, поэтому после обновления сайта пользователь не застревает на старой версии. */
-const CACHE = "kitchen-shell-v17";
+const CACHE = "kitchen-shell-v18";
 const SHELL = ["/", "/manifest.webmanifest", "/icons/icon-192.png"];
 
 self.addEventListener("install", (e) => {

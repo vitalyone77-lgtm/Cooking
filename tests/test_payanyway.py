@@ -20,12 +20,11 @@ config.PAYANYWAY_SIGN_FORM = "1"          # тест не зависит от .e
 
 
 def ok_xml(t):
-    import xml.etree.ElementTree as ET, json as _j, hashlib as _h
+    import xml.etree.ElementTree as ET, hashlib as _h
     try:
         x = ET.fromstring(t.encode("utf-8"))
-        inv = _j.loads(x.find("MNT_ATTRIBUTES/ATTRIBUTE[KEY='INVENTORY']/VALUE").text)
         sig = _h.md5(("200" + x.findtext("MNT_ID") + x.findtext("MNT_TRANSACTION_ID") + config.PAYANYWAY_CODE).encode()).hexdigest()
-        return x.findtext("MNT_RESULT_CODE") == "200" and x.findtext("MNT_SIGNATURE") == sig and inv[0]["quantity"] == 1 and inv[0]["price"] > 0 and "Повар" in inv[0]["name"]
+        return x.findtext("MNT_RESULT_CODE") == "200" and x.findtext("MNT_SIGNATURE") == sig and "Повар" in x.findtext("MNT_DESCRIPTION") and "INVENTORY" not in t
     except Exception:
         return False
 import accounts

@@ -172,6 +172,37 @@ def _row(r) -> dict:
     return d
 
 
+SCORE = "COALESCE((SELECT SUM(v.vote) FROM book_votes v WHERE v.book_id=book.id), 0)"
+HIDE_SCORE = -3          # рецепт, который заметно не понравился, бот сам больше не предлагает; в книге он остаётся внизу
+
+
+def vote(book_id: int, uid, value: int) -> dict:
+    """Оценка 👍 (1) или 👎 (-1). Повторное такое же нажатие снимает её. -> {"up", "down", "my"}."""
+    if value not in (1, -1):
+        raise ValueError("Оценка: 1 или -1")
+    cur = accounts._q("SELECT vote FROM book_votes WHERE book_id=? AND uid=?", (int(book_id), str(uid)), one=True)
+    if cur and cur[0] == value:
+        accounts._q("DELETE FROM book_votes WHERE book_id=? AND uid=?", (int(book_id), str(uid)))
+    else:
+        accounts._q("INSERT INTO book_votes(book_id, uid, vote, ts) VALUES(?,?,?,?) ON CONFLICT(book_id, uid) DO UPDATE SET vote=excluded.vote, ts=excluded.ts",
+                    (int(book_id), str(uid), value, time.time()))
+    return votes([int(book_id)], uid)[int(book_id)]
+
+
+def votes(ids: list[int], uid=None) -> dict[int, dict]:
+    """{рецепт: {"up", "down", "my"}} для списка рецептов."""
+    out = {int(i): {"up": 0, "down": 0, "my": 0} for i in ids}
+    if not out:
+        return out
+    marks = ",".join("?" * len(out))
+    for bid, val, n in accounts._q(f"SELECT book_id, vote, COUNT(*) FROM book_votes WHERE book_id IN ({marks}) GROUP BY book_id, vote", list(out), all_=True):
+        out[bid]["up" if val > 0 else "down"] = n
+    if uid is not None:
+        for bid, val in accounts._q(f"SELECT book_id, vote FROM book_votes WHERE uid=? AND book_id IN ({marks})", [str(uid)] + list(out), all_=True):
+            out[bid]["my"] = val
+    return out
+
+
 def seen_days() -> int:
     return int(getattr(config, "BOOK_REPEAT_DAYS", 14))
 
@@ -181,8 +212,8 @@ def find(uid, data: dict) -> dict | None:
     try:
         cuisine, servings = data.get("cuisine") or "", int(data.get("servings") or 2)
         rows = accounts._q(f"SELECT {COLS} FROM book WHERE cuisine=? AND servings=? AND portion=? AND id NOT IN "
-                           "(SELECT book_id FROM book_seen WHERE uid=? AND ts > ?) ORDER BY uses, RANDOM() LIMIT 80",
-                           (cuisine, servings, data.get("portion") or "normal", str(uid), time.time() - seen_days() * 86400), all_=True)
+                           "(SELECT book_id FROM book_seen WHERE uid=? AND ts > ?) AND " + SCORE + " > ? ORDER BY uses, RANDOM() LIMIT 80",
+                           (cuisine, servings, data.get("portion") or "normal", str(uid), time.time() - seen_days() * 86400, HIDE_SCORE), all_=True)
         limit = _minutes(str(data.get("time") or ""))
         have = set(data.get("appliance") or [])
         want = _wanted(data.get("preferred") or "")
@@ -299,5 +330,5 @@ def search(meal: str | None = None, tag: str | None = None, q: str | None = None
         args += [f"%{root}%" for root in MAINS[main]]
     cond = " AND ".join(where)
     n = accounts._q(f"SELECT COUNT(*) FROM book WHERE {cond}", args, one=True)[0]
-    rows = accounts._q(f"SELECT {COLS} FROM book WHERE {cond} ORDER BY id DESC LIMIT ? OFFSET ?", args + [int(limit), int(offset)], all_=True)
+    rows = accounts._q(f"SELECT {COLS} FROM book WHERE {cond} ORDER BY {SCORE} DESC, id DESC LIMIT ? OFFSET ?", args + [int(limit), int(offset)], all_=True)
     return [_row(r) for r in rows], n

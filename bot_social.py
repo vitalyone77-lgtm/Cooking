@@ -4,9 +4,11 @@
 по кнопке «С картинкой». Команда только для ADMIN_TG_IDS.
 """
 import logging
+import secrets
+import time
 
 from aiogram import F, Router
-from aiogram.filters import Command
+from aiogram.filters import Command, CommandObject
 from aiogram.types import BufferedInputFile, CallbackQuery, InlineKeyboardMarkup, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
@@ -14,6 +16,7 @@ import accounts
 import config
 import feature_posts
 import images
+import partners
 import social
 
 logger = logging.getLogger(__name__)
@@ -135,6 +138,58 @@ async def func_go(callback: CallbackQuery):
     res = await social.publish_feature(callback.bot, key)
     lines = ([f"✅ ВКонтакте: запись №{res['vk']} опубликована"] if res["vk"] else []) + (["✅ Telegram: опубликовано"] if res["tg"] else []) + [f"⚠️ {e}" for e in res["errors"]]
     await callback.message.answer("\n".join(lines) or "Некуда публиковать", reply_markup=_func_kb(), parse_mode=None)
+
+
+# ---------- только для владельца: тестовый аккаунт и партнёры ----------
+
+@router.message(Command("testacc"))
+async def cmd_testacc(message: Message):
+    """Две одноразовые ссылки: чистый гость и чистый вошедший. Для них подписка как будто включена, для остальных людей ничего не меняется."""
+    if not _is_admin(message.chat.id):
+        return
+    site = (config.WEB_APP_URL or "https://menu.ymayaka.ru").rstrip("/")
+    guest, acc = secrets.token_urlsafe(16), secrets.token_urlsafe(16)
+    accounts.sess_set(f"prev:{guest}", {"mode": "guest", "ts": time.time()})
+    accounts.sess_set(f"prev:{acc}", {"mode": "account", "uid": accounts.VK_OFFSET + 9 * 10**11 + int(time.time()) % 10**8, "ts": time.time()})
+    await message.answer("🧪 Чистый аккаунт для проверки. Откройте ссылку в режиме инкогнито, она одноразовая и действует час.\n\n"
+                         f"Как гость (без входа):\n{site}/?test={guest}\n\nКак новый вошедший пользователь (можно оплатить 10 ₽):\n{site}/?test={acc}\n\n"
+                         "Подписка включена только для этих аккаунтов. Для других людей ничего не меняется.", parse_mode=None, disable_web_page_preview=True)
+
+
+def _partner_text(p: dict) -> str:
+    s, ln = partners.stats(p), partners.links(p)
+    return (f"🤝 Партнёр {p['code']}\n\nСсылка на сайт: {ln['site']}\nСсылка на бота: {ln['bot']}\nКабинет (личная ссылка): {ln['cabinet']}\n\n"
+            f"Переходов: {s['clicks']}, пришло людей: {s['users']}, оплатили: {s['buyers']}\nСумма оплат: {s['gross']:g} ₽, налог {p['tax']:g}%: {s['tax']:g} ₽\n"
+            f"Доля {p['share']:g}%: {s['due']:g} ₽, выплачено: {s['paid']:g} ₽, к выплате: {s['balance']:g} ₽")
+
+
+@router.message(Command("partner"))
+async def cmd_partner(message: Message, command: CommandObject):
+    """/partner код — создать партнёра или посмотреть его ссылки и итоги."""
+    if not _is_admin(message.chat.id):
+        return
+    try:
+        await message.answer(_partner_text(partners.ensure((command.args or "").strip())), parse_mode=None, disable_web_page_preview=True)
+    except ValueError as e:
+        await message.answer(f"Формат: /partner код. {e}", parse_mode=None)
+
+
+@router.message(Command("partnerpaid"))
+async def cmd_partner_paid(message: Message, command: CommandObject):
+    """/partnerpaid код сумма — отметить выплату партнёру."""
+    if not _is_admin(message.chat.id):
+        return
+    parts = (command.args or "").split()
+    p = partners.get(parts[0]) if len(parts) == 2 else None
+    try:
+        amount = float(parts[1].replace(",", ".")) if p else 0
+    except ValueError:
+        amount = 0
+    if not p or amount <= 0:
+        await message.answer("Формат: /partnerpaid код сумма", parse_mode=None)
+        return
+    partners.payout(p["code"], amount)
+    await message.answer(_partner_text(p), parse_mode=None, disable_web_page_preview=True)
 
 
 @router.message(Command("postvk"))
