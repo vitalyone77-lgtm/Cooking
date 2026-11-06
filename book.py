@@ -209,6 +209,8 @@ def seen_days() -> int:
 
 def find(uid, data: dict) -> dict | None:
     """Подходящий рецепт из книги, который этот человек ещё не видел за последние BOOK_REPEAT_DAYS дней. Нашли — отмечаем показ."""
+    import usage
+    usage.note_request(uid, data)
     try:
         cuisine, servings = data.get("cuisine") or "", int(data.get("servings") or 2)
         rows = accounts._q(f"SELECT {COLS} FROM book WHERE cuisine=? AND servings=? AND portion=? AND id NOT IN "

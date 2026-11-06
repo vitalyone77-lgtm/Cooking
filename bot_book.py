@@ -48,6 +48,7 @@ def _save(uid, f: dict) -> None:
 
 
 def _query(f: dict, offset: int = 0):
+    usage.note_words("book", f.get("q") or "") if not offset else None
     return book.search(meal=f.get("meal"), tag=f.get("tag"), q=f.get("q"), max_min=f.get("max_min"), max_kcal=f.get("max_kcal"),
                        appliance=f.get("appliance"), servings=f.get("servings"), main=f.get("main"), limit=PAGE, offset=offset)
 

@@ -770,7 +770,7 @@ select{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--lin
       btns='<button class="btn" data-gate-trial="1">Попробовать '+days+' дней бесплатно</button>';
     } else {
       title="Функция тарифа «"+esc(name)+"»";
-      text=(price?"Тариф «"+esc(name)+"»: "+esc(price)+". ":"")+"Он открывает все функции без дневных ограничений.";
+      text=(price?"Тариф «"+esc(name)+"»: "+esc(price)+". ":"")+"Он открывает все функции и больше подборов каждый день.";
       btns='<a class="btn" href="'+botLink("pay")+'" target="_blank" rel="noopener">Оформить в Telegram</a>';
     }
     var d=document.createElement("div");d.id="gate";d.className="sheet-bg";

@@ -49,6 +49,7 @@ fav_mod.FAVORITES_FILE = web_db.DATA_DIR / "favorites.json"
 from ai import generate_recipe
 import usage
 import accounts
+import analytics
 import book
 import cards
 import charts
@@ -358,6 +359,8 @@ def api_book(meal: str = "", tag: str = "", q: str = "", max_min: int = 0, max_k
     """Листать общую книгу рецептов: разделы, хештеги, слово, время, калории, техника, порции, основной ингредиент. Без лимитов (ИИ не вызывается)."""
     dev_id = _dev(x_device)
     page = max(0, min(page, 500))
+    if q and not page:
+        usage.note_words("book", q[:40])
     rows, total = book.search(meal=meal or None, tag=tag[:30] or None, q=q[:40] or None, max_min=max_min if 0 < max_min <= 600 else None,
                               max_kcal=max_kcal if 0 < max_kcal <= 5000 else None, appliance=appliance or None,
                               servings=servings if 1 <= servings <= 6 else None, main=main or None, limit=BOOK_PAGE, offset=page * BOOK_PAGE)
@@ -1509,6 +1512,12 @@ def _settings_view() -> dict:
         "partner_share": int(plans.cfg("PARTNER_SHARE_PCT")),
         "editable": {k: v[0] for k, v in plans.EDITABLE.items()},
     }
+
+
+@app.get("/admin/api/insights")
+def admin_insights(request: Request, days: int = 30):
+    _need_admin(request)
+    return analytics.report(days if days in (7, 30, 90) else 30)
 
 
 @app.get("/admin/api/stats")

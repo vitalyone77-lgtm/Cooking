@@ -13,6 +13,7 @@ from aiogram.types import BufferedInputFile, CallbackQuery, InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 import accounts
+import analytics
 import config
 import feature_posts
 import images
@@ -142,6 +143,13 @@ async def func_go(callback: CallbackQuery):
 
 # ---------- только для владельца: тестовый аккаунт и партнёры ----------
 
+@router.message(Command("stats"))
+async def cmd_stats(message: Message):
+    """Воронка и что люди делают: для решений, что улучшать."""
+    if _is_admin(message.chat.id):
+        await message.answer(analytics.report_text(), parse_mode=None)
+
+
 @router.message(Command("testacc"))
 async def cmd_testacc(message: Message):
     """Две одноразовые ссылки: чистый гость и чистый вошедший. Для них подписка как будто включена, для остальных людей ничего не меняется."""
@@ -159,7 +167,7 @@ async def cmd_testacc(message: Message):
 def _partner_text(p: dict) -> str:
     s, ln = partners.stats(p), partners.links(p)
     return (f"🤝 Партнёр {p['code']}\n\nСсылка на сайт: {ln['site']}\nСсылка на бота: {ln['bot']}\nКабинет (личная ссылка): {ln['cabinet']}\n\n"
-            f"Переходов: {s['clicks']}, пришло людей: {s['users']}, оплатили: {s['buyers']}\nСумма оплат: {s['gross']:g} ₽, налог {p['tax']:g}%: {s['tax']:g} ₽\n"
+            f"Переходов: {s['clicks']}, пришло людей: {s['users']}, оплатили: {s['buyers']}, оплаченных подписок сейчас: {s['active']}\nСумма оплат: {s['gross']:g} ₽, налог {p['tax']:g}%: {s['tax']:g} ₽, комиссия платёжного сервиса {partners.COMMISSION:g}%: {s['fee']:g} ₽\n"
             f"Доля {p['share']:g}%: {s['due']:g} ₽, выплачено: {s['paid']:g} ₽, к выплате: {s['balance']:g} ₽")
 
 

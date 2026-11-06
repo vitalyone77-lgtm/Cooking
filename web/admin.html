@@ -62,6 +62,9 @@ code{background:var(--soft);padding:2px 6px;border-radius:6px;font-size:13px}
 
   <section data-s="users" class="hide">
     <div class="g" id="u-cards"></div>
+    <h2>Воронка за 30 дней</h2><div class="tbl"><table><thead><tr><th>Шаг</th><th>Людей</th></tr></thead><tbody id="in-funnel"></tbody></table></div>
+    <h2>Что востребовано за 30 дней</h2><div class="tbl"><table><thead><tr><th>Функция</th><th>Людей</th><th>Раз</th></tr></thead><tbody id="in-feat"></tbody></table></div>
+    <h2>Что выбирают и ищут</h2><div id="in-words"></div>
     <h2>Какими функциями пользуются (7 дней)</h2><div class="tbl"><table><thead><tr><th>Функция</th><th>Раз</th><th>Людей</th></tr></thead><tbody id="u-feat"></tbody></table></div>
     <h2>Подборы ИИ за 30 дней по видам</h2><div class="tbl"><table><thead><tr><th>Вид</th><th>Подборов</th></tr></thead><tbody id="u-kinds"></tbody></table></div>
     <h2>Активные пользователи (делали подборы) по дням</h2><div class="bars" id="b-act"></div><div class="lab" id="l-act"></div>
@@ -139,6 +142,7 @@ var KINDS={recipe:"Рецепт",daymenu:"Меню на день",week:"План
 var S=null, ROLE="";
 
 function load(){
+  loadInsights();
   fetch("/admin/api/stats").then(function(r){
     if(r.status===401){$("login").className="";$("app").className="hide";return null;}
     return r.json();
@@ -248,6 +252,12 @@ function loadMsgs(){
   fetch("/admin/api/feedback").then(function(r){return r.json();}).then(function(j){
     $("msgs").innerHTML=j.items.length?j.items.map(function(x){return '<tr'+(x.done?' style="opacity:.55"':'')+'><td>'+dt(x.ts)+'</td><td>'+esc(x.uid)+(x.contact?'<br><small>'+esc(x.contact)+'</small>':'')+' <small>('+(x.src==="bot"?"бот":"сайт")+')</small></td><td>'+esc(j.kinds[x.kind]||x.kind)+'</td><td style="white-space:pre-wrap">'+esc(x.text)+'</td><td>'+(x.done?"":'<button data-msg-done="'+x.id+'">Прочитано</button>')+'</td></tr>';}).join(""):'<tr><td colspan="5">Сообщений пока нет</td></tr>';});}
 document.addEventListener("click",function(e){var b=e.target.closest&&e.target.closest("[data-msg-done]");if(b){fetch("/admin/api/feedback/"+b.getAttribute("data-msg-done")+"/done",{method:"POST"}).then(loadMsgs);}});
+function loadInsights(){fetch("/admin/api/insights").then(function(r){return r.ok?r.json():null;}).then(function(d){if(!d)return;
+  $("in-funnel").innerHTML=d.funnel.map(function(s){return '<tr><td>'+esc(s.step)+'</td><td>'+s.users+'</td></tr>';}).join("");
+  $("in-feat").innerHTML=d.features.slice(0,30).map(function(f){return '<tr><td>'+esc(f.name)+'</td><td>'+f.users+'</td><td>'+f.times+'</td></tr>';}).join("");
+  var blocks=Object.assign({},d.choices,d.words);
+  $("in-words").innerHTML=Object.keys(blocks).filter(function(k){return blocks[k].length;}).map(function(k){return '<p><strong>'+esc(k)+':</strong> '+blocks[k].map(function(x){return esc(x[0])+' ('+x[1]+')';}).join(", ")+'</p>';}).join("")||'<p class="note">Данных пока нет.</p>';
+}).catch(function(){});}
 function loadLog(){fetch("/admin/api/log").then(function(r){return r.json();}).then(function(j){
   $("log").innerHTML=j.items.length?j.items.map(function(x){return '<tr><td>'+dt(x.ts)+'</td><td>'+(x.who==="owner"?"владелец":x.who==="partner"?"партнёр":esc(x.who))+'</td><td>'+esc(x.action)+'</td><td>'+esc(x.details)+'</td></tr>';}).join(""):'<tr><td colspan="4">Пока пусто</td></tr>';});}
 

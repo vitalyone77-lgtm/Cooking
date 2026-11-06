@@ -7,10 +7,11 @@
 import asyncio
 import logging
 import random
+import time
 
 from aiogram import Bot, Dispatcher
 from aiogram.exceptions import TelegramForbiddenError
-from aiogram.types import InlineKeyboardMarkup
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -136,6 +137,7 @@ def setup_scheduler(bot: Bot, dp: Dispatcher) -> AsyncIOScheduler:
                       args=[bot], id="social_weekly_feature", replace_existing=True)
     scheduler.add_job(social.daily_job, trigger=CronTrigger(hour=config.SOCIAL_POST_HOUR, minute=config.SOCIAL_POST_MINUTE),
                       args=[bot], id="social_daily", replace_existing=True)
+    scheduler.add_job(trial_nudge_job, trigger=CronTrigger(hour=12, minute=30), args=[bot], id="trial_nudge", replace_existing=True)
     # недельные задания по продвижению владельцу (понедельник утром)
     import bot_promo
     scheduler.add_job(bot_promo.weekly_job, trigger=CronTrigger(day_of_week="mon", hour=10, minute=0),
@@ -146,3 +148,33 @@ def setup_scheduler(bot: Bot, dp: Dispatcher) -> AsyncIOScheduler:
         f"({config.REMINDER_TIMEZONE})"
     )
     return scheduler
+
+
+async def trial_nudge_job(bot) -> None:
+    """Пробный период: за 2 дня до конца и после конца по одному сообщению. Только при включённой подписке и только в Telegram."""
+    import accounts
+    import plans
+    if not plans.paywall():
+        return
+    now = time.time()
+    rows = accounts._q("SELECT uid, until FROM subs WHERE source='trial' AND until > ? AND until < ?", (now - 3 * 86400, now + 2 * 86400), all_=True)
+    for uid, until in rows:
+        if not str(uid).isdigit() or int(uid) >= accounts.VK_OFFSET:
+            continue
+        ended = until <= now
+        key = f"nudge:{'end' if ended else 'soon'}:{uid}"
+        if accounts.sess_get(key):
+            continue
+        accounts.sess_set(key, {"ts": now})
+        accounts.sess_mark_forever(key)
+        name = plans.PREMIUM_NAME
+        text = (f"Пробный период тарифа «{name}» закончился. Рецепты и книга остаются доступны с дневными лимитами. "
+                f"Чтобы вернуть план на 3 дня, PDF и больше рецептов в день, оформите подписку." if ended else
+                f"Пробный период тарифа «{name}» закончится {time.strftime('%d.%m', time.localtime(until))}. "
+                "Если функции пригодились, подписку можно оформить заранее, срок сложится.")
+        kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="💎 Подписка", callback_data="pf:sub")]])
+        try:
+            await bot.send_message(int(uid), text, reply_markup=kb, parse_mode=None)
+            usage.event("nudge_end" if ended else "nudge_soon", uid)
+        except Exception as e:  # noqa: BLE001 — человек мог заблокировать бота
+            logger.info("Сообщение о пробном периоде %s не ушло: %r", uid, e)

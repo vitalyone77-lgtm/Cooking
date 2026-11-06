@@ -562,11 +562,17 @@ accounts.apply_payment("pw:p1", 7300, 1000, "RUB", 30, "month")
 accounts.apply_payment("pwtest:p2", 7300, 500, "RUBTEST", 30, "month")
 accounts.apply_payment("tg:p3", 7300, 200, "XTR", 30, "month")
 _s = _pt.stats(_pt.get("testpartner"))
-check("партнёр: считаются только рубли, (1000 − 4%) × 80%", _s["gross"] == 1000 and _s["tax"] == 40 and _s["due"] == 768 and _s["buyers"] == 1, str(_s))
+check("партнёр: считаются только рубли, (1000 − 4% − 4%) × 80%", _s["gross"] == 1000 and _s["tax"] == 40 and _s["fee"] == 40 and _s["due"] == 736 and _s["buyers"] == 1, str(_s))
+check("партнёр: активная оплаченная подписка считается", _s["active"] == 1, str(_s))
+accounts._q("UPDATE subs SET until=? WHERE uid='7300'", (time.time() - 10,))
+check("партнёр: истёкшая не считается", _pt.stats(_pt.get("testpartner"))["active"] == 0)
+accounts.grant_days(7310, 7, "trial")
+accounts.set_ref(7310, "testpartner")
+check("партнёр: пробный период не считается", _pt.stats(_pt.get("testpartner"))["active"] == 0)
 _pt.payout("testpartner", 100)
-check("партнёр: выплата уменьшает остаток", _pt.stats(_pt.get("testpartner"))["balance"] == 668)
+check("партнёр: выплата уменьшает остаток", _pt.stats(_pt.get("testpartner"))["balance"] == 636)
 pg = cl.get("/partner/" + _p["token"])
-check("партнёр: кабинет по секретной ссылке, закрыт от поиска", pg.status_code == 200 and "668" in pg.text and "noindex" in pg.text, pg.text[:100])
+check("партнёр: кабинет по секретной ссылке, закрыт от поиска", pg.status_code == 200 and "636" in pg.text and "Комиссия платёжного сервиса" in pg.text and "Оплаченных подписок сейчас" in pg.text and "noindex" in pg.text, pg.text[:100])
 check("партнёр: без секрета кабинета нет", cl.get("/partner/testpartner").status_code == 404)
 
 # ---------- тестовый аккаунт ----------
@@ -586,6 +592,32 @@ check("тест: новый вошедший, тариф бесплатный, �
 import payanyway as _pw2
 _chk = plans.is_preview("7400") and _pw2.__name__
 check("другие люди не затронуты", cl.get("/api/me", headers=H).json()["paywall"] is False and plans.plan_of("7001") == "open")
+
+# ---------- аналитика ----------
+import analytics as _an
+import usage as _us
+_us.note_request("7500", {"cuisine": "classic", "time": "30 мин", "servings": 2, "appliance": ["stove"], "preferred": "курица и рис", "excluded": "грибы"})
+_us.note_words("book", "борщ из говядины")
+_us.event("limit_recipe", "7500")
+_r = _an.report(30)
+_steps = {x["step"]: x["users"] for x in _r["funnel"]}
+check("аналитика: упор в лимит в воронке", _steps["Упёрлись в лимит"] >= 1 and "Оплатили" in _steps, str(_steps))
+check("аналитика: выборы и слова", any(x[0] == "classic" for x in _r["choices"]["Тип питания"]) and any(w == "курица" for w, _ in _r["words"]["Что хотят приготовить"]) and any(w == "борщ" for w, _ in _r["words"]["Что ищут в книге"]), str(_r["words"])[:300])
+check("аналитика: служебные c_ не в списке функций", not any(f["name"].startswith("c_") for f in _r["features"]))
+check("аналитика: слова без привязки к людям", "uid" not in [c[1] for c in _us.rows("PRAGMA table_info(word_stats)")])
+check("аналитика: текст для бота", "Воронка" in _an.report_text())
+check("аналитика: только админу", cl.get("/admin/api/insights").status_code in (401, 403))
+_ol = plans.plan_of
+plans.plan_of = lambda u: "free"
+ai.call_llm_with_fallback = fake_llm
+fake_llm.answer = GOOD
+for _i in range(food_ai.FREE_LIMIT):
+    asyncio.run(food_ai.estimate("u77", f"едабез{_i}x"))
+_f, _w = asyncio.run(food_ai.estimate("u77", "ещёблюдо"))
+check("ИИ в дневнике: бесплатный лимит 3", _f is None and "3 в день" in _w, _w)
+plans.plan_of = _ol
+_pg = cl.get("/oplata").text
+check("на странице оплаты таблица тарифов", "Что входит" in _pg and "План на 3 дня" in _pg)
 
 import helpdata
 check("в справке есть дневник и отправка списка", any(k == "diary" for k, _, _ in helpdata.SECTIONS) and any("ссылкой на страницу" in t for _, _, t in helpdata.SECTIONS))

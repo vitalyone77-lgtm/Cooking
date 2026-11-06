@@ -57,6 +57,7 @@ def _conn():
         if "first" not in {r[1] for r in c.execute("PRAGMA table_info(seen)")}:
             c.execute("ALTER TABLE seen ADD COLUMN first REAL")             # когда человек появился впервые
             c.execute("UPDATE seen SET first = ts WHERE first IS NULL")
+        c.execute("CREATE TABLE IF NOT EXISTS word_stats(kind TEXT, word TEXT, day TEXT, n INTEGER, PRIMARY KEY(kind, word, day))")   # слова запросов, без людей
         c.execute("CREATE TABLE IF NOT EXISTS events(name TEXT, uid TEXT, ts REAL)")   # какие функции используют
         c.execute("CREATE INDEX IF NOT EXISTS events_ts ON events(ts, name)")
         if "ip" not in {r[1] for r in c.execute("PRAGMA table_info(gens)")}:
@@ -76,6 +77,16 @@ def _q(sql: str, args=(), one=False):
             with c:
                 cur = c.execute(sql, args)
                 return cur.fetchone() if one else cur
+        finally:
+            c.close()
+
+
+def rows(sql: str, args=()) -> list:
+    """Все строки запроса: выбираются, пока соединение открыто."""
+    with _lock:
+        c = _conn()
+        try:
+            return c.execute(sql, args).fetchall()
         finally:
             c.close()
 
@@ -205,6 +216,7 @@ def try_spend(uid, kind: str, src: str, ip: str | None = None) -> tuple[int | No
             until = plans.maybe_start_trial(uid)
             lim2 = plans.limit(uid, kind) if until else None
             if not lim2 or used(uid, kind, lim2[1]) >= lim2[0]:
+                event(f"limit_{kind}", uid)
                 return None, _refusal(uid, kind, n, days)
             notice = TRIAL_TEXT.format(days=plans.cfg("TRIAL_DAYS"))
             event("trial_start", uid)
@@ -260,6 +272,34 @@ def mark_reminded(chat_id: int, n: int) -> None:
 
 
 # ---------- использование функций и статистика для админки ----------
+
+def note_words(kind: str, text: str) -> None:
+    """Слова запроса для статистики: без привязки к человеку, только что и сколько раз искали."""
+    try:
+        import foods
+        day = time.strftime("%Y-%m-%d")
+        for w in list(dict.fromkeys(foods.content_words(text or "")))[:6]:
+            if 3 <= len(w) <= 24 and not w.isdigit():
+                _q("INSERT INTO word_stats(kind, word, day, n) VALUES(?,?,?,1) ON CONFLICT(kind, word, day) DO UPDATE SET n=n+1", (kind, w, day))
+    except Exception:  # noqa: BLE001 — статистика не должна мешать работе
+        pass
+
+
+def top_words(kind: str, days: int = 30, limit: int = 20) -> list:
+    since = time.strftime("%Y-%m-%d", time.localtime(time.time() - days * 86400))
+    return [[r[0], r[1]] for r in rows("SELECT word, SUM(n) FROM word_stats WHERE kind=? AND day>=? GROUP BY word ORDER BY 2 DESC LIMIT ?", (kind, since, limit))]
+
+
+def note_request(uid, data: dict) -> None:
+    """Что выбирают в анкете рецепта: тип питания, время, порции, техника, продукты."""
+    for key in ("cuisine", "time", "servings"):
+        if data.get(key):
+            event(f"c_{key}:{data[key]}", uid)
+    for a in (data.get("appliance") or [])[:4]:
+        event(f"c_appliance:{a}", uid)
+    note_words("pref", data.get("preferred") or "")
+    note_words("exc", data.get("excluded") or "")
+
 
 def event(name: str, uid) -> None:
     """Отметить использование функции (режим готовки, список покупок, вход на сайт…) — для статистики."""

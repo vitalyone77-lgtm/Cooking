@@ -1,6 +1,6 @@
 """
 Партнёры: именная ссылка, кабинет по секретной ссылке и подсчёт доли. Считаем только настоящие рубли с людей, пришедших по ссылке:
-(оплаты − налог) × доля. Выплаты владелец делает сам и отмечает командой /partnerpaid.
+(оплаты − налог − комиссия платёжного сервиса) × доля, постоянно, с каждой оплаты. Выплаты владелец делает сам и отмечает командой /partnerpaid.
 """
 import re
 import secrets
@@ -13,6 +13,7 @@ import config
 CODE_RE = re.compile(r"^[A-Za-z0-9_-]{3,32}$")
 DEFAULT_SHARE = 80
 DEFAULT_TAX = 4        # налог самозанятого с оплат от физлиц, %
+COMMISSION = 4         # комиссия платёжного сервиса, %
 
 
 def site() -> str:
@@ -49,8 +50,8 @@ def links(p: dict) -> dict:
 
 
 def _money(gross: float, p: dict) -> dict:
-    tax = gross * p["tax"] / 100
-    return {"gross": round(gross, 2), "tax": round(tax, 2), "due": round((gross - tax) * p["share"] / 100, 2)}
+    tax, fee = gross * p["tax"] / 100, gross * COMMISSION / 100
+    return {"gross": round(gross, 2), "tax": round(tax, 2), "fee": round(fee, 2), "due": round((gross - tax - fee) * p["share"] / 100, 2)}
 
 
 def stats(p: dict) -> dict:
@@ -63,7 +64,10 @@ def stats(p: dict) -> dict:
         months[m] = months.get(m, 0) + amount
     paid = accounts._q("SELECT COALESCE(SUM(amount), 0) FROM partner_payouts WHERE code=?", (p["code"],), one=True)[0]
     total = _money(sum(r[1] for r in rows), p)
-    return {"clicks": p["clicks"], "users": users, "buyers": len({r[0] for r in rows}), "payments": len(rows), **total, "paid": round(paid, 2),
+    now = time.time()
+    active = accounts._q("SELECT COUNT(DISTINCT s.uid) FROM subs s JOIN refs r ON r.uid=s.uid JOIN payments p ON p.uid=s.uid "
+                         "WHERE r.ref=? AND s.until > ? AND p.currency='RUB'", (p["code"], now), one=True)[0]
+    return {"clicks": p["clicks"], "users": users, "buyers": len({r[0] for r in rows}), "active": active, "payments": len(rows), **total, "paid": round(paid, 2),
             "balance": round(total["due"] - paid, 2), "months": [{"month": m, **_money(v, p)} for m, v in sorted(months.items(), reverse=True)]}
 
 
@@ -86,7 +90,7 @@ table{{border-collapse:collapse;width:100%;background:var(--surface)}}th,td{{bor
 </style></head><body><h1>Кабинет партнёра: {escape(p['code'])}</h1>
 <p class="sub">К выплате сейчас</p><p class="big" style="margin:0">{fmt(s['balance'])}</p>
 <h2>Ваши ссылки</h2><p>Сайт: <code>{escape(ln['site'])}</code><br>Бот: <code>{escape(ln['bot'])}</code></p>
-<h2>Итоги</h2><table><tr><th>Переходов на сайт</th><td>{s['clicks']}</td></tr><tr><th>Пришло людей</th><td>{s['users']}</td></tr><tr><th>Оплатили</th><td>{s['buyers']}</td></tr><tr><th>Оплат</th><td>{s['payments']}</td></tr>
-<tr><th>Сумма оплат</th><td>{fmt(s['gross'])}</td></tr><tr><th>Налог {p['tax']:g}%</th><td>{fmt(s['tax'])}</td></tr><tr><th>Ваша доля {p['share']:g}%</th><td>{fmt(s['due'])}</td></tr><tr><th>Уже выплачено</th><td>{fmt(s['paid'])}</td></tr></table>
+<h2>Итоги</h2><table><tr><th>Переходов на сайт</th><td>{s['clicks']}</td></tr><tr><th>Пришло людей</th><td>{s['users']}</td></tr><tr><th>Оплатили хотя бы раз</th><td>{s['buyers']}</td></tr><tr><th>Оплаченных подписок сейчас</th><td>{s['active']}</td></tr><tr><th>Оплат</th><td>{s['payments']}</td></tr>
+<tr><th>Сумма оплат</th><td>{fmt(s['gross'])}</td></tr><tr><th>Налог {p['tax']:g}%</th><td>{fmt(s['tax'])}</td></tr><tr><th>Комиссия платёжного сервиса {COMMISSION:g}%</th><td>{fmt(s['fee'])}</td></tr><tr><th>Ваша доля {p['share']:g}%</th><td>{fmt(s['due'])}</td></tr><tr><th>Уже выплачено</th><td>{fmt(s['paid'])}</td></tr></table>
 <h2>По месяцам</h2><table><tr><th>Месяц</th><th>Оплаты</th><th>Ваша доля</th></tr>{months}</table>
-<p class="sub" style="margin-top:16px">Считаются оплаты в рублях от людей, которые впервые пришли по вашей ссылке. Эта страница личная, не пересылайте её адрес.</p></body></html>"""
+<p class="sub" style="margin-top:16px">Считаются оплаты в рублях от людей, которые впервые пришли по вашей ссылке. Оплаченные подписки сейчас: сколько ваших клиентов имеют действующую подписку, когда бы они ни пришли; пробный период не считается. Эта страница личная, не пересылайте её адрес.</p></body></html>"""
