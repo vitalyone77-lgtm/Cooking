@@ -20,6 +20,7 @@ import shoplists
 import usage
 import plans
 from shopping import extract_dish_title, format_store_links, item_amounts
+from stores import prefs
 from stores.links import DEFAULT_STORES, STORES
 
 logger = logging.getLogger(__name__)
@@ -29,7 +30,7 @@ router = Router(name="shop")
 # orig_kb(message, ctx) -> InlineKeyboardMarkup, run_missing(callback, anchor, ctx, names)
 hooks: dict = {}
 
-MODES = {"b": "✅ Купил", "m": "❌ Нет", "h": "🏠 Есть дома"}
+MODES = {"b": "✅ Куплено", "m": "❌ Нет", "h": "🏠 Есть дома"}
 ICON = {"b": "✅", "m": "❌", "h": "🏠"}
 PAGE = 12
 
@@ -110,7 +111,7 @@ async def _load(callback: CallbackQuery, msg: Message | None = None) -> dict | N
     msg = msg or callback.message
     s = accounts.sess_get(_key(msg.chat.id, msg.message_id))
     if not s:
-        await callback.answer("Список устарел — открой его заново кнопкой «🛒 Список покупок».", show_alert=True)
+        await callback.answer("Список устарел — откройте его заново кнопкой «🛒 Продукты и магазины».", show_alert=True)
     return s
 
 
@@ -148,7 +149,7 @@ async def list_open(callback: CallbackQuery):
     msg = callback.message
     terms = hooks["terms"](msg, base_ctx(ctx))
     if not terms:
-        await callback.answer("Не нашёл список продуктов — открой рецепт заново.", show_alert=True)
+        await callback.answer("Не нашёл список продуктов — откройте рецепт заново.", show_alert=True)
         return
     old = accounts.sess_get(_key(msg.chat.id, msg.message_id))
     if old and old.get("terms") == terms:
@@ -179,7 +180,7 @@ async def list_check(callback: CallbackQuery):
     s = await _load(callback)
     if not s:
         return
-    await callback.answer("Выбери отметку сверху и нажимай на продукты")
+    await callback.answer("Выберите отметку сверху и нажимайте на продукты")
     await _redraw(callback, s)
 
 
@@ -243,9 +244,9 @@ async def list_collapse(callback: CallbackQuery):
 
 # ---------- магазин: одно сообщение-ответ, переключается между магазинами ----------
 
-def _store_kb(ctx: str, current: str | None) -> InlineKeyboardMarkup:
+def _store_kb(ctx: str, current: str | None, uid: int | None = None) -> InlineKeyboardMarkup:
     rows, row = [], []
-    for key in DEFAULT_STORES:
+    for key in prefs.get_enabled(uid):
         if key in STORES:
             row.append(InlineKeyboardButton(text=("✅ " if key == current else "") + STORES[key][0],
                                             callback_data=f"sl:s:{key}"))
@@ -271,11 +272,11 @@ async def list_store(callback: CallbackQuery):
     if mid:
         try:
             await callback.bot.edit_message_text(text, chat_id=callback.message.chat.id, message_id=mid,
-                                                 reply_markup=_store_kb(base_ctx(s["ctx"]), None), parse_mode=None)
+                                                 reply_markup=_store_kb(base_ctx(s["ctx"]), None, callback.message.chat.id), parse_mode=None)
             return
         except Exception:  # noqa: BLE001 — сообщение удалили — пришлём новое
             pass
-    sent = await callback.message.reply(text, reply_markup=_store_kb(base_ctx(s["ctx"]), None), parse_mode=None)
+    sent = await callback.message.reply(text, reply_markup=_store_kb(base_ctx(s["ctx"]), None, callback.message.chat.id), parse_mode=None)
     s["store_msg"] = sent.message_id
     _save(callback.message, s)
 
@@ -285,7 +286,7 @@ async def list_store_pick(callback: CallbackQuery):
     parent = callback.message.reply_to_message
     store = callback.data.split(":")[2]
     if not parent or store not in DEFAULT_STORES:
-        await callback.answer("Открой список покупок заново.", show_alert=True)
+        await callback.answer("Откройте список покупок заново.", show_alert=True)
         return
     s = await _load(callback, parent)
     if not s:
@@ -293,7 +294,7 @@ async def list_store_pick(callback: CallbackQuery):
     rest = _remaining(s)
     usage.event("store_links", callback.message.chat.id)
     if not rest:
-        await callback.answer("Всё уже куплено или есть дома 🎉", show_alert=True)
+        await callback.answer("Всё уже куплено или есть дома", show_alert=True)
         return
     await callback.answer()
     text = format_store_links(rest, store, hooks["amounts"](parent, base_ctx(s["ctx"])))
@@ -301,11 +302,11 @@ async def list_store_pick(callback: CallbackQuery):
     if home:
         text += "\n\n🏠 Не включил — есть дома: " + ", ".join(home)
     try:
-        await callback.message.edit_text(text, reply_markup=_store_kb(base_ctx(s["ctx"]), store), disable_web_page_preview=True)
+        await callback.message.edit_text(text, reply_markup=_store_kb(base_ctx(s["ctx"]), store, callback.message.chat.id), disable_web_page_preview=True)
     except Exception as e:  # noqa: BLE001
         if "not modified" in str(e):
             return
-        await callback.message.edit_text(text, reply_markup=_store_kb(base_ctx(s["ctx"]), store), disable_web_page_preview=True,
+        await callback.message.edit_text(text, reply_markup=_store_kb(base_ctx(s["ctx"]), store, callback.message.chat.id), disable_web_page_preview=True,
                                          parse_mode=None)
 
 
@@ -370,6 +371,6 @@ async def list_replace(callback: CallbackQuery):
     names = [t for i, t in enumerate(s["terms"]) if s["st"].get(str(i)) == "m"]
     usage.event("list_replace", callback.message.chat.id)
     if not names:
-        await callback.answer("Отметь ❌ продукты, которых нет в магазине.", show_alert=True)
+        await callback.answer("Отметьте ❌ продукты, которых нет в магазине.", show_alert=True)
         return
     await hooks["run_missing"](callback, callback.message, base_ctx(s["ctx"]), names)

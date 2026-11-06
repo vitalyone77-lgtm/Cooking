@@ -21,6 +21,8 @@ import config
 import plans
 import usage
 from states import FeedbackForm, ProfileForm
+from stores import prefs as store_prefs
+from stores.links import DEFAULT_STORES, STORES
 from storage import reminders_enabled, set_reminders_enabled
 
 logger = logging.getLogger(__name__)
@@ -94,10 +96,10 @@ def _profile_view(uid: int) -> tuple[str, InlineKeyboardMarkup]:
     rows: list[list[tuple[str, str]]] = []
     if consent:
         rows.append([("🚫 Исключить продукты" if mem else "💎 Исключить продукты", "pf:never"), ("🎯 Цели и вес", "pf:goals")])
-        if shelf_on:
-            rows.append([("🏠 Моя полка", "pf:shelf")])
+        rows.append([("🏪 Магазины", "pf:stores")] + ([("🏠 Моя полка", "pf:shelf")] if shelf_on else []))
     else:
         rows.append([("✅ Согласен", "pf:consent")])
+        rows.append([("🏪 Магазины", "pf:stores")])
     if plans.paywall():
         if plans.trial_available(uid):
             rows.append([("🎁 Попробовать бесплатно", "pf:trial")])
@@ -245,6 +247,35 @@ async def profile_settings(callback: CallbackQuery, state: FSMContext):
     await show_profile(callback, state, edit=True, settings=True)
 
 
+def _stores_view(uid: int) -> tuple[str, InlineKeyboardMarkup]:
+    on = store_prefs.get_enabled(uid)
+    b = InlineKeyboardBuilder()
+    for key in DEFAULT_STORES:
+        b.button(text=("✅ " if key in on else "⬜ ") + STORES[key][1], callback_data=f"pf:st:{key}")
+    b.button(text="⬅️ Назад", callback_data="pf:set")
+    b.adjust(1)
+    return "🏪 Магазины\n\nОставьте те, где покупаете: в списках покупок будут только они. Хотя бы один должен остаться.", b.as_markup()
+
+
+@router.callback_query(F.data == "pf:stores")
+async def profile_stores(callback: CallbackQuery, state: FSMContext):
+    await state.clear()
+    await callback.answer()
+    text, markup = _stores_view(callback.message.chat.id)
+    await callback.message.edit_text(text, reply_markup=markup, parse_mode=None)
+
+
+@router.callback_query(F.data.startswith("pf:st:"))
+async def profile_store_toggle(callback: CallbackQuery):
+    uid, key = callback.message.chat.id, callback.data.split(":", 2)[2]
+    before = store_prefs.get_enabled(uid)
+    after = store_prefs.toggle(uid, key)
+    await callback.answer("Хотя бы один магазин должен остаться" if before == after else "")
+    if before != after:
+        text, markup = _stores_view(uid)
+        await callback.message.edit_text(text, reply_markup=markup, parse_mode=None)
+
+
 @router.callback_query(F.data == "pf:goals")
 async def profile_goals(callback: CallbackQuery, state: FSMContext):
     if not await _need_consent(callback):
@@ -380,7 +411,7 @@ async def feedback_text(message: Message, state: FSMContext):
 async def _need_consent(callback: CallbackQuery) -> bool:
     if accounts.consent_get(callback.message.chat.id):
         return True
-    await callback.answer("Сначала нажми «Согласен»", show_alert=True)
+    await callback.answer("Сначала нажмите «Согласен»", show_alert=True)
     return False
 
 
@@ -401,7 +432,7 @@ async def profile_trial(callback: CallbackQuery, state: FSMContext):
         return
     usage.event("trial_start", uid)
     await callback.answer(f"🎁 Подключил тариф «{plans.PREMIUM_NAME}» на {int(plans.cfg('TRIAL_DAYS') or 0)} дней: "
-                          "пробуй все функции приложения.", show_alert=True)
+                          "можно попробовать все функции приложения.", show_alert=True)
     await show_profile(callback, state, edit=True, settings=True)
 
 
@@ -439,8 +470,8 @@ async def profile_goal(callback: CallbackQuery, state: FSMContext):
     await state.set_state(ProfileForm.goal)
     await callback.answer()
     await callback.message.edit_text(
-        "🎯 Напиши цель на день: калории и, если хочешь, белки, жиры и углеводы в граммах. Например: "
-        "«2000 ккал, белки 120, жиры 70, углеводы 200» или просто «1800». Чтобы убрать цель, напиши «нет».",
+        "🎯 Напишите цель на день: калории и, если хотите, белки, жиры и углеводы в граммах. Например: "
+        "«2000 ккал, белки 120, жиры 70, углеводы 200» или просто «1800». Чтобы убрать цель, напишите «нет».",
         reply_markup=_cancel_kb(), parse_mode=None)
 
 
@@ -502,7 +533,7 @@ async def profile_weight(callback: CallbackQuery, state: FSMContext):
     await state.set_state(ProfileForm.weight)
     await callback.answer()
     await callback.message.edit_text(
-        "⚖️ Напиши свой вес в кг на сегодня, например «82.5». Цель по весу: «цель 78», убрать цель: «цель нет». "
+        "⚖️ Напишите свой вес в кг на сегодня, например «82.5». Цель по весу: «цель 78», убрать цель: «цель нет». "
         "График за все дни есть на сайте, в разделе «Профиль».",
         reply_markup=_cancel_kb(), parse_mode=None)
 
@@ -527,7 +558,7 @@ async def profile_set_weight(message: Message, state: FSMContext):
             if "weight" not in g["feats"]:
                 accounts.goals_set(uid, feats=g["feats"] + ["weight"])
     except ValueError as e:
-        await ui.show(message, f"😔 {e}. Напиши число, например 82.5", _cancel_kb(), mode="tracked")
+        await ui.show(message, f"😔 {e}. Напишите число, например 82.5", _cancel_kb(), mode="tracked")
         return
     usage.event("weight_add", uid)
     await show_profile(message, state, mode="tracked")
@@ -541,7 +572,7 @@ async def profile_delete_ask(callback: CallbackQuery):
     b.adjust(1)
     await callback.answer()
     await callback.message.edit_text(
-        "Удалить список «не использовать», цель КБЖУ, вес, полку и согласие? Избранное и подписка останутся.",
+        "Удалить исключённые продукты, цель КБЖУ, вес, дневник, полку и согласие? Избранное и подписка останутся.",
         reply_markup=b.as_markup(), parse_mode=None)
 
 
@@ -606,16 +637,14 @@ def shelf_view(uid: int) -> tuple[str, InlineKeyboardMarkup]:
     items = accounts.shelf_list(uid)
     b = InlineKeyboardBuilder()
     if items:
-        text = ("🏠 *Моя полка* — долгоживущие продукты, которые у тебя скорее всего есть "
-                "(купил или отметил «есть дома»). В списках покупок они идут отдельно.\n\n"
-                "Нажми на продукт, если он закончился.")
+        text = ("🏠 *Моя полка* — долгоживущие продукты, которые у вас, скорее всего, есть (куплены или отмечены «есть дома»). В списках покупок они идут отдельно.\n\n"
+                "Нажмите на продукт, если он закончился.")
         for i, it in enumerate(items[:40]):
             b.button(text=f"❌ {it['item'][:30]} · {time.strftime('%d.%m', time.localtime(it['ts']))}",
                      callback_data=f"pf:shdel:{i}")
     else:
         text = ("🏠 *Моя полка* пока пустая.\n\nСюда попадают масло, специи, крупы и другие долгоживущие продукты, "
-                "когда ты отмечаешь их в списке покупок «✅ купил» или «🏠 есть дома». Тогда в следующих "
-                "рецептах они будут отдельным списком — не придётся покупать второй раз.")
+                "когда вы отмечаете их в списке покупок «✅ куплено» или «🏠 есть дома». В следующих рецептах они будут отдельным списком, чтобы не покупать второй раз.")
     b.adjust(2)
     b.row(InlineKeyboardButton(text="➕ Добавить (текстом или фото)" if plans.feature_on(uid, "photo_shelf")
                                else "➕ Добавить продукт", callback_data="pf:shadd"))
@@ -655,9 +684,9 @@ async def shelf_add_start(callback: CallbackQuery, state: FSMContext):
     await state.set_state(ProfileForm.shelf_add)
     await callback.answer()
     uid = callback.message.chat.id
-    text = "➕ Напиши продукты через запятую — например: «оливковое масло, куркума, рис»."
+    text = "➕ Напишите продукты через запятую — например: «оливковое масло, куркума, рис»."
     if plans.feature_on(uid, "photo_shelf"):
-        text += "\n\n📷 Или пришли фото полки или холодильника — найду продукты, ты отметишь нужные."
+        text += "\n\n📷 Или пришли фото полки или холодильника — найду продукты, вы отметите нужные."
     if plans.feature_on(uid, "voice"):
         text += "\n🎙 Можно и голосом."
     await callback.message.edit_text(text, reply_markup=_cancel_kb(), parse_mode=None)
@@ -685,9 +714,9 @@ async def profile_site(callback: CallbackQuery):
     b = InlineKeyboardBuilder()
     b.button(text="🌐 Открыть сайт (вход выполнен)", url=f"{config.WEB_APP_URL.rstrip('/')}/?login={code}")
     await callback.message.answer(
-        "Ссылка одноразовая и действует 10 минут — не пересылай её никому.\n\n"
+        "Ссылка одноразовая и действует 10 минут — не пересылайте её никому.\n\n"
         "Профиль, избранное, полка и подписка на сайте будут те же, что здесь. "
-        "Если откроешь сайт в другом браузере — нажми там «Войти через Telegram».",
+        "Если откроете сайт в другом браузере — нажмите там «Войти через Telegram».",
         reply_markup=b.as_markup(), parse_mode=None)
 
 
@@ -700,16 +729,14 @@ async def handle_start_args(message: Message, args: str | None) -> bool:
     if args.startswith("link_"):
         code = args[5:]
         if not accounts.link_code_valid(code):
-            await message.answer("😔 Ссылка для входа устарела или уже использована. Нажми «Войти через Telegram» "
+            await message.answer("😔 Ссылка для входа устарела или уже использована. Нажмите «Войти через Telegram» "
                                  "на сайте ещё раз.", parse_mode=None)
             return True
         b = InlineKeyboardBuilder()
         b.button(text="✅ Да, войти на сайте", callback_data=f"pf:lk:{code}")
         b.button(text="Нет", callback_data="pf:lkno")
         b.adjust(1)
-        await message.answer("🌐 Войти на сайте под твоим профилем?\n\nЕсли ты сам только что нажал «Войти через "
-                             "Telegram» на сайте — подтверждай. Если ссылку тебе кто-то прислал — нажми «Нет»: "
-                             "иначе он получит доступ к твоему профилю.", reply_markup=b.as_markup(), parse_mode=None)
+        await message.answer("🌐 Войти на сайте под вашим профилем?\n\nЕсли вы сами только что нажали «Войти через Telegram» на сайте, подтвердите. Если ссылку прислал кто-то другой, нажмите «Нет», иначе он получит доступ к вашему профилю.", reply_markup=b.as_markup(), parse_mode=None)
         return True
     if args.startswith("ref_"):
         accounts.set_ref(uid, args[4:])
@@ -727,10 +754,10 @@ async def link_confirm(callback: CallbackQuery):
         usage.event("site_link", callback.message.chat.id)
     await callback.answer()
     if dev:
-        await callback.message.edit_text("✅ Готово! Сайт привязан к твоему профилю — избранное, профиль, полка и "
+        await callback.message.edit_text("✅ Готово! Сайт привязан к вашему профилю — избранное, профиль, полка и "
                                          "подписка теперь общие. Можно вернуться в браузер.", parse_mode=None)
     else:
-        await callback.message.edit_text("😔 Ссылка для входа устарела. Нажми «Войти через Telegram» на сайте ещё раз.",
+        await callback.message.edit_text("😔 Ссылка для входа устарела. Нажмите «Войти через Telegram» на сайте ещё раз.",
                                          parse_mode=None)
 
 
@@ -767,7 +794,7 @@ def _sub_view(uid: int) -> tuple[str, InlineKeyboardMarkup]:
     if payanyway.enabled() and chk and plans.is_tester(uid):
         b.button(text=f"🧪 {chk['title']} — {chk['rub']} ₽", callback_data=f"pf:pw:{chk['key']}")
     if not config.PAYMENT_STARS_ENABLED and not config.PAYMENT_PROVIDER_TOKEN and not payanyway.enabled():
-        lines.append("Оплата скоро появится 🙂")
+        lines.append("Оплата скоро появится")
     if payanyway.enabled():
         b.button(text="📄 Условия оплаты и возврата", url=(config.WEB_APP_URL or "https://menu.ymayaka.ru").rstrip("/") + "/oplata")
     b.button(text="🎟 Промокод", callback_data="pf:promo")
@@ -853,7 +880,7 @@ def _parse_payload(payload: str) -> tuple[dict, int] | None:
 async def pre_checkout(query: PreCheckoutQuery):
     # Telegram ждёт ответ не дольше 10 секунд — только быстрая проверка, без сети
     ok = _parse_payload(query.invoice_payload) is not None
-    await query.answer(ok=ok, error_message=None if ok else "Тариф устарел — открой «Подписку» заново.")
+    await query.answer(ok=ok, error_message=None if ok else "Тариф устарел — откройте «Подписку» заново.")
 
 
 @router.message(F.successful_payment)
@@ -881,15 +908,14 @@ async def payment_done(message: Message):
 @router.message(Command("paysupport"))
 async def cmd_paysupport(message: Message):
     """Обязательная для оплаты звёздами команда поддержки по платежам."""
-    await message.answer("💬 Вопросы по оплате и возврату: напиши сюда, в этот чат, что случилось и когда платил — "
-                         "мы ответим и при необходимости вернём деньги. Статус подписки — /profile.", parse_mode=None)
+    await message.answer("💬 Вопросы по оплате и возврату: напишите сюда, в этот чат, что случилось и когда вы платили. Мы ответим и при необходимости вернём деньги. Статус подписки — /profile.", parse_mode=None)
 
 
 @router.callback_query(F.data == "pf:promo")
 async def promo_start(callback: CallbackQuery, state: FSMContext):
     await state.set_state(ProfileForm.promo)
     await callback.answer()
-    await ui.show(callback, "🎟 Напиши промокод:", _cancel_kb(), mode="edit")
+    await ui.show(callback, "🎟 Напишите промокод:", _cancel_kb(), mode="edit")
 
 
 @router.message(ProfileForm.promo, F.text)
@@ -901,7 +927,7 @@ async def promo_enter(message: Message, state: FSMContext):
     if not days:
         note = "😔 Такого промокода нет."
     elif not accounts.use_promo(message.chat.id, code):
-        note = "Этот промокод ты уже использовал 🙂"
+        note = "Этот промокод уже использован"
     else:
         until = accounts.grant_days(message.chat.id, days, "promo:" + code.upper())
         usage.event("promo", message.chat.id)

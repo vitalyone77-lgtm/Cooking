@@ -18,7 +18,7 @@
 <meta property="og:site_name" content="Кухонный помощник">
 <meta property="og:locale" content="ru_RU">
 <meta property="og:title" content="Кухонный помощник — рецепты, меню на день и план питания с КБЖУ">
-<meta property="og:description" content="Бесплатно и без регистрации: рецепт по твоим продуктам, меню на день, план на 3 дня, калории и КБЖУ, список покупок со ссылками на магазины, PDF.">
+<meta property="og:description" content="Бесплатно и без регистрации: рецепт по вашим продуктам, меню на день, план на 3 дня, калории и КБЖУ, список покупок со ссылками на магазины, PDF.">
 <meta property="og:url" content="https://menu.ymayaka.ru/">
 <meta property="og:image" content="https://menu.ymayaka.ru/icons/og-image.png">
 <meta property="og:image:width" content="1200">
@@ -26,7 +26,7 @@
 <meta name="twitter:card" content="summary_large_image">
 <!--VERIFY-->
 <script type="application/ld+json">{"@context":"https://schema.org","@type":"WebApplication","name":"Кухонный помощник","url":"https://menu.ymayaka.ru/","applicationCategory":"LifestyleApplication","operatingSystem":"Любой (веб, можно добавить на главный экран)","inLanguage":"ru","description":"Подбор рецептов по продуктам и кухне, меню на день и план питания на 3 дня с калориями и КБЖУ, список покупок со ссылками на магазины, скачивание в PDF. Без регистрации.","offers":{"@type":"Offer","price":"0","priceCurrency":"RUB"},"featureList":["Рецепт с калориями и КБЖУ","Меню на день","План питания на 3 дня","Список покупок и корзина ВкусВилл","Скачивание в PDF"]}</script>
-<script type="application/ld+json">{"@context":"https://schema.org","@type":"FAQPage","mainEntity":[{"@type":"Question","name":"Нужна ли регистрация?","acceptedAnswer":{"@type":"Answer","text":"Нет. Приложение работает без регистрации, данные хранятся на твоём устройстве."}},{"@type":"Question","name":"Сколько стоит?","acceptedAnswer":{"@type":"Answer","text":"Бесплатно. Есть дневные лимиты: 3 рецепта, 1 меню на день, 1 план на 3 дня."}},{"@type":"Question","name":"Как посчитать КБЖУ и калории блюда?","acceptedAnswer":{"@type":"Answer","text":"Выбери кухню и приём пищи — рецепт придёт с калорийностью и белками, жирами, углеводами на порцию."}},{"@type":"Question","name":"Можно ли получить список покупок?","acceptedAnswer":{"@type":"Answer","text":"Да. Выбери магазин (Пятёрочка, ВкусВилл, Перекрёсток, Яндекс Лавка, Купер) — откроются ссылки на поиск продуктов, для ВкусВилла можно собрать корзину с ценами."}}]}</script>
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"FAQPage","mainEntity":[{"@type":"Question","name":"Нужна ли регистрация?","acceptedAnswer":{"@type":"Answer","text":"Нет. Приложение работает без регистрации, данные хранятся на вашем устройстве."}},{"@type":"Question","name":"Сколько стоит?","acceptedAnswer":{"@type":"Answer","text":"Начать можно бесплатно. Есть дневные лимиты, с подпиской их больше."}},{"@type":"Question","name":"Как посчитать КБЖУ и калории блюда?","acceptedAnswer":{"@type":"Answer","text":"Выберите кухню и приём пищи — рецепт придёт с калорийностью и белками, жирами, углеводами на порцию."}},{"@type":"Question","name":"Можно ли получить список покупок?","acceptedAnswer":{"@type":"Answer","text":"Да. Выберите магазин (Пятёрочка, ВкусВилл, Перекрёсток, Яндекс Лавка, Купер) — откроются ссылки на поиск продуктов, для ВкусВилла можно собрать корзину с ценами."}}]}</script>
 
 <style>
 :root{--bg:#FBF7F2;--surface:#fff;--text:#2B2622;--muted:#6B625A;--line:#E7DED3;--primary:#2F6B4F;--on-primary:#fff;--soft:#E6F0EA;--accent:#FBE3C4;--danger:#A33A2B;--r:16px;--tap:52px;--m-p:#2a78d6;--m-f:#eb6834;--m-c:#1baf7a;--m-x:#C9C2B8}
@@ -147,7 +147,7 @@ select{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--lin
   function ls(k,v){try{if(v===undefined)return localStorage.getItem(k);localStorage.setItem(k,v);}catch(e){return null;}}
   function esc(s){return String(s).replace(/[&<>"]/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"}[c];});}
   function sleep(ms){return new Promise(function(r){setTimeout(r,ms);});}
-  function errText(e){return (e&&e instanceof TypeError)?"Нет соединения с интернетом. Проверь сеть и обнови страницу.":((e&&e.message)||"Не удалось загрузить. Проверь интернет.");}
+  function errText(e){return (e&&e instanceof TypeError)?"Нет соединения с интернетом. Проверьте сеть и обновите страницу.":((e&&e.message)||"Не удалось загрузить. Проверьте интернет.");}
 
   // ---- установка на главный экран (PWA) ----
   var deferredInstall=null, framed=false;
@@ -160,12 +160,12 @@ select{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--lin
   window.addEventListener("appinstalled",function(){deferredInstall=null;standalone=true;fillInstall();});
   if("serviceWorker" in navigator){window.addEventListener("load",function(){try{navigator.serviceWorker.register("/sw.js").catch(function(){});}catch(e){}});}
   function installHelp(){
-    if(framed) return 'Эта страница встроена в другой сайт — установить её отсюда нельзя. Открой приложение отдельно и добавь уже оттуда.<a class="btn" style="margin-top:12px" href="'+esc(location.origin+"/")+'" target="_blank" rel="noopener">Открыть приложение</a>';
-    if(isIOS&&inApp) return 'Сейчас страница открыта внутри другого приложения (Telegram и т.п.), здесь нет кнопки «На экран Домой». Открой её в Safari: нажми «⋯» → «Открыть в Safari» и повтори.';
-    if(isIOS) return '1. Нажми «Поделиться» — квадрат со стрелкой вверх внизу экрана Safari.<br>2. Прокрути список и выбери пункт «На экран Домой».<br>3. Нажми «Добавить». Иконка появится на главном экране.';
-    if(/OPR\/|Opera/.test(UA)) return 'Opera: нажми «⋮» (или «⋯») → «Добавить на главный экран» (в некоторых версиях — «Главная страница» → «Ярлык на главный экран»). Если пункта нет — открой сайт в Chrome. Если ярлык не появился, разреши Opera «Создание ярлыков» в настройках Android: Настройки → Приложения → Opera → Разрешения.'; 
-    if(inApp) return 'Сейчас страница открыта внутри другого приложения. Открой её в Chrome: нажми «⋮» → «Открыть в браузере», потом повтори.';
-    return 'Открой меню браузера («⋮» или «⋯») и выбери «Добавить на главный экран» или «Установить приложение».';
+    if(framed) return 'Эта страница встроена в другой сайт — установить её отсюда нельзя. Откройте приложение отдельно и добавьте уже оттуда.<a class="btn" style="margin-top:12px" href="'+esc(location.origin+"/")+'" target="_blank" rel="noopener">Открыть приложение</a>';
+    if(isIOS&&inApp) return 'Сейчас страница открыта внутри другого приложения (Telegram и т.п.), здесь нет кнопки «На экран Домой». Откройте её в Safari: нажмите «⋯» → «Открыть в Safari» и повтори.';
+    if(isIOS) return '1. Нажмите «Поделиться» — квадрат со стрелкой вверх внизу экрана Safari.<br>2. Прокрутите список и выберите пункт «На экран Домой».<br>3. Нажмите «Добавить». Иконка появится на главном экране.';
+    if(/OPR\/|Opera/.test(UA)) return 'Opera: нажмите «⋮» (или «⋯») → «Добавить на главный экран» (в некоторых версиях — «Главная страница» → «Ярлык на главный экран»). Если пункта нет — откройте сайт в Chrome. Если ярлык не появился, разрешите Opera «Создание ярлыков» в настройках Android: Настройки → Приложения → Opera → Разрешения.'; 
+    if(inApp) return 'Сейчас страница открыта внутри другого приложения. Откройте её в Chrome: нажмите «⋮» → «Открыть в браузере», потом повтори.';
+    return 'Откройте меню браузера («⋮» или «⋯») и выберите «Добавить на главный экран» или «Установить приложение».';
   }
   function installCard(){
     var hidden=parseInt(ls("pwa_x")||"0",10);
@@ -225,11 +225,11 @@ select{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--lin
     });
   }
   function runJob(start,label){
-    main.innerHTML='<div class="card progress"><div class="spin"></div><div>'+esc(label)+'</div><div class="sub">Обычно 20–60 секунд. Не закрывай страницу.</div></div>';
+    main.innerHTML='<div class="card progress"><div class="spin"></div><div>'+esc(label)+'</div><div class="sub">Обычно 20–60 секунд. Не закрывайте страницу.</div></div>';
     return start.then(function(j){
       if(j.notice)toast(j.notice);
       function poll(n){return sleep(2000).then(function(){return call("GET","/api/job/"+j.job);}).then(function(s){
-        if(s.status==="done")return s.result; if(s.status==="error")throw new Error(s.error||"Не получилось"); if(n>150)throw new Error("Слишком долго, попробуй ещё раз"); return poll(n+1);});}
+        if(s.status==="done")return s.result; if(s.status==="error")throw new Error(s.error||"Не получилось"); if(n>150)throw new Error("Слишком долго, попробуйте ещё раз"); return poll(n+1);});}
       return poll(0);
     });
   }
@@ -337,7 +337,7 @@ select{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--lin
   window.__r={};
   function actions(title,text,noSave){
     var id="r"+Math.random().toString(36).slice(2,8); window.__r[id]={title:title,text:text};
-    return (ME&&ME.diary_on&&!noSave?'<button class="btn ghost" data-dy-eat="'+id+'">🍽 Съел порцию</button>':'')+'<div class="row">'+(isLocked("pdf")?'<button class="btn locked" data-gate="pdf">'+lockIc()+'Скачать PDF</button>':'<button class="btn" data-pdf="'+id+'">📄 Скачать PDF</button>')+(noSave?'':'<button class="btn ghost" data-save="'+id+'">⭐ Сохранить</button>')+'</div>'+
+    return (ME&&ME.diary_on&&!noSave?'<button class="btn ghost" data-dy-eat="'+id+'">🍽 Записать в дневник</button>':'')+'<div class="row">'+(isLocked("pdf")?'<button class="btn locked" data-gate="pdf">'+lockIc()+'Скачать PDF</button>':'<button class="btn" data-pdf="'+id+'">📄 Скачать PDF</button>')+(noSave?'':'<button class="btn ghost" data-save="'+id+'">⭐ Сохранить</button>')+'</div>'+
       ('wakeLock' in navigator?'<label class="toggle"><input type="checkbox" class="k-wake"> Не гасить экран, пока готовлю</label>':'');
   }
 
@@ -369,7 +369,8 @@ select{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--lin
   function storeChips(items){
     var h='<div class="chips" style="margin:12px 0 4px">';
     h+='<button class="chip" data-store-pick="__list" aria-pressed="false">📝 Список</button>';
-    ((items[0]&&items[0].links)||[]).forEach(function(l){h+='<button class="chip" data-store-pick="'+esc(l.store)+'" aria-pressed="false">'+esc(l.store)+'</button>';});
+    var offStores=((ME&&ME.stores)||[]).filter(function(x){return !x.on;}).map(function(x){return x.name;});
+    ((items[0]&&items[0].links)||[]).filter(function(l){return offStores.indexOf(l.store)<0;}).forEach(function(l){h+='<button class="chip" data-store-pick="'+esc(l.store)+'" aria-pressed="false">'+esc(l.store)+'</button>';});
     return h+'</div><div class="storehint" style="margin:4px 0 8px;color:var(--muted)">«Список» покажет продукты с количеством и галочками, магазин добавит ссылки на поиск.</div>';
   }
   function pickStore(btn){
@@ -414,13 +415,13 @@ select{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--lin
     el.setAttribute("data-loaded","1");
     el.innerHTML='<div style="color:var(--muted)">Подбираю товары и цены во ВкусВилле… до 40 секунд</div>';
     call("POST","/api/cart",{items:JSON.parse(el.getAttribute("data-items")||"[]")}).then(function(r){
-      if(!r.text){el.innerHTML='<div style="color:var(--muted)">ВкусВилл сейчас не отвечает — используй ссылки на поиск ниже.</div>';return;}
+      if(!r.text){el.innerHTML='<div style="color:var(--muted)">ВкусВилл сейчас не отвечает — используйте ссылки на поиск ниже.</div>';return;}
       el.innerHTML='<div class="recipe">'+esc(r.text)+'</div>'+(r.link?'<a class="btn" style="display:block;text-align:center;margin:8px 0" href="'+esc(r.link)+'" target="_blank" rel="noopener">🧺 Открыть корзину во ВкусВилле</a>':"");
-    }).catch(function(){el.removeAttribute("data-loaded");el.innerHTML='<div style="color:var(--muted)">Не удалось получить цены. Выбери магазин ещё раз или открой ссылки на поиск.</div>';});
+    }).catch(function(){el.removeAttribute("data-loaded");el.innerHTML='<div style="color:var(--muted)">Не удалось получить цены. Выберите магазин ещё раз или откройте ссылки на поиск.</div>';});
   }
   function missingBox(items,ctx){
     var h='<div class="missbox" data-ctx="'+ctx+'" style="margin-top:12px"><button class="btn ghost" data-miss-open="1">❌ Нет каких-то продуктов</button>'+
-      '<div class="misspanel" style="display:none"><p class="sub" style="margin:10px 0 4px">Отметь, чего нет в магазине — ИИ предложит замену или переделает блюдо.</p>';
+      '<div class="misspanel" style="display:none"><p class="sub" style="margin:10px 0 4px">Отметьте, чего нет в магазине — ИИ предложит замену или переделает блюдо.</p>';
     items.forEach(function(it){h+='<label class="step"><input type="checkbox" data-miss-name="'+esc(it.name)+'"><span>'+esc(it.name)+'</span></label>';});
     return h+'<input type="text" data-miss-extra="1" maxlength="200" placeholder="Другие продукты через запятую" style="margin:8px 0">'+
       '<button class="btn" data-miss-go="1">✅ Заменить</button></div></div>';
@@ -430,7 +431,7 @@ select{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--lin
     Array.prototype.forEach.call(box.querySelectorAll("[data-miss-name]"),function(c){if(c.checked)names.push(c.getAttribute("data-miss-name"));});
     var ex=box.querySelector("[data-miss-extra]");
     if(ex&&ex.value)ex.value.split(",").forEach(function(x){x=x.trim();if(x)names.push(x);});
-    if(!names.length){alert("Отметь хотя бы один продукт");return;}
+    if(!names.length){alert("Отметьте хотя бы один продукт");return;}
     runJob(call("POST","/api/missing",{ctx:ctx,items:names,text:ctx==="recipe"?LAST_RECIPE:"",excluded:F.exc||""}),"Подбираю замену…").then(function(res){
       if(ctx==="recipe")showRecipe(res);else{show("menus");}
     }).catch(function(e){fail(e,cur);});
@@ -462,7 +463,7 @@ select{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--lin
   function chips(list,sel,name,multi){return '<div class="chips" data-name="'+name+'" data-multi="'+(multi?1:0)+'">'+list.map(function(x){var on=multi?sel.indexOf(x.key)>=0:sel===x.key;return '<button class="chip" data-key="'+esc(x.key)+'" aria-pressed="'+on+'">'+esc(x.label)+'</button>';}).join("")+'</div>';}
   function viewNew(){
     var m=META, times=["15 мин","30 мин","45 мин","60 мин","Не важно"].map(function(x){return {key:x,label:x};}), sv=[1,2,3,4,5,6].map(function(x){return {key:String(x),label:String(x)};});
-    var h=favStrip()+'<h1>Что приготовим?</h1><p class="sub">Ответь на несколько вопросов — подберу рецепт, посчитаю калории и покажу, где купить продукты.</p><div id="install-top"></div>'+adSlot("top");
+    var h=favStrip()+'<h1>Что приготовим?</h1><p class="sub">Ответьте на несколько вопросов — подберу рецепт, посчитаю калории и покажу, где купить продукты.</p><div id="install-top"></div>'+adSlot("top");
     h+='<div class="seg" data-name="mode">'+[["recipe","Рецепт"],["day","Меню на день"],["week","План на "+m.week_days+" дня"]].map(function(x){var kk={day:"daymenu",week:"week"}[x[0]];
       if(kk&&kindLocked(kk))return '<button class="chip locked" data-gate="'+kk+'">'+lockIc()+x[1]+'</button>';
       return '<button class="chip" data-key="'+x[0]+'" aria-pressed="'+(F.mode===x[0])+'">'+x[1]+'</button>';}).join("")+'</div>';
@@ -490,8 +491,8 @@ select{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--lin
     saveText();
     saveForm();
     var body={cuisine:F.cuisine,macro_goal:F.cuisine==="macro_goal"?(F.macro||""):"",preferred:F.pref||"",excluded:F.exc||"",time:F.time,servings:F.servings,portion:F.portion,appliance:F.appliance,meals:F.meals};
-    if(!body.appliance.length){alert("Выбери, в чём готовить");return;}
-    if(F.mode!=="recipe"&&!body.meals.length){alert("Выбери хотя бы один приём пищи");return;}
+    if(!body.appliance.length){alert("Выберите, в чём готовить");return;}
+    if(F.mode!=="recipe"&&!body.meals.length){alert("Выберите хотя бы один приём пищи");return;}
     var path={recipe:"/api/recipe",day:"/api/daymenu",week:"/api/week"}[F.mode];
     var label={recipe:"Ищу рецепты и подбираю лучший…",day:"Собираю меню на день…",week:"Считаю корзину и план…"}[F.mode];
     runJob(call("POST",path,body),label).then(function(res){
@@ -515,7 +516,7 @@ select{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--lin
   function viewMenus(){
     return call("GET","/api/overview").then(function(o){
       if(typeof o.favorites==="number")ME.favorites=o.favorites;
-      if(!o.has_day&&!o.has_week) return favStrip()+'<h1>Готовые меню</h1><div class="card empty">Пока пусто. Собери меню на день или план на несколько дней во вкладке «Создать».</div>';
+      if(!o.has_day&&!o.has_week) return favStrip()+'<h1>Готовые меню</h1><div class="card empty">Пока пусто. Соберите меню на день или план на несколько дней во вкладке «Создать».</div>';
       var sub=ls("sub"); if(sub!=="day"&&sub!=="week") sub=o.has_week?"week":"day"; if(sub==="day"&&!o.has_day)sub="week"; if(sub==="week"&&!o.has_week)sub="day";
       var head=favStrip()+'<h1>Готовые меню</h1><div class="seg">'+(o.has_day?'<button class="chip" data-sub="day" aria-pressed="'+(sub==="day")+'">На день</button>':'')+(o.has_week?'<button class="chip" data-sub="week" aria-pressed="'+(sub==="week")+'">План на несколько дней</button>':'')+'</div>';
       return (sub==="day"?viewDay():viewWeek()).then(function(h){return head+h;});
@@ -562,12 +563,12 @@ select{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--lin
   }
   function favNote(){
     if(ME.linked) return '<div class="card" style="padding:12px 16px;margin:0 0 12px;border-left:4px solid var(--primary)">✅ Избранное сохранено в профиле — оно то же, что в Telegram-боте, и не пропадёт при смене телефона.</div>';
-    return '<div class="card" style="padding:12px 16px;margin:0 0 12px;border-left:4px solid var(--danger)"><strong>⚠ Избранное хранится только на этом устройстве.</strong><br>Оно пропадёт, если очистить данные сайта, открыть сайт в другом браузере или сменить телефон. Чтобы не потерять — <button class="chip mini" data-tab-go="profile">войди через Telegram</button></div>';
+    return '<div class="card" style="padding:12px 16px;margin:0 0 12px;border-left:4px solid var(--danger)"><strong>⚠ Избранное хранится только на этом устройстве.</strong><br>Оно пропадёт, если очистить данные сайта, открыть сайт в другом браузере или сменить телефон. Чтобы не потерять — <button class="chip mini" data-tab-go="profile">войдите через Telegram</button></div>';
   }
   function viewFavs(){
     return call("GET","/api/favorites").then(function(d){ls("favcache",JSON.stringify(d.items));return d.items;},function(){try{return JSON.parse(ls("favcache")||"[]");}catch(e){return [];}}).then(function(items){
       ME.favorites=items.length;
-      if(!items.length) return '<h1>❤️ Любимые рецепты</h1>'+favNote()+'<div class="card empty">Пока пусто. Нажми «⭐ Сохранить» под понравившимся рецептом.</div>';
+      if(!items.length) return '<h1>❤️ Любимые рецепты</h1>'+favNote()+'<div class="card empty">Пока пусто. Нажмите «⭐ Сохранить» под понравившимся рецептом.</div>';
       var h='<h1>❤️ Любимые рецепты</h1>'+favNote();
       h+=bulkButton("📄 Всё избранное — одним PDF",items.map(function(f){return {title:f.title,text:f.text};}),"Избранные рецепты")+'<div style="height:12px"></div>';
       items.forEach(function(f){h+=accordion(esc(f.title),"","",recipeHTML(f.text)+actions(f.title,f.text,true)+'<button class="btn ghost" data-del="'+esc(f.id)+'">🗑 Удалить</button>',false);});
@@ -586,7 +587,7 @@ select{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--lin
       if(!m.linked){
         return linkCode().then(function(L){
         if(m.vk_app)h+='<div class="card pcard"><h2>Войти через ВКонтакте</h2><p class="sub" style="margin:0 0 10px">Подходит, если Telegram не открывается без VPN. Избранное и профиль сохранятся в вашем аккаунте.</p><div id="vk-btn"></div></div>';
-        h+='<div class="card pcard"><h2>Войди через Telegram</h2><p class="sub" style="margin:0">Избранное и подписка станут общими с ботом и не пропадут при смене телефона. Пароль не нужен — подтверждаешь одной кнопкой в Telegram.</p>'+
+        h+='<div class="card pcard"><h2>Войдите через Telegram</h2><p class="sub" style="margin:0">Избранное и подписка станут общими с ботом и не пропадут при смене телефона. Пароль не нужен — подтверждаете одной кнопкой в Telegram.</p>'+
           '<a class="btn" data-link-go="1" href="'+esc(L.url)+'" target="_blank" rel="noopener">Войти через Telegram</a><div id="link-wait"></div></div>';
         if(m.paywall)h+='<div class="card pcard">'+esc(m.status)+'</div>';
         h+='<button class="btn ghost" data-tab-go="help">Справка</button>';
@@ -621,6 +622,7 @@ select{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--lin
         pay+='<a class="btn ghost" href="/oplata" target="_blank" rel="noopener">Условия оплаты и возврата</a>';
         var sl=m.seller||{},sr=[["Самозанятый",sl.name],["ИНН",sl.inn],["Телефон",sl.phone],["Эл. почта",sl.email]].filter(function(x){return x[1];});
         if(sr.length)pay+='<p class="sub" style="margin:12px 0 0;font-size:14px">'+sr.map(function(x){return esc(x[0])+': '+esc(x[1]);}).join("<br>")+'</p>';
+        h+=accordion("🏪 Магазины","оставьте те, где покупаете","",'<p class="sub" style="margin:10px 0 4px">В списках покупок будут только они. Хотя бы один должен остаться.</p>'+(m.stores||[]).map(function(x){return '<label class="opt"><input type="checkbox" data-store-toggle="'+esc(x.key)+'"'+(x.on?' checked':'')+'><span>'+esc(x.name)+'</span></label>';}).join(""),false);
         h+=accordion("💎 Подписка и оплата","","",'<div style="padding-top:10px">'+pay+'</div>',false);
         return (m.via==="vk"?linkCode():Promise.resolve(null)).then(function(L){
           var acc='<p class="sub" style="margin:10px 0 0">'+(m.both_linked?"Telegram и ВКонтакте уже привязаны: профиль общий, входить можно любым способом.":"Вход выполнен через "+(m.via==="vk"?"ВКонтакте":"Telegram")+".")+'</p>';
@@ -633,7 +635,7 @@ select{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--lin
     });
   }
   // код входа создаём заранее (кнопка — настоящая ссылка t.me, её не блокирует браузер), живёт 10 минут
-  // вход через VK ID: кнопка из SDK ВКонтакте, код обменивается в браузере, сервер проверяет токен у ВК
+  // вход через VK ID: обычный переход на страницу ВК, код меняется на токен на сервере
   var VKST=null,VKWAITING=null;
   function vkStart(){
     if(VKST&&Date.now()-VKST.ts<8*60*1000)return Promise.resolve(VKST);
@@ -663,7 +665,7 @@ select{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--lin
   }
   function linkWait(){
     var box=document.getElementById("link-wait"),code=LINK&&LINK.code;
-    if(box)box.innerHTML='<p class="sub" style="margin:10px 0 0">Открываю Telegram. Нажми там «Запустить» (Start) и вернись сюда — вход выполнится сам.</p>';
+    if(box)box.innerHTML='<p class="sub" style="margin:10px 0 0">Открываю Telegram. Нажмите там «Запустить» (Start) и вернитесь сюда — вход выполнится сам.</p>';
     var n=0;(function poll(){
       if((cur!=="profile"&&cur!=="settings")||!code||n++>240)return;   // ждём до 10 минут
       sleep(2500).then(function(){return call("GET","/api/link/status?code="+encodeURIComponent(code));}).then(function(s){
@@ -903,6 +905,7 @@ select{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--lin
       var item=t.closest(".item"); if(item)item.classList.toggle("done",t.checked);
       buyRecount(t.closest(".storeitems"));
     } else if(t.matches("[data-feat]")){ featToggle(t); }
+    else if(t.matches("[data-store-toggle]")){call("POST","/api/stores",{key:t.getAttribute("data-store-toggle")}).then(function(j){ME.stores=j.stores;j.stores.forEach(function(x){var c=document.querySelector('[data-store-toggle="'+x.key+'"]');if(c)c.checked=x.on;});if(!j.stores.filter(function(x){return x.on;}).length||j.stores.filter(function(x){return x.on;}).length===1)toast("Хотя бы один магазин должен остаться");}).catch(function(e){t.checked=!t.checked;alert(e.message);});}
   });
 
   // ---- справка (выпадающие разделы) и «написать разработчику» ----
@@ -939,7 +942,7 @@ select{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--lin
       call("PUT","/api/profile",body).then(function(){toast("Сохранил");return profileReload();}).catch(function(e){alert(e.message);});return;}
     if(b=t.closest("[data-weight-add]")){call("POST","/api/weight",{kg:val("pf-kg")}).then(profileReload).catch(function(e){alert(e.message);});return;}
     if(b=t.closest("[data-weight-del]")){call("DELETE","/api/weight?day="+encodeURIComponent(b.getAttribute("data-weight-del"))).then(profileReload).catch(function(e){alert(e.message);});return;}
-    if(b=t.closest("[data-del-all]")){if(confirm("Удалить список «не использовать», цели, вес, полку и согласие? Избранное и подписка останутся."))call("DELETE","/api/profile/data").then(profileReload).catch(function(e){alert(e.message);});return;}
+    if(b=t.closest("[data-del-all]")){if(confirm("Удалить исключённые продукты, цели, вес, дневник, полку и согласие? Избранное и подписка останутся."))call("DELETE","/api/profile/data").then(profileReload).catch(function(e){alert(e.message);});return;}
     if(b=t.closest(".acc-head")){var c=b.parentNode,o=c.classList.toggle("open");b.setAttribute("aria-expanded",o);return;}
     if(b=t.closest(".step")){b.classList.toggle("checked",b.querySelector("input").checked);return;}
     if(b=t.closest(".k-wake")){ if(b.checked){navigator.wakeLock.request("screen").then(function(l){wake=l;}).catch(function(){b.checked=false;});} else if(wake){wake.release();wake=null;} return;}

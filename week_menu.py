@@ -233,7 +233,7 @@ async def ensure_slot(chat_id: int, index: int) -> dict:
     just_generated = False
     if str(day_number) not in state["days"]:
         if day_number != state["current_day"]:
-            raise RuntimeError("нельзя открыть день вне очереди — сначала приготовь предыдущие")
+            raise RuntimeError("нельзя открыть день вне очереди — сначала приготовьте предыдущие")
         state = await _generate_day(chat_id, state)
         just_generated = True
 

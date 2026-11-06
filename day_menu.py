@@ -134,7 +134,7 @@ async def _generate_one_meal(meal_key: str, base_data: dict, selected_meals: lis
             "meal_key": meal_key,
             "ok": False,
             "title": _meal_label_text(meal_key),
-            "text": f"😔 Не получилось подобрать рецепт для этого приёма пищи.\nПричина: {e}",
+            "text": "😔 Не получилось подобрать рецепт для этого приёма пищи. Соберите меню заново.",
             "shopping_terms": [],
         }
 
@@ -330,7 +330,7 @@ def build_summary_view(chat_id: int) -> tuple[str, InlineKeyboardMarkup] | None:
     ok_count = sum(1 for k in order if meals[k]["ok"])
     text = (
         f"📅 Меню на день готово ({ok_count}/{len(order)})! "
-        "Выбери блюдо, чтобы увидеть полный рецепт:"
+        "Выберите блюдо, чтобы увидеть полный рецепт:"
     )
 
     b = InlineKeyboardBuilder()

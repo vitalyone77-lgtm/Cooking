@@ -83,7 +83,7 @@ class OneHeavyAtATime(BaseMiddleware):
         chat_id = event.message.chat.id
         if chat_id in self._busy:
             try:
-                await event.answer("⏳ Уже готовлю — подожди немного, пришлю результат.")
+                await event.answer("⏳ Уже готовлю — подождите немного, пришлю результат.")
             except Exception:  # noqa: BLE001 — старый callback, Telegram его уже не принимает
                 pass
             return None

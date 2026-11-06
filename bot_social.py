@@ -12,7 +12,9 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 import accounts
 import config
+import feature_posts
 import images
+import plans
 import social
 
 logger = logging.getLogger(__name__)
@@ -76,6 +78,81 @@ async def _draft(bot, chat_id: int, variant: int = 0) -> None:
                            reply_markup=None if auto else _kb())
     if auto:
         await _send_image(bot, chat_id, draft)
+
+
+# ---------- посты о функциях (/postfunc): только по нажатию владельца, по одному ----------
+
+def _func_done() -> dict:
+    return accounts.sess_get("soc:func") or {}
+
+
+def _func_kb() -> InlineKeyboardMarkup:
+    done = _func_done()
+    b = InlineKeyboardBuilder()
+    for key, title, _, _, feat in feature_posts.POSTS:
+        mark = "✅ " if key in done else ("🔒 " if feat and plans.rollout().get(feat) != "all" else "")
+        b.button(text=mark + title, callback_data=f"sf:v:{key}")
+    b.adjust(1)
+    return b.as_markup()
+
+
+def _func_text(key: str) -> str:
+    _, _, text, tags, _ = feature_posts.BY_KEY[key]
+    return f"{text}\n\n{social.links_block()}\n\n{social.hashtags(tags)}"
+
+
+@router.message(Command("postfunc"))
+async def cmd_postfunc(message: Message):
+    if not _is_admin(message.chat.id):
+        return
+    await message.answer("Посты о функциях. ✅ уже опубликован, 🔒 функция открыта не всем, такой пост лучше отложить. Выберите пост:", reply_markup=_func_kb(), parse_mode=None)
+
+
+@router.callback_query(F.data.startswith("sf:v:"))
+async def func_view(callback: CallbackQuery):
+    key = callback.data.split(":", 2)[2]
+    if not _is_admin(callback.message.chat.id) or key not in feature_posts.BY_KEY:
+        await callback.answer()
+        return
+    await callback.answer()
+    b = InlineKeyboardBuilder()
+    b.button(text="✅ Опубликовать в ВК", callback_data=f"sf:go:{key}")
+    b.button(text="⬅️ К списку", callback_data="sf:l")
+    b.adjust(1)
+    await callback.message.edit_text(_func_text(key)[:3900], reply_markup=b.as_markup(), parse_mode=None, disable_web_page_preview=True)
+
+
+@router.callback_query(F.data == "sf:l")
+async def func_list(callback: CallbackQuery):
+    if not _is_admin(callback.message.chat.id):
+        await callback.answer()
+        return
+    await callback.answer()
+    await callback.message.edit_text("Посты о функциях. ✅ уже опубликован, 🔒 функция открыта не всем, такой пост лучше отложить. Выберите пост:", reply_markup=_func_kb(), parse_mode=None)
+
+
+@router.callback_query(F.data.startswith("sf:go:"))
+async def func_go(callback: CallbackQuery):
+    key = callback.data.split(":", 2)[2]
+    if not _is_admin(callback.message.chat.id) or key not in feature_posts.BY_KEY:
+        await callback.answer()
+        return
+    if not social.configured_vk():
+        await callback.answer("ВКонтакте не настроен", show_alert=True)
+        return
+    await callback.answer()
+    await callback.message.edit_reply_markup()               # второе нажатие ничего не опубликует
+    try:
+        attachment = await social.function_photo()
+        post = await social.post_vk(_func_text(key), attachment)
+    except RuntimeError as e:
+        await callback.message.answer(f"⚠️ {e}", parse_mode=None)
+        return
+    done = _func_done()
+    done[key] = post
+    accounts.sess_set("soc:func", done)
+    accounts.sess_mark_forever("soc:func")
+    await callback.message.answer(f"✅ ВКонтакте: запись №{post} опубликована", reply_markup=_func_kb(), parse_mode=None)
 
 
 @router.message(Command("postvk"))

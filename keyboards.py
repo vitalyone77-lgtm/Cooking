@@ -36,7 +36,7 @@ def main_reply_kb() -> ReplyKeyboardMarkup:
         ]],
         resize_keyboard=True,
         is_persistent=True,
-        input_field_placeholder="Нажми «Создать» или напиши, что хочешь приготовить",
+        input_field_placeholder="Нажмите «Создать» или напишите, что хотите приготовить",
     )
 
 

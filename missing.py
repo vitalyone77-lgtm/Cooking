@@ -86,7 +86,7 @@ async def rebuild_day(chat_id: int, missing: list[str]) -> str:
     missing = clean_missing(missing)
     entry = day_menu._load_menu(chat_id)
     if not entry:
-        raise RuntimeError("Меню на день не найдено — собери его заново")
+        raise RuntimeError("Меню на день не найдено — соберите его заново")
     if entry.get("base_data"):
         entry["base_data"] = with_excluded(entry["base_data"], missing)    # и в следующий раз без них
     keys = [k for k in entry["order"] if entry["meals"].get(k, {}).get("ok")
@@ -110,7 +110,7 @@ async def adjust_plan(chat_id: int, missing: list[str]) -> str:
     missing = clean_missing(missing)
     state = week_menu._load(chat_id)
     if not state:
-        raise RuntimeError("План питания не найден — составь его заново")
+        raise RuntimeError("План питания не найден — составьте его заново")
     if not state.get("days"):
         await week_menu.start_week_plan(chat_id, state["meal_keys"], state["days_total"],
                                         with_excluded(state["base_data"], missing))

@@ -65,6 +65,7 @@ from keyboards import MEAL_LABELS, sort_meals, CUISINE_BUTTONS
 from search import search_recipes, format_results_for_prompt
 from shopping import extract_shopping_terms, extract_dish_title, amounts_from_recipe_text, item_amounts, _fmt_amount, _find_amount
 from storage import get_all_users
+from stores import prefs as store_prefs
 from stores.links import STORES, DEFAULT_STORES, search_url, short_name
 from stores.basket import build_priced_basket
 
@@ -145,7 +146,7 @@ class Params(BaseModel):
             raise HTTPException(400, "Неизвестный тип питания")
         keys = [a for a in self.appliance if a in APPLIANCES]
         if not keys:
-            raise HTTPException(400, "Выбери, в чём готовить")
+            raise HTTPException(400, "Выберите, в чём готовить")
         return {"cuisine": self.cuisine, "macro_goal": self.macro_goal.strip(), "preferred": self.preferred.strip(),
                 "excluded": self.excluded.strip(), "time": self.time, "servings": self.servings, "portion": self.portion,
                 "appliance": keys, "appliance_labels": [APPLIANCES[k] for k in keys]}
@@ -153,7 +154,7 @@ class Params(BaseModel):
     def meal_keys(self) -> list[str]:
         keys = sort_meals(self.meals)
         if not keys:
-            raise HTTPException(400, "Выбери хотя бы один приём пищи")
+            raise HTTPException(400, "Выберите хотя бы один приём пищи")
         return keys
 
 
@@ -174,7 +175,7 @@ def _spend(dev_id: int, kind: str) -> dict:
     """Списать подбор с аккаунта (usage.try_spend: тариф, дневные потолки, лимит на IP). Отказ — 429 с понятным текстом."""
     # повторный запрос, пока первый ещё готовится, отклоняем ДО списания — иначе дубль съест попытку
     if any(j["dev"] == dev_id and j["status"] == "running" for j in JOBS.values()):
-        raise HTTPException(429, "Предыдущий запрос ещё выполняется — подожди минутку.")
+        raise HTTPException(429, "Предыдущий запрос ещё выполняется — подождите минутку.")
     uid = _uid(dev_id)
     spent, why = usage.try_spend(uid, kind, "web", ip=_ip_var.get())
     if not spent:
@@ -197,7 +198,7 @@ def _start_job(dev_id: int, coro_fn, spend: dict | None = None) -> dict:
     for k in [k for k, v in JOBS.items() if time.time() - v["ts"] > 3600]:
         JOBS.pop(k, None)
     if any(j["dev"] == dev_id and j["status"] == "running" for j in JOBS.values()):
-        raise HTTPException(429, "Предыдущий запрос ещё выполняется — подожди минутку.")
+        raise HTTPException(429, "Предыдущий запрос ещё выполняется — подождите минутку.")
     job_id = uuid.uuid4().hex
     JOBS[job_id] = {"dev": dev_id, "status": "running", "ts": time.time()}
 
@@ -256,7 +257,7 @@ async def _ip_and_rate(request: Request, call_next):
         while q and now - q[0] > 60:
             q.popleft()
         if len(q) >= API_RATE_PER_MIN:
-            return JSONResponse({"detail": "Слишком много запросов — подожди минутку."}, status_code=429)
+            return JSONResponse({"detail": "Слишком много запросов — подождите минутку."}, status_code=429)
         q.append(now)
         if len(_rate) > 5000:
             for key in [k for k, v in _rate.items() if not v or now - v[-1] > 60]:
@@ -334,7 +335,7 @@ async def api_recipe(p: Params, x_device: str | None = Header(default=None)):
             query, results = await search_recipes(data)
             text = await generate_recipe(data, query, format_results_for_prompt(results))
             if text.startswith("😔"):
-                raise RuntimeError("ИИ сейчас недоступен, попробуй позже")
+                raise RuntimeError("ИИ сейчас недоступен, попробуйте позже")
             text, terms = extract_shopping_terms(text)
             if not text.strip():
                 raise RuntimeError("Не получилось составить рецепт под эти параметры")
@@ -424,7 +425,7 @@ async def api_week_cart(x_device: str | None = Header(default=None)):
     if not plans.has_feature(_uid(dev_id), "cart"):
         raise HTTPException(402, "Корзина с ценами — в подписке 💎")
     if web_db.count_today(dev_id, "cart") >= 30:
-        raise HTTPException(429, "Слишком много запросов корзины — попробуй завтра.")
+        raise HTTPException(429, "Слишком много запросов корзины — попробуйте завтра.")
     web_db.log_event(dev_id, "cart")
     priced = await build_priced_basket(info["inventory_initial"])
     if not priced:
@@ -563,7 +564,7 @@ def me(x_device: str | None = Header(default=None)):
     feat = {f: plans.has_feature(uid, f) for f in ("memory", "pdf", "cart", "noads")}
     out = {"linked": bool(tg), "plan": plans.plan_of(uid), "status": plans.status_text(uid), "left": left,
            "paywall": plans.paywall(), "memory": memory, "shelf_on": shelf_on, "bot": config.BOT_USERNAME, "feat": feat, "via": ("vk" if tg and tg >= accounts.VK_OFFSET else "tg" if tg else ""),
-           "both_linked": bool(tg) and accounts.has_vk_merged(tg), "diary_on": plans.diary_on(uid), "seller": payinfo.seller(), "photo_on": plans.feature_on(uid, "photo_recipe"),
+           "stores": _stores_json(uid), "both_linked": bool(tg) and accounts.has_vk_merged(tg), "diary_on": plans.diary_on(uid), "seller": payinfo.seller(), "photo_on": plans.feature_on(uid, "photo_recipe"),
            "vk_app": (config.VK_CLIENT_ID if config.VK_LOGIN else ""),
            "pay_rub": bool(tg) and payanyway.allowed_for(uid),
            "pay_offers": ([{"key": o["key"], "title": o["title"], "rub": o["rub"], "days": o["days"]} for o in plans.pay_offers_for(uid)]
@@ -590,7 +591,7 @@ def link_start(x_device: str | None = Header(default=None)):
     dev_id = _dev(x_device)
     hist = [t for t in _link_log.get(dev_id, []) if time.time() - t < 3600]
     if len(hist) >= 10:
-        raise HTTPException(429, "Слишком много попыток входа — попробуй через час.")
+        raise HTTPException(429, "Слишком много попыток входа — попробуйте через час.")
     _link_log[dev_id] = hist + [time.time()]
     _prune(_link_log, 3600)
     code = accounts.new_link_code(dev_id)
@@ -613,8 +614,27 @@ def link_claim(body: CodeIn, x_device: str | None = Header(default=None)):
     if tg:
         usage.event("site_link", tg)
     if not tg:
-        raise HTTPException(400, "Ссылка для входа устарела или уже использована — возьми новую в боте (Профиль → Открыть сайт).")
+        raise HTTPException(400, "Ссылка для входа устарела или уже использована — возьмите новую в боте (Настройки → Без VPN).")
     return {"ok": True}
+
+
+def _stores_json(uid) -> list[dict]:
+    on = store_prefs.get_enabled(uid)
+    return [{"key": k, "name": short_name(k), "on": k in on} for k in DEFAULT_STORES]
+
+
+class StoreIn(BaseModel):
+    key: str = Field(min_length=1, max_length=20)
+
+
+@app.post("/api/stores")
+def stores_toggle(body: StoreIn, x_device: str | None = Header(default=None)):
+    """Какие магазины показывать в списках покупок. Хотя бы один всегда остаётся."""
+    uid = _need_account(_dev(x_device))
+    if body.key not in DEFAULT_STORES:
+        raise HTTPException(400, "Такого магазина нет")
+    store_prefs.toggle(uid, body.key)
+    return {"stores": _stores_json(uid)}
 
 
 class VkIn(BaseModel):
@@ -632,7 +652,7 @@ def _vk_link(dev_id: int, access_token: str) -> None:
     """Сервер спрашивает у ВК, чей это токен, и привязывает устройство. Номер из браузера не принимаем: верим только ответу ВК."""
     hist = [t for t in _link_log.get(dev_id, []) if time.time() - t < 3600]
     if len(hist) >= 10:
-        raise HTTPException(429, "Слишком много попыток входа — попробуй через час.")
+        raise HTTPException(429, "Слишком много попыток входа — попробуйте через час.")
     _link_log[dev_id] = hist + [time.time()]
     _prune(_link_log, 3600)
     try:
@@ -640,11 +660,11 @@ def _vk_link(dev_id: int, access_token: str) -> None:
                           data={"client_id": config.VK_CLIENT_ID, "access_token": access_token}, timeout=10)
         data = resp.json()
     except (httpx.HTTPError, ValueError):
-        raise HTTPException(502, "ВКонтакте не ответил — попробуй ещё раз")
+        raise HTTPException(502, "ВКонтакте не ответил — попробуйте ещё раз")
     user = data.get("user") if isinstance(data, dict) else None
     vk_id = str((user or {}).get("user_id") or "")
     if not vk_id.isdigit() or not 0 < int(vk_id) < 10**11:
-        raise HTTPException(400, "ВКонтакте не подтвердил вход — попробуй ещё раз")
+        raise HTTPException(400, "ВКонтакте не подтвердил вход — попробуйте ещё раз")
     try:
         accounts.link_device_vk(dev_id, int(vk_id))
     except ValueError as e:
@@ -668,7 +688,7 @@ def vk_start(x_device: str | None = Header(default=None)):
         raise HTTPException(404, "Вход через ВКонтакте выключен")
     dev_id = _dev(x_device)
     if not _stat_ok(f"vk{dev_id}"):
-        raise HTTPException(429, "Слишком много попыток входа — попробуй через час.")
+        raise HTTPException(429, "Слишком много попыток входа — попробуйте через час.")
     state, verifier = secrets.token_urlsafe(32), secrets.token_urlsafe(48)
     challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).rstrip(b"=").decode()
     accounts.sess_set(f"vkst:{state}", {"dev": dev_id, "v": verifier, "ts": time.time()})
@@ -701,10 +721,10 @@ def _vk_finish(state: str, p: dict, code: str, device_id: str) -> None:
             "device_id": device_id, "redirect_uri": _vk_redirect(), "state": state}, timeout=10)
         data = resp.json()
     except (httpx.HTTPError, ValueError):
-        raise HTTPException(502, "ВКонтакте не ответил — попробуй ещё раз")
+        raise HTTPException(502, "ВКонтакте не ответил — попробуйте ещё раз")
     token = data.get("access_token") if isinstance(data, dict) else None
     if not token or data.get("state") not in (None, state):
-        raise HTTPException(400, "ВКонтакте не подтвердил вход — попробуй ещё раз")
+        raise HTTPException(400, "ВКонтакте не подтвердил вход — попробуйте ещё раз")
     _vk_link(p["dev"], str(token))
     accounts.sess_set(f"vkst:{state}", {"dev": p["dev"], "done": True, "linked": True, "ts": p["ts"]})
 
@@ -813,7 +833,7 @@ def unlink(x_device: str | None = Header(default=None)):
 def _need_memory(dev_id: int) -> str:
     uid = _uid(dev_id)
     if plans.is_anon(uid):
-        raise HTTPException(403, "Сначала войди через Telegram")
+        raise HTTPException(403, "Сначала войдите в профиль")
     if not plans.has_feature(uid, "memory"):
         raise HTTPException(402, "Эта функция — в тарифе «Повар» 💎")
     return uid
@@ -837,7 +857,7 @@ class WeightIn(BaseModel):
 def _need_account(dev_id: int) -> str:
     uid = _uid(dev_id)
     if plans.is_anon(uid):
-        raise HTTPException(403, "Сначала войди через Telegram")
+        raise HTTPException(403, "Сначала войдите в профиль")
     return uid
 
 
@@ -1265,7 +1285,7 @@ def api_pdf(body: PdfIn, x_device: str | None = Header(default=None)):
     if not plans.has_feature(_uid(dev_id), "pdf"):
         raise HTTPException(402, "PDF — в подписке 💎")
     if web_db.count_today(dev_id, "pdf") >= 200:
-        raise HTTPException(429, "Слишком много PDF за сутки — попробуй завтра")
+        raise HTTPException(429, "Слишком много PDF за сутки — попробуйте завтра")
     if sum(len(i.text) for i in body.items) > 600_000:
         raise HTTPException(413, "Слишком большой документ")
     try:
@@ -1343,7 +1363,7 @@ async def admin_login(request: Request, response: Response):
     ip = _client_ip(request)
     fails = [t for t in _login_fail.get(ip, []) if time.time() - t < 600]
     if len(fails) >= 5:
-        raise HTTPException(429, "Слишком много попыток, подожди 10 минут")
+        raise HTTPException(429, "Слишком много попыток, подождите 10 минут")
     try:
         body = await request.json()
     except ValueError:
@@ -1468,7 +1488,7 @@ async def admin_settings(request: Request):
                     rows.append(f"{code}={int(days)}")
             new["PROMO_CODES"] = ",".join(rows)
     except (TypeError, ValueError, AttributeError):
-        raise HTTPException(400, "Проверь значения — где-то не число")
+        raise HTTPException(400, "Проверьте значения — где-то не число")
     before = {k: plans.cfg(k) for k in new}
     diff = {k: v for k, v in new.items() if v != before[k]}
     if diff:
@@ -1679,7 +1699,7 @@ async def api_cart(body: CartIn, x_device: str | None = Header(default=None)):
     if not plans.has_feature(_uid(dev_id), "cart"):
         raise HTTPException(402, "Корзина с ценами — в подписке 💎")
     if web_db.count_today(dev_id, "cart") >= 30:
-        raise HTTPException(429, "Слишком много запросов корзины — попробуй завтра.")
+        raise HTTPException(429, "Слишком много запросов корзины — попробуйте завтра.")
     web_db.log_event(dev_id, "cart")
     amounts: dict[str, int] = {}
     for it in body.items:
@@ -1717,7 +1737,7 @@ async def api_missing(body: MissingIn, x_device: str | None = Header(default=Non
     cid = _cid(dev_id)
     names = missing_mod.clean_missing([i[:80] for i in body.items])
     if not names:
-        raise HTTPException(400, "Укажи, каких продуктов нет")
+        raise HTTPException(400, "Укажите, каких продуктов нет")
     if body.ctx == "recipe" and not body.text.strip():
         raise HTTPException(400, "Нет текста рецепта")
     if body.ctx == "day" and not day_menu.has_menu(cid):

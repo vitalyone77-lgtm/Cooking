@@ -147,12 +147,10 @@ async def generate_recipe(data: dict, search_query: str, search_results_text: st
         text = await call_llm_with_fallback(messages)
         bad = profile_ctx.hits(text)
         if bad:   # и после повторной попытки — предупреждаем, а не молчим
-            text = "⚠️ Проверь состав: возможно, есть " + ", ".join(bad) + " — ты просил это исключить.\n\n" + text
+            text = "⚠️ Проверьте состав: возможно, здесь есть " + ", ".join(bad) + ", а вы просили это исключить.\n\n" + text
         return text
     except RuntimeError as e:
         logger.error(f"Все LLM-провайдеры не сработали: {e}")
         return (
-            "😔 Не получилось получить рецепт от ИИ (проблема с API-ключами или сервисами).\n"
-            f"Технические причины: {e}\n\n"
-            "Проверь ключи в файле .env и попробуй ещё раз."
+            "😔 Сейчас не получается составить рецепт: сервис ИИ не отвечает. Попробуйте ещё раз через несколько минут."
         )

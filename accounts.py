@@ -739,6 +739,8 @@ def delete_my_data(uid) -> dict:
            "diary": _q("DELETE FROM diary WHERE uid=?", (uid,)), "energy": _q("DELETE FROM energy WHERE uid=?", (uid,)),
            "book_seen": _q("DELETE FROM book_seen WHERE uid=?", (uid,)), "shop_lists": _q("DELETE FROM shop_lists WHERE uid=?", (uid,)),
            "macro_ref": _q("DELETE FROM macro_ref WHERE uid=?", (uid,))}
+    from stores import prefs
+    prefs.forget(uid)
     return out
 
 
@@ -889,7 +891,7 @@ def parse_goal(text: str) -> dict:
         nums = [int(x) for x in re.findall(r"\d+", t)][:4]
         out = dict(zip(("kcal", "protein", "fat", "carb"), nums))
     if not out:
-        raise ValueError("Не нашёл чисел. Напиши, например: 2000 ккал, белки 120, жиры 70, углеводы 200")
+        raise ValueError("Не нашёл чисел. Напишите, например: 2000 ккал, белки 120, жиры 70, углеводы 200")
     return out
 
 

@@ -217,6 +217,15 @@ async def build_image(title: str, text: str) -> bytes | None:
     return await images.make_dish_image(title, text)
 
 
+async def function_photo() -> str | None:
+    """Картинка «Возможности помощника» из альбома сообщества для постов о функциях."""
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            return section_photo("funkcii", await group_numeric_id(client))
+    except (httpx.HTTPError, ValueError) as e:
+        raise RuntimeError(f"ВКонтакте не ответил ({type(e).__name__})") from None
+
+
 async def post_vk(text: str, attachment: str | None = None) -> int:
     """Запись на стену сообщества от имени сообщества. -> номер записи. RuntimeError — без ключа в тексте.
     Если ВК не принял вложение-ссылку (код 100, link_photo_sizing_rule), запись всё равно выходит: без вложения, со ссылкой в тексте."""

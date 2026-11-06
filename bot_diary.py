@@ -66,7 +66,7 @@ def diary_view(uid: int, note: str = "") -> tuple[str, InlineKeyboardMarkup]:
     lines += ["", SHORT_NOTE]
     b = InlineKeyboardBuilder()
     b.row(InlineKeyboardButton(text="➕ Из списка", callback_data="dy:cat"), InlineKeyboardButton(text="🔎 Найти", callback_data="dy:find"))
-    b.row(InlineKeyboardButton(text="🍽 Съел рецепт", callback_data="dy:eat"),
+    b.row(InlineKeyboardButton(text="🍽 Записать рецепт", callback_data="dy:eat"),
           *([] if en else [InlineKeyboardButton(text="🧮 Расход", callback_data="dy:calc")]))
     b.row(InlineKeyboardButton(text="⬅️ Профиль", callback_data="pf:main"))
     dels = [InlineKeyboardButton(text=f"❌ {i}", callback_data=f"dy:del:{it['id']}") for i, it in enumerate(day["items"][:12], 1)]

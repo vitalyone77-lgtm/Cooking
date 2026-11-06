@@ -53,24 +53,24 @@ async def voice_middleware(handler, event: Message, data: dict):
     if not plans.feature_on(uid, "voice"):
         return await handler(event, data)
     if event.voice.duration and event.voice.duration > 90:
-        await event.answer("🎙 Голосовое длинновато — уложись в минуту 🙂")
+        await event.answer("🎙 Голосовое слишком длинное: уложитесь в минуту.")
         return None
     if usage.events_today("voice", uid) >= config.VOICE_DAILY:
-        await event.answer("🎙 На сегодня голосовых хватит 🙂 Можно написать текстом.")
+        await event.answer("🎙 Лимит голосовых на сегодня исчерпан. Можно написать текстом.")
         return None
     try:
         audio = await event.bot.download(event.voice.file_id)
         text = await vision.transcribe(audio.read())
     except vision.VisionError:
-        await event.answer("🎙 Не получилось распознать голос — попробуй ещё раз или напиши текстом.")
+        await event.answer("🎙 Не получилось распознать голос — попробуйте ещё раз или напишите текстом.")
         return None
     except Exception:  # noqa: BLE001 — скачивание из Telegram
         logger.exception("голосовое")
-        await event.answer("🎙 Не получилось распознать голос — попробуй ещё раз или напиши текстом.")
+        await event.answer("🎙 Не получилось распознать голос — попробуйте ещё раз или напишите текстом.")
         return None
     usage.event("voice", uid)
     if not text:
-        await event.answer("🎙 Ничего не расслышал — попробуй ещё раз.")
+        await event.answer("🎙 Ничего не расслышал — попробуйте ещё раз.")
         return None
     await event.answer(f"🎙 Распознал: «{text[:300]}»", parse_mode=None)
     state: FSMContext | None = data.get("state")
@@ -106,9 +106,9 @@ def _pick_kb(key: tuple[int, int]) -> InlineKeyboardMarkup:
 
 
 def _pick_text(p: dict) -> str:
-    head = {"shelf": "📷 Вот что я вижу на фото. Сними галочки с лишнего — остальное добавлю на полку.",
-            "form": "📷 Вот что я вижу на фото. Сними галочки с лишнего — из остального подберу рецепт.",
-            "new": "📷 Вот что я вижу на фото. Сними галочки с лишнего — из остального подберу рецепт."}[p["mode"]]
+    head = {"shelf": "📷 Вот что я вижу на фото. Снимите галочки с лишнего: остальное добавлю на полку.",
+            "form": "📷 Вот что я вижу на фото. Снимите галочки с лишнего: из остального подберу рецепт.",
+            "new": "📷 Вот что я вижу на фото. Снимите галочки с лишнего: из остального подберу рецепт."}[p["mode"]]
     return head + "\nЧего-то не хватает — «✏️ Дописать»."
 
 
@@ -156,11 +156,11 @@ async def _recognize(message: Message, state: FSMContext, mode: str) -> None:
         usage.unlog(spent)
         if not isinstance(e, vision.VisionError):
             logger.exception("фото")
-        await status.edit_text("😔 Не получилось разобрать фото. Попробуй ещё раз — поближе и при хорошем свете.")
+        await status.edit_text("😔 Не получилось разобрать фото. Попробуйте ещё раз — поближе и при хорошем свете.")
         return
     if not items:
         usage.unlog(spent)
-        await status.edit_text("🤔 Не вижу на фото продуктов. Попробуй сфотографировать поближе.")
+        await status.edit_text("🤔 Не вижу на фото продуктов. Попробуйте сфотографировать поближе.")
         return
     usage.event("photo_" + ("shelf" if mode == "shelf" else "recipe"), uid)
     _prune()
@@ -172,7 +172,7 @@ async def _recognize(message: Message, state: FSMContext, mode: str) -> None:
 @router.message(ProfileForm.shelf_add, IS_IMAGE)
 async def shelf_photo(message: Message, state: FSMContext):
     if not plans.feature_on(message.chat.id, "photo_shelf"):
-        await message.answer("Пока можно добавить только текстом: напиши продукты через запятую.")
+        await message.answer("Пока можно добавить только текстом: напишите продукты через запятую.")
         return
     await state.clear()
     await _recognize(message, state, "shelf")
@@ -181,7 +181,7 @@ async def shelf_photo(message: Message, state: FSMContext):
 @router.message(RecipeForm.preferred, IS_IMAGE)
 async def form_photo(message: Message, state: FSMContext):
     if not plans.feature_on(message.chat.id, "photo_recipe"):
-        await message.answer("Напиши продукты текстом — например: курица, рис, брокколи.")
+        await message.answer("Напишите продукты текстом — например: курица, рис, брокколи.")
         return
     await _recognize(message, state, "form")
 
@@ -203,8 +203,8 @@ async def fridge_start(callback: CallbackQuery, state: FSMContext):
     await state.clear()
     await callback.answer()
     await callback.message.answer(
-        "📷 Рецепт по фото продуктов\n\nВыложи продукты на стол или открой холодильник так, чтобы все они попали в кадр, "
-        "и пришли фото (можно несколько сразу). Я найду продукты, ты отметишь нужные, и я подберу рецепт.",
+        "📷 Рецепт по фото продуктов\n\nВыложи продукты на стол или откройте холодильник так, чтобы все они попали в кадр, "
+        "и пришлите фото (можно несколько сразу). Я найду продукты, вы отметите нужные, и я подберу рецепт.",
         parse_mode=None)
 
 
@@ -218,7 +218,7 @@ def _pick_of(callback: CallbackQuery) -> tuple[tuple[int, int], dict] | None:
 async def pick_toggle(callback: CallbackQuery):
     got = _pick_of(callback)
     if not got:
-        await callback.answer("Фото устарело — пришли его ещё раз", show_alert=True)
+        await callback.answer("Фото устарело, пришлите его ещё раз", show_alert=True)
         return
     key, p = got
     try:
@@ -244,7 +244,7 @@ async def pick_cancel(callback: CallbackQuery, state: FSMContext):
 async def pick_add(callback: CallbackQuery, state: FSMContext):
     got = _pick_of(callback)
     if not got:
-        await callback.answer("Фото устарело — пришли его ещё раз", show_alert=True)
+        await callback.answer("Фото устарело, пришлите его ещё раз", show_alert=True)
         return
     key, p = got
     keep = {"vp_key": list(key)}
@@ -253,7 +253,7 @@ async def pick_add(callback: CallbackQuery, state: FSMContext):
     await state.set_state(VisionForm.extra)
     await state.update_data(**keep)
     await callback.answer()
-    await callback.message.answer("✏️ Напиши, что добавить, через запятую — например: «сметана, укроп».")
+    await callback.message.answer("✏️ Напишите, что добавить, через запятую — например: «сметана, укроп».")
 
 
 @router.message(VisionForm.extra, F.text)
@@ -263,7 +263,7 @@ async def pick_add_text(message: Message, state: FSMContext):
     p = _picks.get(key)
     if p is None:
         await state.clear()
-        await message.answer("Фото устарело — пришли его ещё раз.")
+        await message.answer("Фото устарело, пришлите его ещё раз.")
         return
     for name in vision._clean([x for x in message.text.split(",")]):
         if name not in p["items"] and len(p["items"]) < 40:
@@ -289,12 +289,12 @@ async def pick_go(callback: CallbackQuery, state: FSMContext):
     key = (callback.message.chat.id, callback.message.message_id)
     p = _picks.pop(key, None)
     if not p:
-        await callback.answer("Фото устарело — пришли его ещё раз", show_alert=True)
+        await callback.answer("Фото устарело, пришлите его ещё раз", show_alert=True)
         return
     chosen = [n for i, n in enumerate(p["items"]) if i in p["on"]]
     if not chosen:
         _picks[key] = p
-        await callback.answer("Отметь хотя бы один продукт", show_alert=True)
+        await callback.answer("Отметьте хотя бы один продукт", show_alert=True)
         return
     await callback.answer()
     await callback.message.edit_reply_markup()

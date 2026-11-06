@@ -38,7 +38,15 @@ def get_enabled(chat_id: int | None) -> list[str]:
     return [s for s in STORES if s in saved] or list(DEFAULT_STORES)
 
 
-def toggle(chat_id: int, store: str) -> list[str]:
+def forget(chat_id) -> None:
+    """Удалить выбор человека («Удалить мои данные»)."""
+    with _lock:
+        data = _read()
+        if data.pop(str(chat_id), None) is not None:
+            write_json_atomic(PREFS_FILE, data)
+
+
+def toggle(chat_id, store: str) -> list[str]:
     """Включает/выключает магазин; хотя бы один всегда остаётся включённым."""
     if store not in STORES:
         return get_enabled(chat_id)

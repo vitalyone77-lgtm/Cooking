@@ -192,7 +192,7 @@ async def cook_start(callback: CallbackQuery):
 async def _load(callback: CallbackQuery) -> dict | None:
     s = accounts.sess_get(_key(callback.message.chat.id, callback.message.message_id))
     if not s:
-        await callback.answer("Этот режим готовки устарел — нажми «Готовить по шагам» под рецептом ещё раз.",
+        await callback.answer("Этот режим готовки устарел — нажмите «Готовить по шагам» под рецептом ещё раз.",
                               show_alert=True)
     return s
 

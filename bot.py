@@ -42,6 +42,7 @@ from reminders import setup_scheduler
 from favorites import add_favorite, get_favorites, get_favorite, remove_favorite, search_favorites
 from last_recipe import set_last_recipe, get_last_recipe
 from stores import prefs as store_prefs
+from stores import prefs as store_prefs
 from stores.links import DEFAULT_STORES
 from stores.basket import build_priced_basket
 from tg_safety import SafeSendMiddleware, OneHeavyAtATime, FloodGuard, ChatSequential
@@ -98,7 +99,7 @@ async def on_error(event: ErrorEvent):
         elif upd.message:
             chat_id = upd.message.chat.id
         if chat_id:
-            await bot.send_message(chat_id, "😔 Что-то пошло не так. Попробуй ещё раз или нажми /start.",
+            await bot.send_message(chat_id, "😔 Что-то пошло не так. Попробуйте ещё раз или нажмите /start.",
                                    parse_mode=None)
     except Exception:  # noqa: BLE001 — сообщить не удалось (например, бот заблокирован), лог уже есть
         pass
@@ -131,7 +132,7 @@ async def answer_long(message: Message, text: str, reply_markup=None, **kwargs):
             await message.answer(part, reply_markup=markup, parse_mode=None, **kwargs)
 
 
-# ---------- Кнопка «🛒 Найти продукты в магазине» ----------
+# ---------- Кнопка «🛒 Продукты и магазины» ----------
 # Список ссылок не показываем сразу (он длинный): под рецептом/меню/планом стоит кнопка → выбор магазина →
 # короткий список ссылок только на этот магазин. Продукты берутся не из памяти, а из данных, которые
 # переживают перезапуск: для рецепта — из текста сообщения, на которое ответили (с запасом в памяти — точные названия
@@ -182,12 +183,12 @@ async def edit_text_safe(message: Message, text: str, reply_markup=None, **kwarg
 async def shop_open(callback: CallbackQuery):
     ctx = callback.data.split(":", 2)[2]
     if not resolve_shopping_terms(callback.message, ctx):
-        await callback.answer("Не нашёл список продуктов — открой рецепт заново.", show_alert=True)
+        await callback.answer("Не нашёл список продуктов — откройте рецепт заново.", show_alert=True)
         return
     # Ответом на сообщение с рецептом: так по нему же восстановим продукты на следующем шаге
     await callback.message.reply(
         "🛒 В каком магазине искать продукты?",
-        reply_markup=kb.store_pick_kb(ctx, DEFAULT_STORES),
+        reply_markup=kb.store_pick_kb(ctx, store_prefs.get_enabled(callback.message.chat.id)),
     )
     await callback.answer()
 
@@ -198,14 +199,14 @@ async def shop_store(callback: CallbackQuery):
     chat_id = callback.message.chat.id
     terms = resolve_shopping_terms(callback.message, ctx)
     if not terms:
-        await callback.answer("Не нашёл список продуктов — открой рецепт заново.", show_alert=True)
+        await callback.answer("Не нашёл список продуктов — откройте рецепт заново.", show_alert=True)
         return
     if store not in DEFAULT_STORES:
         await callback.answer("Неизвестный магазин", show_alert=True)
         return
     text = format_store_links(terms, store, resolve_shopping_amounts(callback.message, ctx))
     await edit_text_safe(
-        callback.message, text, reply_markup=kb.store_pick_kb(ctx, DEFAULT_STORES, current=store),
+        callback.message, text, reply_markup=kb.store_pick_kb(ctx, store_prefs.get_enabled(chat_id), current=store),
         disable_web_page_preview=True,
     )
     await callback.answer()
@@ -247,7 +248,7 @@ async def shop_cart(callback: CallbackQuery):
         await wait.delete()
         await answer_long(callback.message, priced, disable_web_page_preview=True)
     else:
-        await wait.edit_text("ℹ️ ВкусВилл сейчас не ответил или ничего не нашёл — открой список ссылок и ищи продукты вручную.")
+        await wait.edit_text("ℹ️ ВкусВилл сейчас не ответил или ничего не нашёл — откройте список ссылок и ищи продукты вручную.")
 
 
 async def ensure_reply_kb(message: Message) -> None:
@@ -255,8 +256,7 @@ async def ensure_reply_kb(message: Message) -> None:
     key = f"kbv:{message.chat.id}"
     if (accounts.sess_get(key) or {}).get("v") == kb.KB_VERSION:
         return
-    await message.answer("⌨️ Внизу — кнопки «🍳 Создать», «🗂 Готовые меню» и «👤 Профиль». Свернуть и открыть их "
-                         "снова можно значком ⊞ справа от смайлика.", reply_markup=kb.main_reply_kb(), parse_mode=None)
+    await message.answer("⌨️ Внизу кнопки «🍳 Создать», «🗂 Готовые меню» и «👤 Профиль».", reply_markup=kb.main_reply_kb(), parse_mode=None)
     _kb_sent(message.chat.id)
 
 
@@ -303,11 +303,11 @@ def _input_hints(chat_id: int) -> str:
     if plans.feature_on(chat_id, "photo_recipe"):
         hints.append("📷 пришли фото холодильника — подберу рецепт из того, что видно")
     if plans.feature_on(chat_id, "voice"):
-        hints.append("🎙 или скажи голосом, что хочется")
+        hints.append("🎙 или скажите голосом, что хочется")
     return ("\n\n" + "\n".join(hints)) if hints else ""
 
 
-async def show_main_menu(message: Message, state: FSMContext, intro: str = "Что готовим? Выбери тип питания/кухни:", event=None):
+async def show_main_menu(message: Message, state: FSMContext, intro: str = "Что готовим? Выберите тип питания:", event=None):
     """event — нажатая кнопка: если она под экраном бота, экран правится на месте, под рецептом приходит новое сообщение."""
     await state.clear()
     await ensure_reply_kb(message)
@@ -325,7 +325,7 @@ async def show_main_menu(message: Message, state: FSMContext, intro: str = "Чт
 async def last_open(callback: CallbackQuery, state: FSMContext):
     last = get_last_recipe(callback.message.chat.id)
     if not last:
-        await callback.answer("Последний рецепт не найден — подбери новый.", show_alert=True)
+        await callback.answer("Последний рецепт не найден — подберите новый.", show_alert=True)
         return
     await state.clear()
     await callback.answer()
@@ -361,7 +361,7 @@ async def cmd_start(message: Message, state: FSMContext, command: CommandObject)
         reply_markup=kb.main_reply_kb(),
     )
     _kb_sent(message.chat.id)
-    await show_main_menu(message, state, "Для начала выбери тип питания/кухни:")
+    await show_main_menu(message, state, "Для начала выберите тип питания:")
 
 
 @dp.message(Command("menu"))
@@ -386,8 +386,8 @@ async def cmd_remind(message: Message):
     enabled = not reminders_enabled(message.chat.id)
     set_reminders_enabled(message.chat.id, enabled)
     if enabled:
-        await message.answer("🔔 Напоминания включены: если ты не заходишь несколько дней, пришлю идею блюда "
-                             "по твоим прошлым параметрам — не больше двух раз подряд.\n"
+        await message.answer("🔔 Напоминания включены: если вы не заходите несколько дней, пришлю идею блюда "
+                             "по вашим прошлым параметрам, не больше двух раз подряд.\n"
                              "Выключить — снова /remind", parse_mode=None)
     else:
         await message.answer("🔕 Напоминания выключены. Включить снова — /remind", parse_mode=None)
@@ -400,13 +400,13 @@ async def cmd_app(message: Message):
         return
     await message.answer(
         "🌐 Веб-версия работает отдельно от Telegram, регистрация не нужна:\n"
-        f"{config.WEB_APP_URL}\n\nОткрой на телефоне и добавь на главный экран."
+        f"{config.WEB_APP_URL}\n\nОткройте на телефоне и добавьте на главный экран."
     )
 
 
 @dp.callback_query(F.data == "confirm:restart")
 async def restart(callback: CallbackQuery, state: FSMContext):
-    await show_main_menu(callback.message, state, "Хорошо, начнём заново! Выбери тип питания/кухни:", event=callback)
+    await show_main_menu(callback.message, state, "Начнём заново. Выберите тип питания:", event=callback)
     await callback.answer()
 
 
@@ -494,9 +494,9 @@ async def step_cuisine(callback: CallbackQuery, state: FSMContext):
 
     if cuisine == MACRO_GOAL_KEY:
         await callback.message.answer(
-            "Укажи цель по КБЖУ на этот приём пищи, например:\n"
+            "Укажите цель по КБЖУ на этот приём пищи, например:\n"
             "«500 ккал, белки 40 г» или «около 600 ккал, много белка, поменьше углеводов».\n"
-            "Если без разницы — нажми «Пропустить», подберу сбалансированный вариант.",
+            "Если без разницы — нажмите «Пропустить», подберу сбалансированный вариант.",
             reply_markup=_skip("macro_goal", callback.message.chat.id),
         )
         await state.set_state(RecipeForm.macro_goal)
@@ -533,10 +533,8 @@ async def ask_preferred(message: Message, state: FSMContext):
     if plans.feature_on(message.chat.id, "voice"):
         extra += "\n🎙 Можно ответить голосом."
     await message.answer(
-        "Отлично! Теперь напиши, какие продукты ты хочешь использовать "
-        "(например: курица, рис, брокколи) — или сразу название блюда, "
-        "которое хочешь приготовить (например: «хочу плов» или «хочу борщ»).\n"
-        "Если без разницы — нажми «Пропустить»." + extra,
+        "Какие продукты хотите использовать (например: курица, рис, брокколи)? Можно сразу написать блюдо: «хочу плов» или «хочу борщ».\n"
+        "Если без разницы — нажмите «Пропустить»." + extra,
         reply_markup=_skip("preferred", message.chat.id),
     )
     await state.set_state(RecipeForm.preferred)
@@ -548,7 +546,7 @@ async def start_recipe_with(message: Message, state: FSMContext, preferred: str)
     await state.update_data(preferred=preferred, preset_preferred=True)
     await state.set_state(RecipeForm.cuisine)
     last = get_last_recipe(message.chat.id)
-    await message.answer(f"🧺 Продукты: {preferred}\n\nВыбери тип питания:" + _left_line(message.chat.id, "recipe"),
+    await message.answer(f"🧺 Продукты: {preferred}\n\nВыберите тип питания:" + _left_line(message.chat.id, "recipe"),
                          reply_markup=kb.cuisine_kb(last_title=(last or {}).get("title") or ("Рецепт" if last else None)),
                          parse_mode=None)
 
@@ -577,9 +575,9 @@ async def step_preferred_skip(callback: CallbackQuery, state: FSMContext):
 
 async def ask_excluded(message: Message, state: FSMContext):
     await message.answer(
-        "Какие продукты нужно исключить? (аллергии, нелюбимые продукты)\n"
+        "Какие продукты нужно исключить? (например, нелюбимые)\n"
         "Например: орехи, грибы, лук.\n"
-        "Если исключать нечего — нажми «Пропустить».",
+        "Если исключать нечего — нажмите «Пропустить».",
         reply_markup=_skip("excluded", message.chat.id),
     )
     await state.set_state(RecipeForm.excluded)
@@ -643,7 +641,7 @@ async def step_appliance(callback: CallbackQuery, state: FSMContext):
 
     if value == "done":
         if not selected:
-            await callback.answer("Выбери хотя бы один вариант!", show_alert=True)
+            await callback.answer("Выберите хотя бы один вариант!", show_alert=True)
             return
         labels = [APPLIANCE_LABELS[k] for k in selected]
         await state.update_data(appliance_labels=labels)
@@ -711,7 +709,7 @@ async def step_confirm_go(callback: CallbackQuery, state: FSMContext):
         if not recipe_text.strip():
             await status_msg.edit_text(
                 "😔 Не получилось составить рецепт под эти параметры (возможно, слишком "
-                "противоречивые условия, например цель по КБЖУ). Попробуй изменить запрос "
+                "противоречивые условия, например цель по КБЖУ). Попробуйте изменить запрос "
                 "и повторить.",
                 reply_markup=kb.restart_kb(),
             )
@@ -727,8 +725,8 @@ async def step_confirm_go(callback: CallbackQuery, state: FSMContext):
         usage.unlog(spent)
         logger.exception("Ошибка при подборе рецепта")
         await status_msg.edit_text(
-            f"😔 Что-то пошло не так при подборе рецепта.\nТехническая причина: {e}\n\n"
-            "Попробуй ещё раз.",
+            f"😔 Что-то пошло не так при подборе рецепта.\n\n"
+            "Попробуйте ещё раз.",
             reply_markup=kb.restart_kb(),
         )
         return
@@ -813,7 +811,7 @@ async def send_pdf(callback: CallbackQuery):
     items, title = _pdf_items(chat_id, ctx, callback.message) if ctx in ("r", "d", "w") else ([], "")
     items = [i for i in items if i.get("text", "").strip()]
     if not items:
-        await callback.answer("Нечего скачивать — открой рецепт или меню заново.", show_alert=True)
+        await callback.answer("Нечего скачивать — откройте рецепт или меню заново.", show_alert=True)
         return
     usage.event("pdf", chat_id)
     await callback.answer("Готовлю PDF…")
@@ -824,7 +822,7 @@ async def send_pdf(callback: CallbackQuery):
         return
     name = "".join(ch for ch in title if ch.isalnum() or ch in " -_")[:60].strip() or "recipe"
     await callback.message.answer_document(BufferedInputFile(data, filename=f"{name}.pdf"),
-                                           caption="📄 Сохрани файл — откроется без интернета.", parse_mode=None)
+                                           caption="📄 Сохраните файл — откроется без интернета.", parse_mode=None)
 
 
 # ---------- Таймеры шагов рецепта ----------
@@ -839,7 +837,7 @@ MAX_TIMERS_PER_CHAT = 8
 def recipe_kb(recipe_text: str, chat_id: int | None = None):
     markup = kb.recipe_result_kb(step_timers_mod.step_timers(recipe_text))
     if chat_id is not None and plans.diary_on(chat_id):          # «Съел порцию»: только у тех, кто включил дневник
-        markup.inline_keyboard.append([InlineKeyboardButton(text="🍽 Съел порцию", callback_data="dy:eat")])
+        markup.inline_keyboard.append([InlineKeyboardButton(text="🍽 Записать в дневник", callback_data="dy:eat")])
     return markup
 
 
@@ -873,7 +871,7 @@ async def timer_start(callback: CallbackQuery):
     chat_id = callback.message.chat.id
     active = _active_timers.setdefault(chat_id, set())
     if len(active) >= MAX_TIMERS_PER_CHAT:
-        await callback.answer("Уже запущено много таймеров — дождись сигнала.", show_alert=True)
+        await callback.answer("Уже запущено много таймеров — дождитесь сигнала.", show_alert=True)
         return
     fm = step_timers_mod.fmt_min
     task = asyncio.create_task(_run_timer(callback.message, step, mn, mx))
@@ -889,7 +887,7 @@ async def timer_start(callback: CallbackQuery):
 async def reminder_ok(callback: CallbackQuery):
     """«Приготовить» в напоминании — под рецептом появляются обычные кнопки: продукты, избранное, ещё рецепт."""
     await callback.message.edit_reply_markup(reply_markup=kb.recipe_result_kb())
-    await callback.answer("Отлично! Ниже — продукты и избранное")
+    await callback.answer("Ниже продукты и избранное")
 
 
 @dp.callback_query(F.data == "portion:cycle")
@@ -928,7 +926,7 @@ async def reminder_cook(callback: CallbackQuery, state: FSMContext):
 async def reminder_next(callback: CallbackQuery, state: FSMContext):
     """Нажатие кнопки «Найти другое» — открываем меню выбора параметров."""
     await callback.answer()
-    await show_main_menu(callback.message, state, "Подобрать другой рецепт — выбери параметры:")
+    await show_main_menu(callback.message, state, "Подобрать другой рецепт — выберите параметры:")
 
 
 @dp.callback_query(F.data == "reminder:off")
@@ -973,15 +971,15 @@ async def miss_open(callback: CallbackQuery):
     if ctx == "r":
         anchor = _recipe_source(msg)
         if anchor is None:
-            await callback.answer("Не нашёл рецепт — открой его заново.", show_alert=True)
+            await callback.answer("Не нашёл рецепт — откройте его заново.", show_alert=True)
             return
     terms = resolve_shopping_terms(anchor, ctx)
     if not terms:
         await callback.answer("Не нашёл список продуктов.", show_alert=True)
         return
     picker = await anchor.reply(
-        "❌ Каких продуктов нет в магазине? Отметь нужные кнопками и нажми «Заменить».\n"
-        "Если продукта нет в списке — ответь на это сообщение текстом (названия через запятую).",
+        "❌ Каких продуктов нет в магазине? Отметьте нужные кнопками и нажмите «Заменить».\n"
+        "Если продукта нет в списке — ответьте на это сообщение текстом (названия через запятую).",
         reply_markup=kb.missing_pick_kb(ctx, terms, set()),
         parse_mode=None,
     )
@@ -996,7 +994,7 @@ async def miss_toggle(callback: CallbackQuery):
     anchor = msg.reply_to_message if ctx == "r" else msg
     terms = resolve_shopping_terms(anchor, ctx) if anchor else []
     if not idx.isdigit() or int(idx) >= len(terms):
-        await callback.answer("Список изменился — открой кнопку заново.", show_alert=True)
+        await callback.answer("Список изменился — откройте кнопку заново.", show_alert=True)
         return
     st = _missing_state(msg.chat.id, msg.message_id, ctx)
     st["sel"] ^= {int(idx)}
@@ -1011,7 +1009,7 @@ async def miss_text(message: Message):
     names = [x for x in (p.strip() for p in message.text.replace("\n", ",").split(",")) if x]
     st["extra"] = missing.clean_missing(st["extra"] + names)
     await message.reply(
-        "Добавил: " + ", ".join(st["extra"]) + "\nТеперь нажми «✅ Заменить отмеченные» в сообщении выше.",
+        "Добавил: " + ", ".join(st["extra"]) + "\nТеперь нажмите «✅ Заменить отмеченные» в сообщении выше.",
         parse_mode=None,
     )
 
@@ -1026,7 +1024,7 @@ async def miss_go(callback: CallbackQuery):
     st = _missing_state(chat_id, msg.message_id, ctx)
     names = missing.clean_missing([terms[i] for i in sorted(st["sel"]) if i < len(terms)] + st["extra"])
     if not names:
-        await callback.answer("Отметь хотя бы один продукт.", show_alert=True)
+        await callback.answer("Отметьте хотя бы один продукт.", show_alert=True)
         return
     await run_missing(callback, anchor, ctx, names, picker=msg)
 
@@ -1074,7 +1072,7 @@ async def run_missing(callback: CallbackQuery, anchor: Message, ctx: str, names:
     except Exception as e:  # noqa: BLE001
         usage.unlog(spent)
         logger.exception("Ошибка замены недостающих продуктов")
-        await status.edit_text(f"😔 Не получилось подобрать замену: {e}\nПопробуй ещё раз.", parse_mode=None)
+        await status.edit_text(f"😔 Не получилось подобрать замену: {e}\nПопробуйте ещё раз.", parse_mode=None)
 
 
 # ---------- Меню на день ----------
@@ -1083,7 +1081,7 @@ async def run_missing(callback: CallbackQuery, anchor: Message, ctx: str, names:
 async def daymenu_start(callback: CallbackQuery, state: FSMContext):
     await callback.message.edit_reply_markup()
     await callback.message.answer(
-        "📅 Соберём меню на день! Выбери приёмы пищи (можно несколько), потом «Готово»:",
+        "📅 Соберём меню на день! Выберите приёмы пищи (можно несколько), потом «Готово»:",
         reply_markup=kb.meals_kb(set()),
     )
     await state.set_state(DayMenuForm.meals)
@@ -1098,11 +1096,11 @@ async def dm_step_meals(callback: CallbackQuery, state: FSMContext):
 
     if value == "done":
         if not selected:
-            await callback.answer("Выбери хотя бы один приём пищи!", show_alert=True)
+            await callback.answer("Выберите хотя бы один приём пищи!", show_alert=True)
             return
         await state.update_data(meals=kb.sort_meals(selected))
         await callback.message.edit_reply_markup()
-        await callback.message.answer("Теперь выбери тип питания/кухни:", reply_markup=kb.cuisine_kb(with_extras=False))
+        await callback.message.answer("Теперь выберите тип питания:", reply_markup=kb.cuisine_kb(with_extras=False))
         await state.set_state(DayMenuForm.cuisine)
         await callback.answer()
         return
@@ -1124,10 +1122,10 @@ async def dm_step_cuisine(callback: CallbackQuery, state: FSMContext):
 
     if cuisine == MACRO_GOAL_KEY:
         await callback.message.answer(
-            "Укажи ОБЩУЮ цель по КБЖУ на весь день, например:\n"
+            "Укажите общую цель по КБЖУ на весь день, например:\n"
             "«1800 ккал» или «2000 ккал, белки 120 г».\n"
             "Раздам её по приёмам пищи пропорционально.\n"
-            "Если без разницы — нажми «Пропустить».",
+            "Если без разницы — нажмите «Пропустить».",
             reply_markup=_skip("dm_macro_goal", callback.message.chat.id),
         )
         await state.set_state(DayMenuForm.macro_goal)
@@ -1152,7 +1150,7 @@ async def dm_step_macro_goal_skip(callback: CallbackQuery, state: FSMContext):
 
 async def dm_ask_preferred(message: Message, state: FSMContext):
     await message.answer(
-        "Какие продукты хочешь использовать на весь день, в общих чертах "
+        "Какие продукты хотите использовать на весь день, в общих чертах "
         "(например: курица, рис, овощи)? Если без разницы — «Пропустить».",
         reply_markup=_skip("dm_preferred", message.chat.id),
     )
@@ -1175,8 +1173,8 @@ async def dm_step_preferred_skip(callback: CallbackQuery, state: FSMContext):
 
 async def dm_ask_excluded(message: Message, state: FSMContext):
     await message.answer(
-        "Какие продукты исключить на весь день? (аллергии, нелюбимые продукты)\n"
-        "Если исключать нечего — нажми «Пропустить».",
+        "Какие продукты исключить на весь день? (например, нелюбимые)\n"
+        "Если исключать нечего — нажмите «Пропустить».",
         reply_markup=_skip("dm_excluded", message.chat.id),
     )
     await state.set_state(DayMenuForm.excluded)
@@ -1197,7 +1195,7 @@ async def dm_step_excluded_skip(callback: CallbackQuery, state: FSMContext):
 
 
 async def dm_ask_time(message: Message, state: FSMContext):
-    await message.answer("Сколько времени готов тратить на КАЖДОЕ блюдо?", reply_markup=kb.time_kb())
+    await message.answer("Сколько времени готовы тратить на каждое блюдо?", reply_markup=kb.time_kb())
     await state.set_state(DayMenuForm.time)
 
 
@@ -1232,7 +1230,7 @@ async def dm_step_appliance(callback: CallbackQuery, state: FSMContext):
 
     if value == "done":
         if not selected:
-            await callback.answer("Выбери хотя бы один вариант!", show_alert=True)
+            await callback.answer("Выберите хотя бы один вариант!", show_alert=True)
             return
         labels = [APPLIANCE_LABELS[k] for k in selected]
         await state.update_data(appliance_labels=labels)
@@ -1293,15 +1291,15 @@ async def dm_step_confirm_go(callback: CallbackQuery, state: FSMContext):
         usage.unlog(spent)
         logger.exception("Ошибка при сборке меню на день")
         await status_msg.edit_text(
-            f"😔 Что-то пошло не так при сборке меню на день.\nТехническая причина: {e}\n\n"
-            "Попробуй ещё раз.",
+            f"😔 Что-то пошло не так при сборке меню на день.\n\n"
+            "Попробуйте ещё раз.",
             reply_markup=kb.restart_kb(),
         )
         return
 
     await status_msg.delete()
 
-    # Список продуктов — по кнопке «🛒 Найти продукты в магазине» в самом меню (day_menu.build_summary_view)
+    # Список продуктов — по кнопке «🛒 Продукты и магазины» в самом меню (day_menu.build_summary_view)
     text, markup = day_menu.build_summary_view(callback.message.chat.id)
     await callback.message.answer(text, reply_markup=markup)
 
@@ -1312,7 +1310,7 @@ async def daymenu_show(callback: CallbackQuery):
     meal_key = callback.data.split(":", 2)[2]
     view = day_menu.build_meal_view(callback.message.chat.id, meal_key)
     if not view:
-        await callback.answer("Рецепт не найден, собери меню заново.", show_alert=True)
+        await callback.answer("Рецепт не найден, соберите меню заново.", show_alert=True)
         return
     text, markup = view
     await callback.message.edit_text(text, reply_markup=markup)
@@ -1324,7 +1322,7 @@ async def daymenu_collapse(callback: CallbackQuery):
     """Сворачивает рецепт обратно в список блюд — тоже редактированием того же сообщения."""
     view = day_menu.build_summary_view(callback.message.chat.id)
     if not view:
-        await callback.answer("Меню не найдено, собери заново.", show_alert=True)
+        await callback.answer("Меню не найдено, соберите заново.", show_alert=True)
         return
     text, markup = view
     await callback.message.edit_text(text, reply_markup=markup)
@@ -1338,7 +1336,7 @@ async def weekmenu_start(callback: CallbackQuery, state: FSMContext):
     await callback.message.edit_reply_markup()
     await callback.message.answer(
         f"📆 Соберём план питания на {config.WEEK_MENU_DAYS} дня! "
-        "Выбери приёмы пищи (можно несколько), потом «Готово»:",
+        "Выберите приёмы пищи (можно несколько), потом «Готово»:",
         reply_markup=kb.meals_kb(set()),
     )
     await state.set_state(WeekMenuForm.meals)
@@ -1353,11 +1351,11 @@ async def wm_step_meals(callback: CallbackQuery, state: FSMContext):
 
     if value == "done":
         if not selected:
-            await callback.answer("Выбери хотя бы один приём пищи!", show_alert=True)
+            await callback.answer("Выберите хотя бы один приём пищи!", show_alert=True)
             return
         await state.update_data(meals=kb.sort_meals(selected))
         await callback.message.edit_reply_markup()
-        await callback.message.answer("Теперь выбери тип питания/кухни:", reply_markup=kb.cuisine_kb(with_extras=False))
+        await callback.message.answer("Теперь выберите тип питания:", reply_markup=kb.cuisine_kb(with_extras=False))
         await state.set_state(WeekMenuForm.cuisine)
         await callback.answer()
         return
@@ -1379,9 +1377,9 @@ async def wm_step_cuisine(callback: CallbackQuery, state: FSMContext):
 
     if cuisine == MACRO_GOAL_KEY:
         await callback.message.answer(
-            "Укажи ОБЩУЮ цель по КБЖУ на КАЖДЫЙ день плана, например:\n"
+            "Укажите общую цель по КБЖУ на каждый день плана, например:\n"
             "«1800 ккал» или «2000 ккал, белки 120 г».\n"
-            "Если без разницы — нажми «Пропустить».",
+            "Если без разницы — нажмите «Пропустить».",
             reply_markup=_skip("wm_macro_goal", callback.message.chat.id),
         )
         await state.set_state(WeekMenuForm.macro_goal)
@@ -1406,7 +1404,7 @@ async def wm_step_macro_goal_skip(callback: CallbackQuery, state: FSMContext):
 
 async def wm_ask_preferred(message: Message, state: FSMContext):
     await message.answer(
-        "Какие продукты хочешь использовать на весь период, в общих чертах "
+        "Какие продукты хотите использовать на весь период, в общих чертах "
         "(например: курица, рис, овощи)? Если без разницы — «Пропустить».",
         reply_markup=_skip("wm_preferred", message.chat.id),
     )
@@ -1429,8 +1427,8 @@ async def wm_step_preferred_skip(callback: CallbackQuery, state: FSMContext):
 
 async def wm_ask_excluded(message: Message, state: FSMContext):
     await message.answer(
-        "Какие продукты исключить на весь период? (аллергии, нелюбимые продукты)\n"
-        "Если исключать нечего — нажми «Пропустить».",
+        "Какие продукты исключить на весь период? (например, нелюбимые)\n"
+        "Если исключать нечего — нажмите «Пропустить».",
         reply_markup=_skip("wm_excluded", message.chat.id),
     )
     await state.set_state(WeekMenuForm.excluded)
@@ -1451,7 +1449,7 @@ async def wm_step_excluded_skip(callback: CallbackQuery, state: FSMContext):
 
 
 async def wm_ask_time(message: Message, state: FSMContext):
-    await message.answer("Сколько времени готов тратить на КАЖДОЕ блюдо?", reply_markup=kb.time_kb())
+    await message.answer("Сколько времени готовы тратить на каждое блюдо?", reply_markup=kb.time_kb())
     await state.set_state(WeekMenuForm.time)
 
 
@@ -1486,7 +1484,7 @@ async def wm_step_appliance(callback: CallbackQuery, state: FSMContext):
 
     if value == "done":
         if not selected:
-            await callback.answer("Выбери хотя бы один вариант!", show_alert=True)
+            await callback.answer("Выберите хотя бы один вариант!", show_alert=True)
             return
         labels = [APPLIANCE_LABELS[k] for k in selected]
         await state.update_data(appliance_labels=labels)
@@ -1550,8 +1548,8 @@ async def wm_step_confirm_go(callback: CallbackQuery, state: FSMContext):
         usage.unlog(spent)
         logger.exception("Ошибка при сборке продуктовой корзины плана питания")
         await status_msg.edit_text(
-            f"😔 Не получилось составить план питания.\nТехническая причина: {e}\n\n"
-            "Попробуй ещё раз.",
+            f"😔 Не получилось составить план питания.\n\n"
+            "Попробуйте ещё раз.",
             reply_markup=kb.restart_kb(),
         )
         return
@@ -1571,7 +1569,7 @@ async def wm_step_confirm_go(callback: CallbackQuery, state: FSMContext):
             await answer_long(callback.message, priced, disable_web_page_preview=True)
         else:
             await price_msg.edit_text(
-                "ℹ️ Цены ВкусВилла сейчас недоступны — воспользуйся кнопкой «🛒 Найти продукты в магазине» выше."
+                "ℹ️ Цены ВкусВилла сейчас недоступны — воспользуйтесь кнопкой «🛒 Продукты и магазины» выше."
             )
 
     text, markup = week_menu.build_status_view(chat_id)
@@ -1603,7 +1601,7 @@ async def weekmenu_open_day(callback: CallbackQuery):
 
 @dp.callback_query(F.data == "weekmenu:noop")
 async def weekmenu_noop(callback: CallbackQuery):
-    await callback.answer("Сначала приготовь предыдущий день 🙂")
+    await callback.answer("Сначала приготовьте предыдущий день")
 
 
 @dp.callback_query(F.data == "weekmenu:basket")
@@ -1643,7 +1641,7 @@ async def weekmenu_cook_next(callback: CallbackQuery):
     except Exception as e:
         logger.exception("Ошибка при генерации дня плана питания")
         await callback.message.edit_text(
-            f"😔 Не получилось приготовить день.\nТехническая причина: {e}\n\nПопробуй ещё раз.",
+            f"😔 Не получилось приготовить день.\n\nПопробуйте ещё раз.",
         )
         return
     if slot.get("just_generated"):
@@ -1687,7 +1685,7 @@ async def weekmenu_done(callback: CallbackQuery):
         return
     except Exception as e:
         logger.exception("Ошибка при генерации следующего дня плана питания")
-        await callback.message.edit_text(f"😔 Не получилось сгенерировать следующий день.\nПричина: {e}")
+        await callback.message.edit_text("😔 Не получилось составить следующий день. Попробуйте ещё раз.")
         return
 
     text, markup = week_menu.build_slot_view(chat_id, slot)
@@ -1717,14 +1715,14 @@ async def favorites_open(callback: CallbackQuery, state: FSMContext):
 
 @dp.callback_query(F.data == "favorites:back")
 async def favorites_back(callback: CallbackQuery, state: FSMContext):
-    await callback.message.answer("Выбери тип питания/кухни:", reply_markup=kb.cuisine_kb())
+    await callback.message.answer("Выберите тип питания:", reply_markup=kb.cuisine_kb())
     await state.set_state(RecipeForm.cuisine)
     await callback.answer()
 
 
 @dp.callback_query(F.data == "favorites:search")
 async def favorites_search_start(callback: CallbackQuery, state: FSMContext):
-    await callback.message.answer("Напиши слово из названия или продукта рецепта для поиска:")
+    await callback.message.answer("Напишите слово из названия или продукта рецепта для поиска:")
     await state.set_state(FavoritesForm.search)
     await callback.answer()
 
@@ -1738,7 +1736,7 @@ async def favorites_search_run(message: Message, state: FSMContext):
         )
     else:
         await message.answer(
-            "Ничего не нашлось. Попробуй другое слово.",
+            "Ничего не нашлось. Попробуйте другое слово.",
             reply_markup=kb.favorites_list_kb(get_favorites(message.chat.id)),
         )
 
@@ -1761,7 +1759,7 @@ async def favorite_delete(callback: CallbackQuery):
     await callback.answer("Удалено из избранного")
     favs = get_favorites(callback.message.chat.id)
     if favs:
-        await callback.message.answer("⭐ Твоё избранное:", reply_markup=kb.favorites_list_kb(favs))
+        await callback.message.answer("⭐ Ваше избранное:", reply_markup=kb.favorites_list_kb(favs))
     else:
         await callback.message.answer("Избранное теперь пусто.", reply_markup=kb.cuisine_kb())
 
@@ -1770,7 +1768,7 @@ async def favorite_delete(callback: CallbackQuery):
 async def favorite_save(callback: CallbackQuery):
     last = get_last_recipe(callback.message.chat.id)
     if not last:
-        await callback.answer("Не нашёл рецепт для сохранения, попробуй ещё раз получить его.", show_alert=True)
+        await callback.answer("Не нашёл рецепт для сохранения, попробуйте ещё раз получить его.", show_alert=True)
         return
     add_favorite(callback.message.chat.id, last["title"], last["text"], last["cuisine"])
     usage.event("fav_save", callback.message.chat.id)
@@ -1850,7 +1848,7 @@ async def fallback_text(message: Message, state: FSMContext):
         await message.answer("Расчёт расхода прервался: бот обновлялся и забыл, на каком вы шаге. Нажмите кнопку и начните заново, "
                              "это быстро: три числа в одном сообщении.", reply_markup=b.as_markup(), parse_mode=None)
         return
-    await message.answer("Не совсем понял 🙂 Вот меню:", reply_markup=kb.main_reply_kb())
+    await message.answer("Не понял запрос. Вот меню:", reply_markup=kb.main_reply_kb())
     _kb_sent(message.chat.id)
     await show_main_menu(message, state)
 
