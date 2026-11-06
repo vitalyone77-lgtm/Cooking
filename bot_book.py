@@ -77,7 +77,7 @@ def home_view(uid) -> tuple[str, InlineKeyboardMarkup]:
     n, today = book.total(), book.added_today()
     text = (f"📖 Книга рецептов\n\nВ книге {n} рецептов" + (f", сегодня добавилось {today}" if today else "") + ". Каждый новый рецепт, который составляет бот, "
             "попадает в книгу, поэтому она пополняется каждый день. Листать книгу можно без ограничений.\n\n"
-            "Нужен рецепт именно под вас: нажмите «Создать» в меню. Бот сначала поищет в книге, а если подходящего нет, составит новый.")
+            "Нужен рецепт именно под вас: нажмите «Создать» в меню.")
     b = InlineKeyboardBuilder()
     for m in book.MEALS:
         b.button(text=f"{book.MEAL_TITLES[m]} ({counts.get(m, 0)})", callback_data=f"bk:m:{m}")

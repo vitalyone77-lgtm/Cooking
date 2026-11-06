@@ -234,7 +234,7 @@ async def shop_cart(callback: CallbackQuery):
     """Собирает корзину во ВкусВилле: подбирает товары и упаковки, считает цену, даёт ссылку «открыть корзину»."""
     ctx = callback.data.split(":", 2)[2]
     if not plans.has_feature(callback.message.chat.id, "cart"):
-        await callback.answer("Корзина с ценами — в подписке 💎 (Профиль → Подписка)", show_alert=True)
+        await callback.answer(plans.locked_text("Корзина с ценами", callback.message.chat.id), show_alert=True)
         return
     amounts = resolve_shopping_amounts(callback.message, ctx)
     if not amounts:
@@ -295,7 +295,8 @@ def _left_line(chat_id: int, kind: str) -> str:
     except Exception:  # noqa: BLE001
         pass
     t = usage.left_text(chat_id, kind)
-    return out + (f"\n\n🔢 {t}" if t else "")
+    g = plans.next_step(chat_id)
+    return out + (f"\n\n🔢 {t}" if t else "") + (f"\n💡 {g['text']} Профиль → Настройки → Подписка." if g and g["action"] != "login" else "")
 
 
 def _input_hints(chat_id: int) -> str:
@@ -307,13 +308,20 @@ def _input_hints(chat_id: int) -> str:
     return ("\n\n" + "\n".join(hints)) if hints else ""
 
 
+def _kind_locked(chat_id: int, kind: str) -> bool:
+    """В этом тарифе такого подбора нет совсем: кнопка видна, при нажатии пояснение."""
+    lim = plans.limit(chat_id, kind)
+    return bool(lim and lim[0] == 0)
+
+
 async def show_main_menu(message: Message, state: FSMContext, intro: str = "Что готовим? Выберите тип питания:", event=None):
     """event — нажатая кнопка: если она под экраном бота, экран правится на месте, под рецептом приходит новое сообщение."""
     await state.clear()
     await ensure_reply_kb(message)
     last = get_last_recipe(message.chat.id)
     intro += _input_hints(message.chat.id) + _left_line(message.chat.id, "recipe")
-    markup = kb.cuisine_kb(fridge=plans.feature_on(message.chat.id, "photo_recipe"), last_title=(last or {}).get("title") or ("Рецепт" if last else None))
+    markup = kb.cuisine_kb(fridge=plans.feature_on(message.chat.id, "photo_recipe"), last_title=(last or {}).get("title") or ("Рецепт" if last else None),
+                           locked=tuple(k for k in ("daymenu", "week") if _kind_locked(message.chat.id, k)))
     if event is not None:
         await ui.show(event, intro, markup, mode="auto", parse_mode=ParseMode.MARKDOWN)
     else:
@@ -691,7 +699,7 @@ async def step_confirm_go(callback: CallbackQuery, state: FSMContext):
     data = await state.get_data()
     data = {**data, 'portion': data.get('portion') or get_portion(callback.message.chat.id)}
     hit = book.find(callback.message.chat.id, data)
-    status_msg = await callback.message.answer("📖 Нашёл в книге рецептов…" if hit else "🔎 Ищу рецепты в интернете...")
+    status_msg = await callback.message.answer("🔎 Подбираю рецепт…")
 
     try:
         if hit:
@@ -806,7 +814,7 @@ async def send_pdf(callback: CallbackQuery):
     ctx = callback.data.split(":", 1)[1]
     chat_id = callback.message.chat.id
     if not plans.has_feature(chat_id, "pdf"):
-        await callback.answer("PDF — в подписке 💎 (Профиль → Подписка)", show_alert=True)
+        await callback.answer(plans.locked_text("PDF", chat_id), show_alert=True)
         return
     items, title = _pdf_items(chat_id, ctx, callback.message) if ctx in ("r", "d", "w") else ([], "")
     items = [i for i in items if i.get("text", "").strip()]
@@ -836,6 +844,11 @@ MAX_TIMERS_PER_CHAT = 8
 
 def recipe_kb(recipe_text: str, chat_id: int | None = None):
     markup = kb.recipe_result_kb(step_timers_mod.step_timers(recipe_text))
+    if chat_id is not None and not plans.has_feature(chat_id, "pdf"):        # PDF виден, но с 💎: при нажатии пояснение
+        for row in markup.inline_keyboard:
+            for btn in row:
+                if btn.callback_data == "pdf:r":
+                    btn.text = "💎 PDF"
     if chat_id is not None and plans.diary_on(chat_id):          # «Съел порцию»: только у тех, кто включил дневник
         markup.inline_keyboard.append([InlineKeyboardButton(text="🍽 Записать в дневник", callback_data="dy:eat")])
     return markup
@@ -1079,6 +1092,9 @@ async def run_missing(callback: CallbackQuery, anchor: Message, ctx: str, names:
 
 @dp.callback_query(F.data == "daymenu:start")
 async def daymenu_start(callback: CallbackQuery, state: FSMContext):
+    if _kind_locked(callback.message.chat.id, "daymenu"):
+        await callback.answer(plans.locked_text("Меню на день", callback.message.chat.id), show_alert=True)
+        return
     await callback.message.edit_reply_markup()
     await callback.message.answer(
         "📅 Соберём меню на день! Выберите приёмы пищи (можно несколько), потом «Готово»:",
@@ -1333,6 +1349,9 @@ async def daymenu_collapse(callback: CallbackQuery):
 
 @dp.callback_query(F.data == "weekmenu:start")
 async def weekmenu_start(callback: CallbackQuery, state: FSMContext):
+    if _kind_locked(callback.message.chat.id, "week"):
+        await callback.answer(plans.locked_text(f"План на {config.WEEK_MENU_DAYS} дня", callback.message.chat.id), show_alert=True)
+        return
     await callback.message.edit_reply_markup()
     await callback.message.answer(
         f"📆 Соберём план питания на {config.WEEK_MENU_DAYS} дня! "

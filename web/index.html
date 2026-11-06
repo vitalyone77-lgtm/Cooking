@@ -95,7 +95,8 @@ textarea{width:100%;min-height:64px;padding:10px 14px;border:1.5px solid var(--l
 .toast{position:fixed;left:12px;right:12px;top:12px;z-index:50;background:var(--primary);color:var(--on-primary);padding:14px 16px;border-radius:14px;font-weight:600;box-shadow:0 6px 24px rgba(0,0,0,.25)}
 
 .lock{display:inline-flex;vertical-align:-3px;margin-right:6px}.lock svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round}
-.btn.locked{background:transparent;color:var(--muted);border:2px dashed var(--line)}.chip.locked{color:var(--muted);border-style:dashed}
+.btn.locked{background:transparent;color:var(--muted);border:2px dashed var(--line);opacity:.6}.chip.locked{color:var(--muted);border-style:dashed;opacity:.6}.opt.locked{opacity:.6}
+.hint{display:flex;gap:10px;align-items:center;justify-content:space-between;background:var(--soft);border-radius:12px;padding:10px 12px;margin:12px 0 0;font-size:15px}.hint .chip{flex:none;min-height:38px;padding:0 12px;font-size:14px}
 .sheet-bg{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:80;display:flex;align-items:flex-end;justify-content:center}
 .sheet{width:100%;max-width:640px;background:var(--surface);border-radius:20px 20px 0 0;padding:20px 16px calc(20px + env(safe-area-inset-bottom));max-height:85vh;overflow:auto}
 .sheet h2{margin:0 0 8px;font-size:20px}.sheet .sub{margin-bottom:8px}
@@ -460,6 +461,12 @@ select{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--lin
   // последний ввод анкеты помним на этом устройстве (на сервер не уходит): продукты, исключения, кухня, время и т.д.
   (function(){try{var o=JSON.parse(ls("form")||"{}");["mode","cuisine","meals","time","servings","portion","appliance","pref","exc","macro"].forEach(function(k){if(o[k]!==undefined&&o[k]!==null)F[k]=o[k];});}catch(e){}})();
   function saveForm(){try{ls("form",JSON.stringify(F));}catch(e){}}
+  // мягкая подсказка о следующем шаге: войти, попробовать тариф, подробнее о подписке
+  function hintHTML(){
+    var g=ME&&ME.hint;if(!g)return "";
+    var b=g.action==="login"?'<button class="chip" data-tab-go="profile">Войти</button>':g.action==="trial"?'<button class="chip" data-gate-trial="1">Попробовать</button>':'<button class="chip" data-tab-go="settings">Подробнее</button>';
+    return '<div class="hint"><span>'+esc(g.text)+'</span>'+b+'</div>';
+  }
   function chips(list,sel,name,multi){return '<div class="chips" data-name="'+name+'" data-multi="'+(multi?1:0)+'">'+list.map(function(x){var on=multi?sel.indexOf(x.key)>=0:sel===x.key;return '<button class="chip" data-key="'+esc(x.key)+'" aria-pressed="'+on+'">'+esc(x.label)+'</button>';}).join("")+'</div>';}
   function viewNew(){
     var m=META, times=["15 мин","30 мин","45 мин","60 мин","Не важно"].map(function(x){return {key:x,label:x};}), sv=[1,2,3,4,5,6].map(function(x){return {key:String(x),label:String(x)};});
@@ -481,6 +488,7 @@ select{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--lin
     if(lr&&lr.title)h+='<button class="btn ghost" data-last-recipe="1">📖 Последний рецепт: '+esc(lr.title)+'</button>';
     var lk={recipe:"recipe",day:"daymenu",week:"week"}[F.mode], lf=(ME.left||{})[lk];
     if(lf&&lf[1])h+='<p class="sub" style="margin:14px 0 0;text-align:center">🔢 Осталось '+(lf[2]>1?"на "+lf[2]+" дн.":"сегодня")+': <strong>'+lf[0]+' из '+lf[1]+'</strong></p>';
+    h+=hintHTML();
     h+='<button class="btn" id="go">🔍 Подобрать</button><div class="install-bottom" id="install-bottom"></div>'+
       '<p class="sub" style="margin-top:18px;font-size:14px">Как это работает: <a href="/pitanie/menu-na-den">меню на день</a> · <a href="/pitanie/plan-pitaniya-na-3-dnya">план на 3 дня</a> · <a href="/pitanie/podbor-po-kbzhu">подбор по КБЖУ</a> · <a href="/pitanie/spisok-pokupok-i-korzina">список покупок</a></p>';
     main.innerHTML=h;
@@ -506,7 +514,7 @@ select{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--lin
   function showRecipe(res){
     LAST_RECIPE=res.text;
     try{ls("lastrecipe",JSON.stringify(res));}catch(e){}
-        main.innerHTML='<h1>'+esc(res.title)+'</h1><div class="card" style="padding:4px 16px 16px">'+(res.card?'<img class="rcard" src="'+esc(res.card)+'" alt="" loading="lazy">':'')+recipeHTML(res.text)+actions(res.title,res.text)+'</div>'+shoppingHTML(res.shopping,"Найти продукты в магазине","recipe")+adSlot("inline")+'<button class="btn ghost" id="again">🍳 Подобрать ещё</button>';
+        main.innerHTML='<h1>'+esc(res.title)+'</h1><div class="card" style="padding:4px 16px 16px">'+(res.card?'<img class="rcard" src="'+esc(res.card)+'" alt="" loading="lazy">':'')+recipeHTML(res.text)+actions(res.title,res.text)+'</div>'+shoppingHTML(res.shopping,"Найти продукты в магазине","recipe")+hintHTML()+adSlot("inline")+'<button class="btn ghost" id="again">🍳 Подобрать ещё</button>';
         document.getElementById("again").onclick=function(){show("new");};
     if(Object.keys(TM).length)tmEnsureTick();
     window.scrollTo(0,0);
@@ -682,7 +690,7 @@ select{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--lin
   }
   function viewBook(){
     return call("GET","/api/book"+(bkQuery()?"?"+bkQuery():"")).then(function(d){
-      var m=d.meta, h=favStrip()+'<h1>📖 Книга рецептов</h1><p class="sub">В книге '+m.total+' рецептов'+(m.today?', сегодня добавилось '+m.today:'')+'. Каждый новый рецепт, который составляет помощник, попадает сюда, поэтому книга пополняется каждый день. Листать можно без ограничений. Нужен рецепт под вас: «Создать» сначала ищет в книге, потом составляет новый.</p>';
+      var m=d.meta, h=favStrip()+'<h1>📖 Книга рецептов</h1><p class="sub">В книге '+m.total+' рецептов'+(m.today?', сегодня добавилось '+m.today:'')+'. Каждый новый рецепт, который составляет помощник, попадает сюда, поэтому книга пополняется каждый день. Листать можно без ограничений. Нужен рецепт под вас: нажмите «Создать».</p>';
       h+='<div class="chips">'+[{key:"",title:"📚 Все",count:m.total}].concat(m.meals).map(function(x){return '<button class="chip" data-bk-meal="'+esc(x.key)+'" aria-pressed="'+(BK.meal===x.key)+'">'+esc(x.title)+' ('+x.count+')</button>';}).join("")+'</div>';
       h+='<div class="row" style="margin-top:10px"><input type="text" id="bk-q" maxlength="40" placeholder="слово: борщ, говядина, творог" aria-label="Поиск по книге" value="'+esc(BK.q)+'"><button class="btn" style="width:auto;margin:0" data-bk-search="1">Найти</button></div>';
       var mainOpts=[["","Любая основа"]].concat(m.mains.map(function(x){return [x,x.charAt(0).toUpperCase()+x.slice(1)];}));
@@ -786,8 +794,8 @@ select{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--lin
       '<label class="opt"><input type="checkbox" data-feat="diary"'+(on("diary")?' checked':'')+'><span>Дневник питания</span></label>'+
       '<label class="opt"><input type="checkbox" data-feat="weight"'+(on("weight")?' checked':'')+'><span>Вес и график</span></label>'+
       '<label class="opt"><input type="checkbox" data-feat="macro"'+(on("macro")?' checked':'')+'><span>Цель по калориям и БЖУ</span></label>'+
-      '<label class="opt"><input type="checkbox" data-feat="shelf"'+(on("shelf")?' checked':'')+'><span>Полка: что уже есть дома'+(p.never_allowed?'':' '+lockIc()+'тариф «'+esc(ME.name||"Повар")+'»')+'</span></label>'+
-      '<label class="opt"><input type="checkbox" data-feat="never"'+(on("never")?' checked':'')+'><span>Исключить продукты навсегда'+(p.never_allowed?'':' '+lockIc()+'тариф «'+esc(ME.name||"Повар")+'»')+'</span></label>',true);
+      '<label class="opt'+(p.never_allowed?'':' locked')+'"><input type="checkbox" data-feat="shelf"'+(on("shelf")?' checked':'')+'><span>Полка: что уже есть дома'+(p.never_allowed?'':' '+lockIc()+'тариф «'+esc(ME.name||"Повар")+'»')+'</span></label>'+
+      '<label class="opt'+(p.never_allowed?'':' locked')+'"><input type="checkbox" data-feat="never"'+(on("never")?' checked':'')+'><span>Исключить продукты навсегда'+(p.never_allowed?'':' '+lockIc()+'тариф «'+esc(ME.name||"Повар")+'»')+'</span></label>',true);
     if(on("macro")||on("diary")||on("weight")){
       var g='';
       if(on("macro")||on("diary"))g+='<h2 style="margin-top:12px">Цель на день</h2><div class="goalgrid"><div><label for="pf-kcal">Калории</label><input type="text" inputmode="numeric" id="pf-kcal" value="'+(p.kcal||"")+'"></div><div><label for="pf-protein">Белки, г</label><input type="text" inputmode="numeric" id="pf-protein" value="'+(p.protein||"")+'"></div><div><label for="pf-fat">Жиры, г</label><input type="text" inputmode="numeric" id="pf-fat" value="'+(p.fat||"")+'"></div><div><label for="pf-carb">Углеводы, г</label><input type="text" inputmode="numeric" id="pf-carb" value="'+(p.carb||"")+'"></div></div><p class="sub" style="margin:8px 0 0">Здесь цель в граммах. Подставляется на шаге «Цель по КБЖУ» и видна в дневнике. В процентах можно задать ниже, в «Свой ориентир БЖУ».</p><button class="btn" data-pf-save="macro">Сохранить</button>';

@@ -197,7 +197,7 @@ async def bot_part():
     check("бот: в книге нет тыквенного супа — составляет ИИ", gen["n"] == 1 and any("Тыквенный суп" in x for x in t1), str(t1)[:200])
     check("новый рецепт пополнил книгу", book.total() == total0 + 1 and book.search(q="тыква")[1] == 1)
     t2 = await ask(791002, d)
-    check("бот: другому человеку тот же запрос берётся из книги, ИИ не вызывается", gen["n"] == 1 and any("Тыквенный суп" in x for x in t2) and any("Нашёл в книге" in x for x in t2), str(t2)[:300])
+    check("бот: другому человеку тот же запрос берётся из книги, ИИ не вызывается", gen["n"] == 1 and any("Тыквенный суп" in x for x in t2) and not any("книге" in x for x in t2[:1]), str(t2)[:300])
     t3 = await ask(791002, d)
     check("бот: тому же человеку повторно — книга уже показывала, составляется новый", gen["n"] == 2, str(gen))
     check("дубль не раздувает книгу", book.total() == total0 + 1)

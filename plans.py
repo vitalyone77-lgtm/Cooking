@@ -255,6 +255,25 @@ def trial_available(uid) -> bool:
     return bool(paywall() and not is_anon(uid) and days > 0 and plan_of(uid) != "premium" and accounts.trial_available(uid))
 
 
+def next_step(uid) -> dict | None:
+    """Мягкая подсказка, что можно сделать дальше: {"text", "action": login | trial | sub}. Пока подписка выключена, лимиты у всех одни, подсказывать нечего."""
+    if not paywall():
+        return None
+    if is_anon(uid):
+        return {"text": "Войдите в профиль: рецептов в день станет больше. Это бесплатно.", "action": "login"}
+    if plan_of(uid) == "premium":
+        return None
+    if trial_available(uid):
+        return {"text": f"Можно {int(cfg('TRIAL_DAYS'))} дней бесплатно попробовать все функции тарифа «{PREMIUM_NAME}».", "action": "trial"}
+    return {"text": f"В тарифе «{PREMIUM_NAME}» больше рецептов в день и все функции.", "action": "sub"}
+
+
+def locked_text(what: str, uid) -> str:
+    """Текст при нажатии на функцию, которой нет в текущем тарифе."""
+    extra = f" Можно {int(cfg('TRIAL_DAYS'))} дней попробовать бесплатно: Профиль → Настройки → Подписка." if trial_available(uid) else " Профиль → Настройки → Подписка."
+    return f"{what}: доступно в тарифе «{PREMIUM_NAME}».{extra}"
+
+
 def status_text(uid) -> str:
     plan = plan_of(uid)
     if plan == "open":

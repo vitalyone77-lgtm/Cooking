@@ -53,7 +53,7 @@ CUISINE_BUTTONS = {
 }
 
 
-def cuisine_kb(with_extras: bool = True, last_title: str | None = None, fridge: bool = False) -> InlineKeyboardMarkup:
+def cuisine_kb(with_extras: bool = True, last_title: str | None = None, fridge: bool = False, locked: tuple = ()) -> InlineKeyboardMarkup:
     """
     Главное меню («Создать») парами: классическая/сбалансированная, спорт кардио/сила, КБЖУ/перекус,
     аюрведа/избранное, меню на день/на N дней; внизу — «Последний рецепт», если он есть. Внутри анкет
@@ -69,8 +69,8 @@ def cuisine_kb(with_extras: bool = True, last_title: str | None = None, fridge: 
         b.button(text="📷 По фото продуктов", callback_data="fridge:start")
     b.button(text="⭐ Избранное", callback_data="favorites:open", style="primary")     # другой цвет: отдельный раздел и разделитель в меню
     b.button(text="📖 Книга рецептов", callback_data="book:open", style="primary")
-    b.button(text="📅 Меню на день", callback_data="daymenu:start")
-    b.button(text=f"📆 Меню на {config.WEEK_MENU_DAYS} дня", callback_data="weekmenu:start")
+    b.button(text=("💎 " if "daymenu" in locked else "📅 ") + "Меню на день", callback_data="daymenu:start")      # недоступное видно, 💎 и пояснение при нажатии
+    b.button(text=("💎 " if "week" in locked else "📆 ") + f"Меню на {config.WEEK_MENU_DAYS} дня", callback_data="weekmenu:start")
     if last_title:
         short = last_title if len(last_title) <= 28 else last_title[:26] + "…"
         b.button(text=f"📖 Последний: {short}", callback_data="last:open")

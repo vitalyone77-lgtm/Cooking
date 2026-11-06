@@ -481,6 +481,29 @@ import cards as _cd
 check("карточка функции рисуется", _cd.feature_card("Список покупок, который можно отправить")[:4] == b"\x89PNG")
 config.TG_CHANNEL_ID = ""
 
+# ---------- подсказки и закрытые функции ----------
+_pw = plans.paywall
+_tr = plans.trial_available
+_po = plans.plan_of
+check("подписка выключена: подсказок нет", plans.next_step("w1") is None and plans.next_step("1") is None)
+plans.paywall = lambda: True
+check("гостю: войти", plans.next_step("w1")["action"] == "login")
+plans.plan_of = lambda u: "free"
+plans.trial_available = lambda u: True
+check("вошёл: попробовать бесплатно", plans.next_step("1")["action"] == "trial" and "бесплатно" in plans.next_step("1")["text"])
+check("нажатие на закрытое: тариф и как попробовать", "доступно в тарифе «Повар»" in plans.locked_text("PDF", "1") and "бесплатно" in plans.locked_text("PDF", "1"))
+plans.trial_available = lambda u: False
+check("пробный использован: о подписке", plans.next_step("1")["action"] == "sub")
+plans.plan_of = lambda u: "premium"
+check("с тарифом подсказок нет", plans.next_step("1") is None)
+plans.plan_of = _po
+_kbl = K.cuisine_kb(locked=("week",))
+_txt = [b.text for r in _kbl.inline_keyboard for b in r]
+check("закрытое меню на виду с 💎", any(x.startswith("💎 Меню на") for x in _txt) and "📅 Меню на день" in _txt, str(_txt))
+plans.paywall, plans.trial_available = _pw, _tr
+check("на сайте подсказка и полупрозрачность", "function hintHTML" in html and "opacity:.6" in html and "hintHTML()+" in html)
+check("про поиск в книге людям не рассказываем", "сначала ищет в книге" not in html and "сначала поищет" not in open("bot_book.py", encoding="utf-8").read() and "Нашёл в книге" not in open("bot.py", encoding="utf-8").read())
+
 import helpdata
 check("в справке есть дневник и отправка списка", any(k == "diary" for k, _, _ in helpdata.SECTIONS) and any("ссылкой на страницу" in t for _, _, t in helpdata.SECTIONS))
 print()

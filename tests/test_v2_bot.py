@@ -359,7 +359,7 @@ async def main():
     check("оплата: счёт в Stars (XTR), цена из настроек", inv and inv["currency"] == "XTR" and inv["prices"][0]["amount"] == 150, str(inv)[:200])
     await botmod.dp.feed_update(b, cb("pdf:r", msg_id=700))
     ans = last(s, "AnswerCallbackQuery")
-    check("бот без подписки: PDF — только в подписке", ans and "подписке" in ans.get("text", ""), str(ans))
+    check("бот без подписки: PDF — только в подписке", ans and "доступно в тарифе" in ans.get("text", ""), str(ans))
     config.PAYWALL_ENABLED = False
 
     # вход на сайт — только после подтверждения кнопкой (ссылку могли прислать чужую)
