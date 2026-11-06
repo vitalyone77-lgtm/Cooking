@@ -162,6 +162,8 @@ TG_CHANNEL_ID = os.getenv("TG_CHANNEL_ID", "")                   # @имя_ка�
 SOCIAL_AUTOPOST = os.getenv("SOCIAL_AUTOPOST", "false").lower() == "true"   # false: только вручную через /postvk
 SOCIAL_POST_HOUR = int(os.getenv("SOCIAL_POST_HOUR", "9"))
 SOCIAL_POST_MINUTE = int(os.getenv("SOCIAL_POST_MINUTE", "30"))
+SOCIAL_FEATURE_DAY = os.getenv("SOCIAL_FEATURE_DAY", "wed")       # пост о функции раз в неделю, между рецептами дня
+SOCIAL_FEATURE_HOUR = int(os.getenv("SOCIAL_FEATURE_HOUR", "18"))
 # Картинки блюд через Leonardo.ai (images.py): ключ владельца; SOCIAL_IMAGES=true — рисовать картинку к каждому рецепту дня
 # Чем делать картинку: card (фирменная карточка рецепта, бесплатно, по умолчанию), free (pollinations.ai, как в autobot),
 # leonardo (платный) или off. Если free или leonardo не справились, берётся карточка

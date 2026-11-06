@@ -19,6 +19,8 @@ import httpx
 import accounts
 import book
 import cards
+import feature_posts
+import plans
 import config
 import images
 from ai import generate_recipe
@@ -314,6 +316,68 @@ async def _tell_admins(bot, text: str) -> None:
             await bot.send_message(admin, text, parse_mode=None)
         except Exception:  # noqa: BLE001
             pass
+
+
+# ---------- посты о функциях: раз в неделю по расписанию или вручную через /postfunc ----------
+FEATURE_DONE_KEY = "soc:func"
+FEATURE_WEEK_KEY = "soc:func:week"
+
+
+def feature_done() -> dict:
+    """{пост: номер записи} уже опубликованных."""
+    return accounts.sess_get(FEATURE_DONE_KEY) or {}
+
+
+def feature_open(key: str) -> bool:
+    """Пост про новую функцию не выпускаем, пока она не открыта всем."""
+    feat = feature_posts.BY_KEY[key][4]
+    return not feat or plans.rollout().get(feat) == "all"
+
+
+def feature_next() -> str | None:
+    """Следующий пост: сначала ещё не выходившие по порядку, потом тот, что выходил давнее всего."""
+    done = feature_done()
+    keys = [p[0] for p in feature_posts.POSTS if feature_open(p[0])]
+    fresh = [k for k in keys if k not in done]
+    if fresh:
+        return fresh[0]
+    return min(keys, key=lambda k: done[k]) if keys else None
+
+
+def feature_text(key: str) -> str:
+    _, _, text, tags, _ = feature_posts.BY_KEY[key]
+    return f"{text}\n\n{links_block()}\n\n{hashtags(tags)}"
+
+
+async def publish_feature(key: str) -> int:
+    """Пост о функции в ВК с картинкой из альбома. -> номер записи. RuntimeError — понятный текст без ключа."""
+    post = await post_vk(feature_text(key), await function_photo())
+    done = feature_done()
+    done[key] = post
+    accounts.sess_set(FEATURE_DONE_KEY, done)
+    accounts.sess_mark_forever(FEATURE_DONE_KEY)
+    return post
+
+
+async def weekly_feature_job(bot) -> None:
+    """По расписанию раз в неделю. Работает только при SOCIAL_AUTOPOST=true; за неделю один пост, даже если сервер перезапустили."""
+    if not config.SOCIAL_AUTOPOST or not configured_vk():
+        return
+    week = "-".join(str(x) for x in datetime.now(ZoneInfo(config.REMINDER_TIMEZONE)).isocalendar()[:2])
+    if (accounts.sess_get(FEATURE_WEEK_KEY) or {}).get("week") == week:
+        return
+    key = feature_next()
+    if not key:
+        return
+    try:
+        post = await publish_feature(key)
+    except Exception as e:  # noqa: BLE001
+        logger.exception("Пост о функции не опубликован")
+        await _tell_admins(bot, f"⚠️ Пост о функции не опубликован: {e}")
+        return
+    accounts.sess_set(FEATURE_WEEK_KEY, {"week": week})
+    accounts.sess_mark_forever(FEATURE_WEEK_KEY)
+    logger.info("Пост о функции опубликован: %s, запись %s", key, post)
 
 
 async def daily_job(bot) -> None:

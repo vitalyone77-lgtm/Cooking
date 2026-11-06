@@ -409,6 +409,45 @@ for _f2 in ("bot.py", "bot_profile.py", "bot_shop.py", "bot_diary.py", "bot_visi
     check(f"тексты {_f2}: обращение на «вы»", _m is None, _m.group(0) if _m else "")
 check("людям не показываются технические подробности", "Техническая причина" not in open("bot.py", encoding="utf-8").read() and ".env и попробуй" not in open("ai.py", encoding="utf-8").read())
 
+# ---------- посты о функциях по расписанию ----------
+_posted = []
+
+
+async def _fake_post(text, attachment=None):
+    _posted.append((text, attachment))
+    return 100 + len(_posted)
+
+
+async def _fake_photo():
+    return "photo-1_2"
+
+
+_so.post_vk, _so.function_photo = _fake_post, _fake_photo
+_so.configured_vk = lambda: True
+_real_open = _so.feature_open
+accounts.sess_set(_so.FEATURE_DONE_KEY, {})
+accounts.sess_set(_so.FEATURE_WEEK_KEY, {})
+config.SOCIAL_AUTOPOST = False
+asyncio.run(_so.weekly_feature_job(None))
+check("посты по расписанию: выключено — ничего не выходит", not _posted)
+config.SOCIAL_AUTOPOST = True
+_rollout = plans.rollout
+plans.rollout = lambda: {"photo_recipe": "testers"}
+asyncio.run(_so.weekly_feature_job(None))
+check("посты по расписанию: первый пост с картинкой", len(_posted) == 1 and _posted[0][1] == "photo-1_2" and "Не знаете, что приготовить" in _posted[0][0], str(_posted)[:200])
+asyncio.run(_so.weekly_feature_job(None))
+check("посты по расписанию: за неделю один", len(_posted) == 1)
+_order = []
+for _ in range(6):
+    _k = _so.feature_next()
+    _order.append(_k)
+    asyncio.run(_so.publish_feature(_k))
+check("посты: закрытая функция пропускается, потом по кругу", "photo" not in _order and _order[:4] == ["list", "menu", "diary", "book"] and _order[4] == "recipe", str(_order))
+plans.rollout = lambda: {"photo_recipe": "all"}
+check("посты: функцию открыли — пост выходит", _so.feature_next() == "photo")
+plans.rollout = _rollout
+config.SOCIAL_AUTOPOST = False
+
 import helpdata
 check("в справке есть дневник и отправка списка", any(k == "diary" for k, _, _ in helpdata.SECTIONS) and any("ссылкой на страницу" in t for _, _, t in helpdata.SECTIONS))
 print()

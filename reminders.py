@@ -132,6 +132,8 @@ def setup_scheduler(bot: Bot, dp: Dispatcher) -> AsyncIOScheduler:
     scheduler.add_job(alerts.check, trigger=CronTrigger(minute=7), args=[bot], id="admin_alerts", replace_existing=True)
     # «рецепт дня» в сообщество ВК и канал (публикует сам только при SOCIAL_AUTOPOST=true)
     import social
+    scheduler.add_job(social.weekly_feature_job, trigger=CronTrigger(day_of_week=config.SOCIAL_FEATURE_DAY, hour=config.SOCIAL_FEATURE_HOUR, minute=0),
+                      args=[bot], id="social_weekly_feature", replace_existing=True)
     scheduler.add_job(social.daily_job, trigger=CronTrigger(hour=config.SOCIAL_POST_HOUR, minute=config.SOCIAL_POST_MINUTE),
                       args=[bot], id="social_daily", replace_existing=True)
     # недельные задания по продвижению владельцу (понедельник утром)

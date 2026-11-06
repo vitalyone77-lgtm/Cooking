@@ -14,7 +14,6 @@ import accounts
 import config
 import feature_posts
 import images
-import plans
 import social
 
 logger = logging.getLogger(__name__)
@@ -82,23 +81,14 @@ async def _draft(bot, chat_id: int, variant: int = 0) -> None:
 
 # ---------- посты о функциях (/postfunc): только по нажатию владельца, по одному ----------
 
-def _func_done() -> dict:
-    return accounts.sess_get("soc:func") or {}
-
-
 def _func_kb() -> InlineKeyboardMarkup:
-    done = _func_done()
+    done = social.feature_done()
     b = InlineKeyboardBuilder()
-    for key, title, _, _, feat in feature_posts.POSTS:
-        mark = "✅ " if key in done else ("🔒 " if feat and plans.rollout().get(feat) != "all" else "")
+    for key, title, _, _, _ in feature_posts.POSTS:
+        mark = "✅ " if key in done else ("🔒 " if not social.feature_open(key) else "")
         b.button(text=mark + title, callback_data=f"sf:v:{key}")
     b.adjust(1)
     return b.as_markup()
-
-
-def _func_text(key: str) -> str:
-    _, _, text, tags, _ = feature_posts.BY_KEY[key]
-    return f"{text}\n\n{social.links_block()}\n\n{social.hashtags(tags)}"
 
 
 @router.message(Command("postfunc"))
@@ -119,7 +109,7 @@ async def func_view(callback: CallbackQuery):
     b.button(text="✅ Опубликовать в ВК", callback_data=f"sf:go:{key}")
     b.button(text="⬅️ К списку", callback_data="sf:l")
     b.adjust(1)
-    await callback.message.edit_text(_func_text(key)[:3900], reply_markup=b.as_markup(), parse_mode=None, disable_web_page_preview=True)
+    await callback.message.edit_text(social.feature_text(key)[:3900], reply_markup=b.as_markup(), parse_mode=None, disable_web_page_preview=True)
 
 
 @router.callback_query(F.data == "sf:l")
@@ -143,15 +133,10 @@ async def func_go(callback: CallbackQuery):
     await callback.answer()
     await callback.message.edit_reply_markup()               # второе нажатие ничего не опубликует
     try:
-        attachment = await social.function_photo()
-        post = await social.post_vk(_func_text(key), attachment)
+        post = await social.publish_feature(key)
     except RuntimeError as e:
         await callback.message.answer(f"⚠️ {e}", parse_mode=None)
         return
-    done = _func_done()
-    done[key] = post
-    accounts.sess_set("soc:func", done)
-    accounts.sess_mark_forever("soc:func")
     await callback.message.answer(f"✅ ВКонтакте: запись №{post} опубликована", reply_markup=_func_kb(), parse_mode=None)
 
 
