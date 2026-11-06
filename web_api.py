@@ -563,7 +563,7 @@ def me(x_device: str | None = Header(default=None)):
     feat = {f: plans.has_feature(uid, f) for f in ("memory", "pdf", "cart", "noads")}
     out = {"linked": bool(tg), "plan": plans.plan_of(uid), "status": plans.status_text(uid), "left": left,
            "paywall": plans.paywall(), "memory": memory, "shelf_on": shelf_on, "bot": config.BOT_USERNAME, "feat": feat, "via": ("vk" if tg and tg >= accounts.VK_OFFSET else "tg" if tg else ""),
-           "diary_on": plans.diary_on(uid), "seller": payinfo.seller(), "photo_on": plans.feature_on(uid, "photo_recipe"),
+           "both_linked": bool(tg) and accounts.has_vk_merged(tg), "diary_on": plans.diary_on(uid), "seller": payinfo.seller(), "photo_on": plans.feature_on(uid, "photo_recipe"),
            "vk_app": (config.VK_CLIENT_ID if config.VK_LOGIN else ""),
            "pay_rub": bool(tg) and payanyway.allowed_for(uid),
            "pay_offers": ([{"key": o["key"], "title": o["title"], "rub": o["rub"], "days": o["days"]} for o in plans.pay_offers_for(uid)]

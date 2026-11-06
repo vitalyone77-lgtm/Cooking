@@ -440,7 +440,7 @@ select{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--lin
     var home=items.filter(function(i){return i.home;});
     return home.length?'<div class="home">🏠 Скорее всего есть дома: '+home.map(function(i){return esc(i.name);}).join(", ")+'</div>':"";
   }
-  function homeBtn(name){return ME.shelf_on?'<button class="chip tiny" data-home="'+esc(name)+'" title="Продукт уже есть дома: убрать из покупок">есть дома</button>':'';}
+  function homeBtn(name){return ME.shelf_on?'<button class="chip tiny" data-home="'+esc(name)+'" title="Продукт уже есть: убрать из покупок и добавить на полку">🏠 уже есть</button>':'';}
   function shoppingHTML(items,title,ctx){
     if(!items||!items.length) return "";
     var buy=items.filter(function(i){return !i.home;});
@@ -623,11 +623,11 @@ select{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--lin
         if(sr.length)pay+='<p class="sub" style="margin:12px 0 0;font-size:14px">'+sr.map(function(x){return esc(x[0])+': '+esc(x[1]);}).join("<br>")+'</p>';
         h+=accordion("💎 Подписка и оплата","","",'<div style="padding-top:10px">'+pay+'</div>',false);
         return (m.via==="vk"?linkCode():Promise.resolve(null)).then(function(L){
-          var acc='<p class="sub" style="margin:10px 0 0">Вход выполнен через '+(m.via==="vk"?"ВКонтакте":"Telegram")+'.</p>';
-          if(m.via==="tg"&&m.vk_app)acc+='<h2 style="margin-top:12px">Привязать ВКонтакте</h2><p class="sub" style="margin:0 0 10px">Тогда можно входить и через ВК, а профиль останется общим.</p><div id="vk-btn"></div>';
+          var acc='<p class="sub" style="margin:10px 0 0">'+(m.both_linked?"Telegram и ВКонтакте уже привязаны: профиль общий, входить можно любым способом.":"Вход выполнен через "+(m.via==="vk"?"ВКонтакте":"Telegram")+".")+'</p>';
+          if(m.via==="tg"&&m.vk_app&&!m.both_linked)acc+='<h2 style="margin-top:12px">Привязать ВКонтакте</h2><p class="sub" style="margin:0 0 10px">Тогда можно входить и через ВК, а профиль останется общим.</p><div id="vk-btn"></div>';
           if(L)acc+='<h2 style="margin-top:12px">Привязать Telegram</h2><p class="sub" style="margin:0 0 10px">Профиль, избранное и дневник станут общими с ботом.</p><a class="btn" data-link-go="1" href="'+esc(L.url)+'" target="_blank" rel="noopener">Привязать Telegram</a><div id="link-wait"></div>';
           acc+='<button class="btn ghost" data-unlink="1">Выйти из профиля на этом устройстве</button>'+(p.consent?'<button class="btn ghost" data-del-all="1">Удалить мои данные</button>':'');
-          return h+accordion("🔑 Вход и аккаунт","","",acc,true);    // открыто: кнопка ВК рисуется только в видимом блоке
+          return h+accordion("🔑 Вход и аккаунт",m.both_linked?"":m.via==="vk"?"здесь можно привязать Telegram":"здесь можно привязать ВКонтакте","",acc,true);    // открыто: кнопка ВК рисуется только в видимом блоке
         });
       });
     });
@@ -641,7 +641,7 @@ select{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--lin
   }
   function vkMount(){
     var box=document.getElementById("vk-btn");if(!box||!ME||!ME.vk_app)return;
-    vkStart().then(function(v){box.innerHTML='<a class="btn" data-vk-go="1" href="'+esc(v.url)+'">Войти через ВКонтакте</a><div id="vk-wait"></div>';})
+    vkStart().then(function(v){box.innerHTML='<a class="btn" data-vk-go="1" href="'+esc(v.url)+'">Войти через ВКонтакте</a><p class="sub" style="margin:8px 0 0;font-size:13px">Если вход ходит по кругу, откройте сайт в другом браузере: в Опере на телефоне такое бывает.</p><div id="vk-wait"></div>';})
       .catch(function(e){box.innerHTML='<p class="sub" style="margin:0">'+esc(e.message)+'</p>';});
   }
   // вход мог завершиться в окне приложения ВК: эта вкладка ждёт и сама открывает профиль

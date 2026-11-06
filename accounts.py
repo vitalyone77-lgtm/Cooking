@@ -309,6 +309,11 @@ def link_device_vk(dev_id: int, vk_id: int) -> int:
             c.close()
 
 
+def has_vk_merged(tg_id) -> bool:
+    """К этому аккаунту Telegram уже присоединён ВКонтакте: профиль общий, входить можно через оба."""
+    return bool(_q("SELECT 1 FROM alias WHERE dst=? LIMIT 1", (str(tg_id),), one=True))
+
+
 def tg_of_device(dev_id: int) -> int | None:
     row = _q("SELECT tg_id FROM links WHERE dev_id=?", (dev_id,), one=True)
     return row[0] if row else None
