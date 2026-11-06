@@ -441,12 +441,45 @@ _order = []
 for _ in range(6):
     _k = _so.feature_next()
     _order.append(_k)
-    asyncio.run(_so.publish_feature(_k))
+    asyncio.run(_so.publish_feature(None, _k))
+    time.sleep(0.01)
 check("посты: закрытая функция пропускается, потом по кругу", "photo" not in _order and _order[:4] == ["list", "menu", "diary", "book"] and _order[4] == "recipe", str(_order))
 plans.rollout = lambda: {"photo_recipe": "all"}
 check("посты: функцию открыли — пост выходит", _so.feature_next() == "photo")
 plans.rollout = _rollout
 config.SOCIAL_AUTOPOST = False
+
+
+class _Bot:
+    def __init__(self, fail=False):
+        self.photos, self.msgs, self.fail = [], [], fail
+
+    async def send_photo(self, chat, photo, **k):
+        self.photos.append((chat, photo))
+
+    async def send_message(self, chat, text, **k):
+        if self.fail:
+            raise RuntimeError("секрет")
+        self.msgs.append((chat, text))
+
+        class M:
+            message_id = 5
+        return M()
+
+
+config.TG_CHANNEL_ID = "@rbzum"
+config.VK_GROUP_ID = "kbzum"
+_b = _Bot()
+_n = len(_posted)
+_r = asyncio.run(_so.publish_feature(_b, "list"))
+check("пост о функции уходит и в ВК, и в Telegram со своей картинкой", _r["vk"] and _r["tg"] and len(_posted) == _n + 1 and len(_b.photos) == 1 and _b.photos[0][0] == "@rbzum", str(_r))
+_t = _b.msgs[0][1]
+check("в Telegram свои метки ссылок и нет хештега для поиска в ВК", "ref_tg" in _t and "utm_source=tg" in _t and "ref_vk" not in _t and "@kbzum" not in _t and "#списокпокупок" in _t, _t[-300:])
+_r = asyncio.run(_so.publish_feature(_Bot(fail=True), "book"))
+check("сбой Telegram не мешает ВК и не показывает подробности", _r["vk"] and not _r["tg"] and "секрет" not in str(_r["errors"]), str(_r))
+import cards as _cd
+check("карточка функции рисуется", _cd.feature_card("Список покупок, который можно отправить")[:4] == b"\x89PNG")
+config.TG_CHANNEL_ID = ""
 
 import helpdata
 check("в справке есть дневник и отправка списка", any(k == "diary" for k, _, _ in helpdata.SECTIONS) and any("ссылкой на страницу" in t for _, _, t in helpdata.SECTIONS))

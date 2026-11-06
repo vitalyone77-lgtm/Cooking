@@ -106,7 +106,7 @@ async def func_view(callback: CallbackQuery):
         return
     await callback.answer()
     b = InlineKeyboardBuilder()
-    b.button(text="✅ Опубликовать в ВК", callback_data=f"sf:go:{key}")
+    b.button(text="✅ Опубликовать", callback_data=f"sf:go:{key}")
     b.button(text="⬅️ К списку", callback_data="sf:l")
     b.adjust(1)
     await callback.message.edit_text(social.feature_text(key)[:3900], reply_markup=b.as_markup(), parse_mode=None, disable_web_page_preview=True)
@@ -127,17 +127,14 @@ async def func_go(callback: CallbackQuery):
     if not _is_admin(callback.message.chat.id) or key not in feature_posts.BY_KEY:
         await callback.answer()
         return
-    if not social.configured_vk():
-        await callback.answer("ВКонтакте не настроен", show_alert=True)
+    if not (social.configured_vk() or social.configured_tg()):
+        await callback.answer("ВКонтакте и Telegram не настроены", show_alert=True)
         return
     await callback.answer()
     await callback.message.edit_reply_markup()               # второе нажатие ничего не опубликует
-    try:
-        post = await social.publish_feature(key)
-    except RuntimeError as e:
-        await callback.message.answer(f"⚠️ {e}", parse_mode=None)
-        return
-    await callback.message.answer(f"✅ ВКонтакте: запись №{post} опубликована", reply_markup=_func_kb(), parse_mode=None)
+    res = await social.publish_feature(callback.bot, key)
+    lines = ([f"✅ ВКонтакте: запись №{res['vk']} опубликована"] if res["vk"] else []) + (["✅ Telegram: опубликовано"] if res["tg"] else []) + [f"⚠️ {e}" for e in res["errors"]]
+    await callback.message.answer("\n".join(lines) or "Некуда публиковать", reply_markup=_func_kb(), parse_mode=None)
 
 
 @router.message(Command("postvk"))

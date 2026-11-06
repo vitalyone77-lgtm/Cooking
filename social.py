@@ -11,6 +11,7 @@ import logging
 import random
 import re
 import secrets
+import time
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -257,7 +258,14 @@ async def post_vk(text: str, attachment: str | None = None) -> int:
     return int(data["response"]["post_id"])
 
 
+def tg_text(text: str) -> str:
+    """Тот же пост для Telegram: свои метки в ссылках и без хештега для поиска внутри сообщества ВК."""
+    text = text.replace("start=ref_vk", "start=ref_tg").replace("utm_source=vk", "utm_source=tg")
+    return re.sub(r"\s*#[^\s#@]+@\S+", "", text)
+
+
 async def post_tg(bot, text: str, image: bytes | None = None) -> int:
+    text = tg_text(text)
     if image:
         from aiogram.types import BufferedInputFile
         await bot.send_photo(config.TG_CHANNEL_ID, BufferedInputFile(image, "dish.png"))
@@ -349,19 +357,30 @@ def feature_text(key: str) -> str:
     return f"{text}\n\n{links_block()}\n\n{hashtags(tags)}"
 
 
-async def publish_feature(key: str) -> int:
-    """Пост о функции в ВК с картинкой из альбома. -> номер записи. RuntimeError — понятный текст без ключа."""
-    post = await post_vk(feature_text(key), await function_photo())
-    done = feature_done()
-    done[key] = post
-    accounts.sess_set(FEATURE_DONE_KEY, done)
-    accounts.sess_mark_forever(FEATURE_DONE_KEY)
-    return post
+async def publish_feature(bot, key: str) -> dict:
+    """Пост о функции: в ВК с картинкой из альбома, в Telegram со своей карточкой. -> {"vk", "tg", "errors"}; сбой в одном месте не мешает другому."""
+    out = {"vk": None, "tg": None, "errors": []}
+    if configured_vk():
+        try:
+            out["vk"] = await post_vk(feature_text(key), await function_photo())
+        except RuntimeError as e:
+            out["errors"].append(str(e))
+    if configured_tg():
+        try:
+            out["tg"] = await post_tg(bot, feature_text(key), cards.feature_card(feature_posts.BY_KEY[key][1]))
+        except Exception as e:  # noqa: BLE001
+            out["errors"].append(f"Telegram: {type(e).__name__}")
+    if out["vk"] or out["tg"]:
+        done = feature_done()
+        done[key] = time.time()
+        accounts.sess_set(FEATURE_DONE_KEY, done)
+        accounts.sess_mark_forever(FEATURE_DONE_KEY)
+    return out
 
 
 async def weekly_feature_job(bot) -> None:
     """По расписанию раз в неделю. Работает только при SOCIAL_AUTOPOST=true; за неделю один пост, даже если сервер перезапустили."""
-    if not config.SOCIAL_AUTOPOST or not configured_vk():
+    if not config.SOCIAL_AUTOPOST or not (configured_vk() or configured_tg()):
         return
     week = "-".join(str(x) for x in datetime.now(ZoneInfo(config.REMINDER_TIMEZONE)).isocalendar()[:2])
     if (accounts.sess_get(FEATURE_WEEK_KEY) or {}).get("week") == week:
@@ -369,15 +388,13 @@ async def weekly_feature_job(bot) -> None:
     key = feature_next()
     if not key:
         return
-    try:
-        post = await publish_feature(key)
-    except Exception as e:  # noqa: BLE001
-        logger.exception("Пост о функции не опубликован")
-        await _tell_admins(bot, f"⚠️ Пост о функции не опубликован: {e}")
-        return
-    accounts.sess_set(FEATURE_WEEK_KEY, {"week": week})
-    accounts.sess_mark_forever(FEATURE_WEEK_KEY)
-    logger.info("Пост о функции опубликован: %s, запись %s", key, post)
+    res = await publish_feature(bot, key)
+    if res["errors"]:
+        await _tell_admins(bot, "⚠️ Пост о функции: " + "; ".join(res["errors"]))
+    if res["vk"] or res["tg"]:
+        accounts.sess_set(FEATURE_WEEK_KEY, {"week": week})
+        accounts.sess_mark_forever(FEATURE_WEEK_KEY)
+        logger.info("Пост о функции опубликован: %s", key)
 
 
 async def daily_job(bot) -> None:

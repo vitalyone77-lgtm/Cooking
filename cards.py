@@ -120,3 +120,26 @@ def make_card(title: str, recipe_text: str, size: tuple[int, int] = (1200, 630))
     out = BytesIO()
     img.save(out, "PNG")
     return out.getvalue()
+
+
+def feature_card(title: str, size: tuple[int, int] = (1200, 630)) -> bytes:
+    """PNG с карточкой поста о функции для Telegram: название функции и фирменная тарелка."""
+    w, h = size
+    img = Image.new("RGB", (w, h), BG)
+    draw = ImageDraw.Draw(img)
+    _plate(draw, w - 250, h // 2 + 25, 0.9)
+    _pill(draw, 80, 60, "Возможности помощника", _font(26, True), pad_y=8)
+    fsize, lines = 68, []
+    for fsize in (68, 60, 54, 48):
+        lines = _wrap(draw, title, _font(fsize, True), 640)
+        if len(lines) <= 4:
+            break
+    y = 150
+    for ln in lines[:4]:
+        draw.text((80, y), ln, font=_font(fsize, True), fill=INK)
+        y += int(fsize * 1.18)
+    draw.ellipse((80, h - 52, 96, h - 36), fill=GREEN)
+    draw.text((110, h - 62), "Кухонный помощник", font=_font(26), fill=MUTED)
+    out = BytesIO()
+    img.save(out, "PNG")
+    return out.getvalue()
