@@ -68,6 +68,8 @@ def diary_view(uid: int, note: str = "") -> tuple[str, InlineKeyboardMarkup]:
     b.row(InlineKeyboardButton(text="➕ Из списка", callback_data="dy:cat"), InlineKeyboardButton(text="🔎 Найти", callback_data="dy:find"))
     b.row(InlineKeyboardButton(text="🍽 Записать рецепт", callback_data="dy:eat"),
           *([] if en else [InlineKeyboardButton(text="🧮 Расход", callback_data="dy:calc")]))
+    if accounts.diary_yesterday(uid):
+        b.row(InlineKeyboardButton(text="🔁 Как вчера", callback_data="dy:yd"))
     b.row(InlineKeyboardButton(text="⬅️ Профиль", callback_data="pf:main"))
     dels = [InlineKeyboardButton(text=f"❌ {i}", callback_data=f"dy:del:{it['id']}") for i, it in enumerate(day["items"][:12], 1)]
     for k in range(0, len(dels), 6):
@@ -114,6 +116,35 @@ async def open_diary(callback: CallbackQuery, state: FSMContext):
         return
     await callback.answer()
     await _show(callback)
+
+
+@router.callback_query(F.data == "dy:yd")
+async def yesterday_list(callback: CallbackQuery):
+    """Быстрая запись: то же, что ели вчера. Дольше всего дневник бросают из-за долгой записи."""
+    if not await _need_diary(callback):
+        return
+    await callback.answer()
+    b = InlineKeyboardBuilder()
+    for it in accounts.diary_yesterday(callback.message.chat.id)[:12]:
+        b.row(InlineKeyboardButton(text=f"{it['title'][:40]} · {it['kcal']}", callback_data=f"dy:cp:{it['id']}"))
+    b.row(InlineKeyboardButton(text="⬅️ Дневник", callback_data="dy:open"))
+    await ui.show(callback, "🔁 Вчера вы записали. Нажмите, чтобы добавить на сегодня:", b.as_markup(), mode="edit")
+
+
+@router.callback_query(F.data.startswith("dy:cp:"))
+async def yesterday_copy(callback: CallbackQuery):
+    if not await _need_diary(callback):
+        return
+    try:
+        res = accounts.diary_copy(callback.message.chat.id, int(callback.data.split(":")[2]))
+    except ValueError as e:
+        await callback.answer(str(e), show_alert=True)
+        return
+    if not res:
+        await callback.answer("Запись не найдена")
+        return
+    usage.event("diary_copy", callback.message.chat.id)
+    await callback.answer(f"Записал: {res['kcal']} ккал")
 
 
 @router.callback_query(F.data == "dy:eat")

@@ -210,8 +210,10 @@ async def cmd_testacc(message: Message):
 def _partner_text(p: dict) -> str:
     s, ln = partners.stats(p), partners.links(p)
     return (f"🤝 Партнёр {p['code']}\n\nСсылка на сайт: {ln['site']}\nСсылка на бота: {ln['bot']}\nКабинет (личная ссылка): {ln['cabinet']}\n\n"
-            f"Переходов: {s['clicks']}, пришло людей: {s['users']}, оплатили: {s['buyers']}, оплаченных подписок сейчас: {s['active']}\nСумма оплат: {s['gross']:g} ₽, налог {p['tax']:g}%: {s['tax']:g} ₽, комиссия платёжного сервиса {partners.COMMISSION:g}%: {s['fee']:g} ₽\n"
-            f"Доля {p['share']:g}%: {s['due']:g} ₽, выплачено: {s['paid']:g} ₽, к выплате: {s['balance']:g} ₽")
+            f"Переходов: {s['clicks']}, пришло людей: {s['users']}, оплатили: {s['buyers']}, оплаченных подписок сейчас: {s['active']}\n\n"
+            f"С прошлой выплаты: {s['unpaid']:g} ₽, налог {p['tax']:g}%: {s['tax']:g} ₽, комиссия платёжного сервиса: {s['fee']:g} ₽\n"
+            f"Доля {p['share']:g}%: {s['due']:g} ₽" + (" (можно выплачивать)" if s["ready"] else f" (меньше {partners.MIN_PAYOUT} ₽, переносится)") + f"\nВсего выплачено: {s['paid']:g} ₽\n"
+            f"Звёзды: всего {s['stars']}, к выплате {s['stars_due']} ⭐, выплачено {s['stars_paid']} ⭐")
 
 
 @router.message(Command("partner"))
@@ -227,20 +229,26 @@ async def cmd_partner(message: Message, command: CommandObject):
 
 @router.message(Command("partnerpaid"))
 async def cmd_partner_paid(message: Message, command: CommandObject):
-    """/partnerpaid код сумма — отметить выплату партнёру."""
+    """/partnerpaid код — рубли выплачены. /partnerpaid код всё — выплатить меньше минимума. /partnerpaid код звёзды — звёзды выплачены."""
     if not _is_admin(message.chat.id):
         return
     parts = (command.args or "").split()
-    p = partners.get(parts[0]) if len(parts) == 2 else None
-    try:
-        amount = float(parts[1].replace(",", ".")) if p else 0
-    except ValueError:
-        amount = 0
-    if not p or amount <= 0:
-        await message.answer("Формат: /partnerpaid код сумма", parse_mode=None)
+    p = partners.get(parts[0]) if parts else None
+    if not p or len(parts) > 2 or (len(parts) == 2 and parts[1] not in ("всё", "все", "звёзды", "звезды")):
+        await message.answer("Формат: /partnerpaid код. Меньше минимума: /partnerpaid код всё. Звёзды: /partnerpaid код звёзды", parse_mode=None)
         return
-    partners.payout(p["code"], amount)
-    await message.answer(_partner_text(p), parse_mode=None, disable_web_page_preview=True)
+    if len(parts) == 2 and parts[1] in ("звёзды", "звезды"):
+        n = partners.settle_stars(p["code"])
+        note = f"✅ Отмечено: {n} ⭐" if n > 0 else "Звёзд к выплате нет."
+    else:
+        s = partners.stats(p)
+        if s["due"] <= 0:
+            note = "Выплачивать нечего."
+        elif not s["ready"] and len(parts) == 1:
+            note = f"Накоплено {s['due']:g} ₽, это меньше {partners.MIN_PAYOUT} ₽: сумма переносится. Если всё же выплатили: /partnerpaid {p['code']} всё"
+        else:
+            note = f"✅ Отмечена выплата: {partners.settle(p['code']):g} ₽"
+    await message.answer(note + "\n\n" + _partner_text(p), parse_mode=None, disable_web_page_preview=True)
 
 
 @router.message(Command("postvk"))

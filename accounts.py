@@ -57,7 +57,7 @@ CREATE TABLE IF NOT EXISTS pay_orders(id TEXT PRIMARY KEY, uid TEXT, plan TEXT, 
 CREATE INDEX IF NOT EXISTS pay_orders_uid ON pay_orders(uid, ts);
 CREATE TABLE IF NOT EXISTS book_votes(book_id INTEGER, uid TEXT, vote INTEGER, ts REAL, PRIMARY KEY(book_id, uid));
 CREATE TABLE IF NOT EXISTS partners(code TEXT PRIMARY KEY, token TEXT UNIQUE, share REAL, tax REAL, clicks INTEGER, ts REAL);
-CREATE TABLE IF NOT EXISTS partner_payouts(id INTEGER PRIMARY KEY AUTOINCREMENT, code TEXT, amount REAL, ts REAL);
+CREATE TABLE IF NOT EXISTS partner_settlements(id INTEGER PRIMARY KEY AUTOINCREMENT, code TEXT, gross REAL, amount REAL, stars INTEGER, ts REAL);
 CREATE TABLE IF NOT EXISTS macro_ref(uid TEXT PRIMARY KEY, p REAL, f REAL, c REAL);
 CREATE TABLE IF NOT EXISTS shop_lists(id TEXT PRIMARY KEY, uid TEXT, title TEXT, items TEXT, done TEXT, ts REAL);
 CREATE INDEX IF NOT EXISTS shop_lists_uid ON shop_lists(uid, ts);
@@ -916,6 +916,21 @@ def macro_ref_set(uid, protein, fat, carb) -> dict | None:
         raise ValueError("Сумма процентов должна быть 100")
     _q("INSERT INTO macro_ref(uid, p, f, c) VALUES(?,?,?,?) ON CONFLICT(uid) DO UPDATE SET p=excluded.p, f=excluded.f, c=excluded.c", (str(uid), p, f, c))
     return {"protein": p, "fat": f, "carb": c}
+
+
+def diary_yesterday(uid) -> list[dict]:
+    """Что записано вчера: чтобы повторить привычный завтрак одним нажатием."""
+    import datetime
+    return diary_day(uid, (datetime.date.today() - datetime.timedelta(days=1)).isoformat())["items"]
+
+
+def diary_copy(uid, entry_id: int) -> dict | None:
+    """Записать такую же еду на сегодня. Только свою запись. -> запись или None."""
+    r = _q("SELECT title, kcal, protein, fat, carb, src FROM diary WHERE uid=? AND id=?", (str(uid), int(entry_id)), one=True)
+    if not r:
+        return None
+    diary_add(uid, r[0], r[1], r[2], r[3], r[4], r[5])
+    return {"title": r[0], "kcal": r[1]}
 
 
 def diary_stats(series: list[dict]) -> dict:

@@ -989,7 +989,7 @@ def diary_get(days: int = 30, x_device: str | None = Header(default=None)):
     by_name = {f["name"]: f for f in foods.FOODS}
     return {"days": days, "today": accounts.diary_day(uid), "target": target, "energy": en, "series": series, "stats": accounts.diary_stats(series),
             "shares": charts.macro_shares(series), "reference": charts.reference_text(accounts.macro_ref_get(uid)), "athlete_note": charts.ATHLETE_NOTE, "note": accounts.DIARY_NOTE,
-            "weights": [w for w in accounts.weights_list(uid, days + 5) if w["day"] >= series[0]["day"]], "weight_goal": g["weight_goal"], "goal_grams": {k: g[k] for k in ("protein", "fat", "carb")},
+            "weights": [w for w in accounts.weights_list(uid, days + 5) if w["day"] >= series[0]["day"]], "yesterday": accounts.diary_yesterday(uid)[:12], "weight_goal": g["weight_goal"], "goal_grams": {k: g[k] for k in ("protein", "fat", "carb")},
             "frequent": [_food_json(by_name[n]) for n in accounts.diary_frequent(uid) if n in by_name],
             "activities": [{"key": k, "title": v[1]} for k, v in accounts.ACTIVITY.items()]}
 
@@ -1041,6 +1041,20 @@ def diary_recipe(body: DiaryRecipeIn, x_device: str | None = Header(default=None
         raise HTTPException(400, str(e))
     usage.event("diary_add", uid)
     return {"ok": True, "kcal": kcal}
+
+
+@app.post("/api/diary/{entry_id}/copy")
+def diary_copy(entry_id: int, x_device: str | None = Header(default=None)):
+    """Записать на сегодня то же, что вчера. Только свою запись."""
+    uid = _need_diary(_dev(x_device))
+    try:
+        res = accounts.diary_copy(uid, entry_id)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    if not res:
+        raise HTTPException(404, "Запись не найдена")
+    usage.event("diary_copy", uid)
+    return {"ok": True, "kcal": res["kcal"]}
 
 
 @app.delete("/api/diary/{entry_id}")

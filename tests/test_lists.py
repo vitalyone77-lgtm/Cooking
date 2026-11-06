@@ -572,10 +572,21 @@ check("партнёр: истёкшая не считается", _pt.stats(_pt.
 accounts.grant_days(7310, 7, "trial")
 accounts.set_ref(7310, "testpartner")
 check("партнёр: пробный период не считается", _pt.stats(_pt.get("testpartner"))["active"] == 0)
-_pt.payout("testpartner", 100)
-check("партнёр: выплата уменьшает остаток", _pt.stats(_pt.get("testpartner"))["balance"] == 632)
+check("партнёр: меньше 1000 ₽ не готово к выплате", _s["ready"] is False)
+accounts.set_ref(7320, "testpartner")
+accounts.apply_payment("tg:s1", 7320, 500, "XTR", 30, "month")
+_sx = _pt.stats(_pt.get("testpartner"))
+check("партнёр: звёзды считаются отдельно, 80%", _sx["stars"] == 700 and _sx["stars_due"] == 560 and _sx["due"] == 732, str(_sx)[:300])
+check("партнёр: звёзды выплачены", _pt.settle_stars("testpartner") == 560 and _pt.stats(_pt.get("testpartner"))["stars_due"] == 0)
+check("партнёр: комиссия с каждой выплаты, минимум 40", _pt._money(1740, {"tax": 4, "share": 80})["due"] == 1273.68 and _pt._money(100, {"tax": 4, "share": 80})["due"] == 44.8)
+check("партнёр: выплата обнуляет накопленное", _pt.settle("testpartner") == 732 and _pt.stats(_pt.get("testpartner"))["balance"] == 0 and _pt.stats(_pt.get("testpartner"))["paid"] == 732)
+accounts.apply_payment("pw:p9", 7300, 2000, "RUB", 30, "month")
+_sy = _pt.stats(_pt.get("testpartner"))
+check("партнёр: новая сумма считается заново и готова к выплате", _sy["unpaid"] == 2000 and _sy["ready"] is True and _sy["due"] == 1464, str(_sy)[:200])
+accounts.refund_payment("p9")
+check("партнёр: возврат до выплаты убирает сумму", _pt.stats(_pt.get("testpartner"))["unpaid"] == 0)
 pg = cl.get("/partner/" + _p["token"])
-check("партнёр: кабинет по секретной ссылке, закрыт от поиска", pg.status_code == 200 and "632" in pg.text and "Комиссия платёжного сервиса" in pg.text and "Оплаченных подписок сейчас" in pg.text and "noindex" in pg.text, pg.text[:100])
+check("партнёр: кабинет по секретной ссылке, закрыт от поиска", pg.status_code == 200 and "732" in pg.text and "до 10 числа" in pg.text and "Комиссия платёжного сервиса" in pg.text and "Оплаченных подписок сейчас" in pg.text and "noindex" in pg.text, pg.text[:100])
 check("партнёр: без секрета кабинета нет", cl.get("/partner/testpartner").status_code == 404)
 
 # ---------- тестовый аккаунт ----------
@@ -595,6 +606,16 @@ check("тест: новый вошедший, тариф бесплатный, �
 import payanyway as _pw2
 _chk = plans.is_preview("7400") and _pw2.__name__
 check("другие люди не затронуты", cl.get("/api/me", headers=H).json()["paywall"] is False and plans.plan_of("7001") == "open")
+
+# ---------- дневник: как вчера ----------
+import datetime as _dd
+_yd = (_dd.date.today() - _dd.timedelta(days=1)).isoformat()
+_eid = accounts.diary_add(TG, "Овсянка (200 г)", 200, 7, 4, 30, "list", day=_yd)
+_dj = cl.get("/api/diary", headers=H).json()
+check("дневник: вчерашнее приходит на сайт", any(i["id"] == _eid for i in _dj["yesterday"]))
+_n0 = _dj["today"]["kcal"]
+check("дневник: повторить вчера", cl.post(f"/api/diary/{_eid}/copy", headers=H).json()["kcal"] == 200 and cl.get("/api/diary", headers=H).json()["today"]["kcal"] == _n0 + 200)
+check("дневник: чужую запись не скопировать", accounts.diary_copy("другой", _eid) is None and cl.post("/api/diary/99999999/copy", headers=H).status_code == 404)
 
 # ---------- возвраты ----------
 accounts.set_ref(7600, "testpartner")
