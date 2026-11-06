@@ -845,7 +845,7 @@ async def sub_pay_pw(callback: CallbackQuery):
 async def sub_buy(callback: CallbackQuery):
     _, _, method, key = callback.data.split(":", 3)
     o = plans.offer(key)
-    if not o or method not in ("stars", "rub"):
+    if not o or key == plans.CHECK_KEY or method not in ("stars", "rub"):         # проверочный тариф только через кабинет платежей и только тестировщикам
         await callback.answer("Тариф не найден", show_alert=True)
         return
     await callback.answer()
@@ -871,7 +871,7 @@ def _parse_payload(payload: str) -> tuple[dict, int] | None:
     try:
         kind, key, uid = payload.split(":")
         o = plans.offer(key)
-        return (o, int(uid)) if kind == "sub" and o else None
+        return (o, int(uid)) if kind == "sub" and o and key != plans.CHECK_KEY else None
     except ValueError:
         return None
 
@@ -889,6 +889,12 @@ async def payment_done(message: Message):
     parsed = _parse_payload(sp.invoice_payload)
     if not parsed:
         logger.error("Оплата с непонятным payload %r", sp.invoice_payload)
+        await message.answer("Оплата получена, но тариф не определился. Мы уже разбираемся и включим подписку вручную.", parse_mode=None)
+        for admin in config.ADMIN_TG_IDS:                # деньги списаны, подписка не выдана: без этого сообщения об этом никто не узнает
+            try:
+                await message.bot.send_message(admin, f"⚠️ Оплата не зачислена автоматически: {sp.total_amount} {sp.currency}, {sp.invoice_payload}, пользователь {message.chat.id}", parse_mode=None)
+            except Exception:  # noqa: BLE001
+                pass
         return
     o, uid = parsed
     until = accounts.apply_payment(sp.telegram_payment_charge_id, uid, sp.total_amount, sp.currency, o["days"], o["key"])

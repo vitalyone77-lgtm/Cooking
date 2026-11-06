@@ -359,16 +359,31 @@ def grant_days(uid, days: int, source: str) -> float:
 
 
 def trial_used(uid) -> bool:
+    """Пробный период уже был, либо человек уже платил: тогда бесплатная неделя не положена."""
     row = _q("SELECT trial_used FROM subs WHERE uid=?", (str(uid),), one=True)
-    return bool(row and row[0])
+    if row and row[0]:
+        return True
+    return bool(_q("SELECT 1 FROM payments WHERE uid=? AND currency NOT IN ('RUBTEST', 'RUBREFUND') LIMIT 1", (str(uid),), one=True))
 
 
 def start_trial(uid, days: int) -> float | None:
-    if days <= 0 or trial_used(uid):
+    """Пробный период один раз: проверка и выдача одной транзакцией, два одновременных нажатия не дадут две недели."""
+    if days <= 0:
         return None
-    until = grant_days(uid, days, "trial")
-    _q("UPDATE subs SET trial_used=1 WHERE uid=?", (str(uid),))
-    return until
+    with _lock:
+        c = _conn()
+        try:
+            with c:
+                row = c.execute("SELECT until, trial_used FROM subs WHERE uid=?", (str(uid),)).fetchone()
+                paid = c.execute("SELECT 1 FROM payments WHERE uid=? AND currency NOT IN ('RUBTEST', 'RUBREFUND') LIMIT 1", (str(uid),)).fetchone()
+                if (row and row[1]) or paid:
+                    return None
+                until = max(time.time(), (row[0] or 0) if row else 0) + days * 86400
+                c.execute("INSERT INTO subs(uid, until, source, trial_used) VALUES(?,?,'trial',1) ON CONFLICT(uid) DO UPDATE SET "
+                          "until=excluded.until, source=excluded.source, trial_used=1", (str(uid), until))
+                return until
+        finally:
+            c.close()
 
 
 def record_payment(charge_id: str, uid, amount: int, currency: str, days: int, plan: str) -> bool:
@@ -441,9 +456,11 @@ def use_promo(uid, code: str) -> bool:
 
 
 def set_ref(uid, ref: str) -> None:
-    """Откуда пришёл человек (t.me/бот?start=ref_блогер). Запоминаем только первый источник."""
+    """Откуда пришёл человек (t.me/бот?start=ref_блогер). Запоминаем только первый источник и только у нового человека:
+    кто уже пользовался сервисом, не считается приведённым по ссылке, иначе партнёру засчитывались бы чужие оплаты."""
+    import usage
     ref = "".join(ch for ch in ref if ch.isalnum() or ch in "_-")[:32]
-    if ref:
+    if ref and not usage.is_old_user(uid):
         _q("INSERT OR IGNORE INTO refs(uid, ref, ts) VALUES(?,?,?)", (str(uid), ref, time.time()))
 
 
@@ -545,6 +562,7 @@ def _merge_accounts(c, src: str, dst: str) -> None:
         c.execute(f"DELETE FROM {t} WHERE uid=?", (src,))
     c.execute("UPDATE diary SET uid=? WHERE uid=?", (dst, src))
     c.execute("UPDATE payments SET uid=? WHERE uid=?", (dst, src))
+    c.execute("UPDATE pay_orders SET uid=? WHERE uid=?", (dst, src))       # оплата, начатая до объединения, должна прийти в общий профиль
     c.execute("UPDATE shop_lists SET uid=? WHERE uid=?", (dst, src))
     s = c.execute("SELECT until, source, trial_used FROM subs WHERE uid=?", (src,)).fetchone()
     if s:
@@ -570,7 +588,9 @@ def _link(c, dev_id: int, tg_id: int) -> None:
 def _merge_device(c, dev_id: int, tg_id: int) -> None:
     """Устройство привязали к Telegram: его избранное (сделанное без входа) переходит в аккаунт."""
     c.execute("UPDATE OR IGNORE favs SET uid=? WHERE uid=?", (str(tg_id), f"w{dev_id}"))
-    c.execute("UPDATE OR IGNORE refs SET uid=? WHERE uid=?", (str(tg_id), f"w{dev_id}"))      # откуда пришёл гость: важно для партнёрской доли
+    import usage
+    if not usage.is_old_user(tg_id):                                                         # откуда пришёл гость: важно для партнёрской доли, но только у нового аккаунта
+        c.execute("UPDATE OR IGNORE refs SET uid=? WHERE uid=?", (str(tg_id), f"w{dev_id}"))
     c.execute("DELETE FROM refs WHERE uid=?", (f"w{dev_id}",))
 
 
@@ -646,7 +666,7 @@ def money_stats() -> dict:
         return _q(q, a, one=True)[0]
     now = time.time()
     trials = one("SELECT COUNT(*) FROM subs WHERE trial_used=1")
-    paid_after_trial = one("SELECT COUNT(DISTINCT p.uid) FROM payments p JOIN subs s ON s.uid=p.uid WHERE s.trial_used=1")
+    paid_after_trial = one("SELECT COUNT(DISTINCT p.uid) FROM payments p JOIN subs s ON s.uid=p.uid WHERE s.trial_used=1 AND p.currency NOT IN ('RUBTEST', 'RUBREFUND')")
     return {
         "months": sorted(by_month.values(), key=lambda d: d["month"], reverse=True),
         "recent": recent,

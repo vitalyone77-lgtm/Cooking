@@ -86,10 +86,11 @@ def get_order(oid: str) -> dict | None:
 
 def form_fields(order: dict) -> dict:
     o = plans.offer(order["plan"]) or {"title": order["plan"]}
+    site = (config.WEB_APP_URL or "https://menu.ymayaka.ru").rstrip("/")
     sig = form_signature(str(config.PAYANYWAY_MNT_ID), order["id"], order["amount"], "RUB", "", order["test"], config.PAYANYWAY_CODE)
     fields = {"MNT_ID": str(config.PAYANYWAY_MNT_ID), "MNT_TRANSACTION_ID": order["id"], "MNT_CURRENCY_CODE": "RUB", "MNT_AMOUNT": order["amount"],
               "MNT_TEST_MODE": str(order["test"]), "MNT_DESCRIPTION": f"Кухонный помощник: подписка «{plans.PREMIUM_NAME}», {o['title'].lower()}",
-              "moneta.locale": "ru"}
+              "MNT_SUCCESS_URL": site + "/?pay=ok", "MNT_FAIL_URL": site + "/?pay=fail", "MNT_RETURN_URL": site + "/", "moneta.locale": "ru"}
     if str(config.PAYANYWAY_SIGN_FORM).strip().lower() not in ("0", "false", "no", "off"):
         fields["MNT_SIGNATURE"] = sig
     return fields
@@ -145,7 +146,7 @@ def handle_notification(p: dict) -> tuple[str, dict | None]:
         rub = int(Decimal(order["amount"]))
         charge = ("pwtest:" if order["test"] else "pw:") + op
         until = accounts.apply_payment(charge, order["uid"], rub, "RUBTEST" if order["test"] else "RUB", int(order["days"]), order["plan"])
-        accounts._q("UPDATE pay_orders SET status='paid', op=? WHERE id=?", (op, order["id"]))
+        accounts._q("UPDATE pay_orders SET status='paid', op=? WHERE id=? AND status='new'", (op, order["id"]))      # возврат повторным уведомлением не отменится
         info = {"uid": order["uid"], "plan": order["plan"], "amount": order["amount"], "test": order["test"],
                 "until": until, "new": until is not None}
         return "SUCCESS", info

@@ -68,7 +68,7 @@ def stats(p: dict) -> dict:
     total = {k: round(sum(m[k] for m in by_month), 2) for k in ("gross", "tax", "fee", "due")}       # минимум комиссии действует в каждом месяце
     now = time.time()
     active = accounts._q("SELECT COUNT(DISTINCT s.uid) FROM subs s JOIN refs r ON r.uid=s.uid JOIN payments p ON p.uid=s.uid "
-                         "WHERE r.ref=? AND s.until > ? AND p.currency='RUB'", (p["code"], now), one=True)[0]
+                         "WHERE r.ref=? AND s.until > ? AND s.source='payment' AND p.currency='RUB'", (p["code"], now), one=True)[0]
     return {"clicks": p["clicks"], "users": users, "buyers": len({r[0] for r in rows}), "active": active, "payments": len(rows), **total, "paid": round(paid, 2),
             "balance": round(total["due"] - paid, 2), "months": by_month}
 

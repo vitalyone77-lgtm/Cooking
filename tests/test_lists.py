@@ -614,6 +614,59 @@ check("возврат: повторное уведомление не выдаё
 import accounts as _ac2
 check("возврат: выручка партнёра по ссылкам без отменённого", any(x["ref"] == "testpartner" and x["amount"] == _before + 10 for x in accounts.ref_stats()), str(accounts.ref_stats()))
 
+# ---------- проверка денег ----------
+import usage as _us
+# объединение: заказ переходит в общий профиль
+accounts._q("INSERT INTO pay_orders(id, uid, plan, days, amount, test, ts, status) VALUES('cpmerge','1400000000001','month',30,'290.00',0,?,'new')", (time.time(),))
+_mc = accounts._conn()
+with _mc:
+    accounts._merge_accounts(_mc, "1400000000001", "7700")
+_mc.close()
+check("деньги: заказ переходит при объединении", accounts._q("SELECT uid FROM pay_orders WHERE id='cpmerge'", one=True)[0] == "7700")
+# пробный период
+check("деньги: пробный один раз", accounts.start_trial("7710", 7) and accounts.start_trial("7710", 7) is None and accounts.trial_used("7710"))
+accounts.apply_payment("pw:t1", "7720", 290, "RUB", 30, "month")
+check("деньги: кто платил, пробного не получает", accounts.start_trial("7720", 7) is None and accounts.trial_used("7720"))
+accounts.apply_payment("pwtest:t2", "7730", 290, "RUBTEST", 30, "month")
+check("деньги: тестовый платёж пробному не мешает", accounts.start_trial("7730", 7) is not None)
+_u0 = accounts.premium_until("7740")
+_tt = accounts.start_trial("7740", 7)
+check("деньги: пробный не укорачивает", _tt and _tt > time.time() + 6 * 86400)
+# партнёр: старые пользователи не считаются
+_us._q("INSERT OR REPLACE INTO seen(uid, ts, stage, first) VALUES('7750', ?, 0, ?)", (time.time(), time.time() - 30 * 86400))
+accounts.set_ref("7750", "testpartner")
+check("деньги: давний пользователь не засчитывается партнёру", accounts._q("SELECT COUNT(*) FROM refs WHERE uid='7750'", one=True)[0] == 0)
+_us._q("INSERT OR REPLACE INTO seen(uid, ts, stage, first) VALUES('7760', ?, 0, ?)", (time.time(), time.time()))
+accounts.set_ref("7760", "testpartner")
+check("деньги: новый засчитывается", accounts._q("SELECT ref FROM refs WHERE uid='7760'", one=True)[0] == "testpartner")
+_dvo = cl.post("/api/device").json()["device"]
+cl.post("/api/ref", json={"ref": "testpartner"}, headers={"X-Device": _dvo})
+accounts.claim_login_code(accounts.new_login_code(7750), web_db.device_id(_dvo))
+check("деньги: старый вошёл через ссылку на сайте, не засчитан", accounts._q("SELECT COUNT(*) FROM refs WHERE uid='7750'", one=True)[0] == 0)
+# промокод не считается оплаченной подпиской
+_act0 = _pt.stats(_pt.get("testpartner"))["active"]
+accounts.apply_payment("pw:t5", "7760", 290, "RUB", 1, "month")
+accounts._q("UPDATE subs SET until=? WHERE uid='7760'", (time.time() - 5,))
+accounts.grant_days("7760", 14, "promo:X")
+check("деньги: промокод не считается оплаченной подпиской", _pt.stats(_pt.get("testpartner"))["active"] == _act0, str(_pt.stats(_pt.get("testpartner"))))
+accounts.refund_payment("t5")
+# возврат не отменяется повторным уведомлением
+import payanyway as _pwc
+_cfg = (config.PAYANYWAY_MNT_ID, config.PAYANYWAY_CODE, config.PAYANYWAY_TEST)
+config.PAYANYWAY_MNT_ID, config.PAYANYWAY_CODE, config.PAYANYWAY_TEST = "111", "secretcode", "0"
+accounts._q("INSERT INTO pay_orders(id, uid, plan, days, amount, test, ts, status) VALUES('cprefund','7770','month',30,'290.00',0,?,'new')", (time.time(),))
+_np = {"MNT_ID": "111", "MNT_TRANSACTION_ID": "cprefund", "MNT_OPERATION_ID": "555", "MNT_AMOUNT": "290.00", "MNT_CURRENCY_CODE": "RUB", "MNT_TEST_MODE": "0"}
+_np["MNT_SIGNATURE"] = _pwc.notify_signature(_np, "secretcode")
+check("деньги: уведомление зачислено", _pwc.handle_notification(dict(_np))[0] == "SUCCESS" and accounts.is_premium("7770"))
+accounts.refund_payment("555")
+_res = _pwc.handle_notification(dict(_np))
+check("деньги: повтор после возврата подписку не возвращает", _res[0] == "SUCCESS" and _res[1]["new"] is False and not accounts.is_premium("7770") and accounts._q("SELECT status FROM pay_orders WHERE id='cprefund'", one=True)[0] == "refunded")
+_ff = _pwc.form_fields(_pwc.get_order("cprefund"))
+check("деньги: форма возвращает на сайт", _ff["MNT_SUCCESS_URL"].endswith("/?pay=ok") and _ff["MNT_FAIL_URL"].endswith("/?pay=fail"))
+config.PAYANYWAY_MNT_ID, config.PAYANYWAY_CODE, config.PAYANYWAY_TEST = _cfg
+import bot_profile as _bpf
+check("деньги: проверочный тариф нельзя через оплату Telegram", _bpf._parse_payload("sub:check:1") is None and _bpf._parse_payload("sub:month:1") is not None)
+
 # ---------- аналитика ----------
 import analytics as _an
 import usage as _us

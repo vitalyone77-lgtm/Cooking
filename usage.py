@@ -301,6 +301,15 @@ def note_request(uid, data: dict) -> None:
     note_words("exc", data.get("excluded") or "")
 
 
+NEW_USER_HOURS = 1
+
+
+def is_old_user(uid) -> bool:
+    """Человек появился раньше, чем час назад: для партнёрских ссылок он уже не новый."""
+    row = _q("SELECT first FROM seen WHERE uid=?", (str(uid),), one=True)
+    return bool(row and row[0] and time.time() - row[0] > NEW_USER_HOURS * 3600)
+
+
 def event(name: str, uid) -> None:
     """Отметить использование функции (режим готовки, список покупок, вход на сайт…) — для статистики."""
     try:
