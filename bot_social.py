@@ -150,6 +150,49 @@ async def cmd_stats(message: Message):
         await message.answer(analytics.report_text(), parse_mode=None)
 
 
+@router.message(Command("refund"))
+async def cmd_refund(message: Message, command: CommandObject):
+    """/refund номер_операции — отметить возврат, сделанный в кабинете платёжного сервиса."""
+    if not _is_admin(message.chat.id):
+        return
+    op = (command.args or "").strip()
+    pay = accounts.payment_by_op(op) if op else None
+    if not pay:
+        await message.answer("Формат: /refund номер_операции из кабинета платёжного сервиса. Такой операции не нашёл.", parse_mode=None)
+        return
+    if pay["currency"] != "RUB":
+        await message.answer("Этот платёж уже отмечен как возврат или не является настоящей оплатой в рублях.", parse_mode=None)
+        return
+    b = InlineKeyboardBuilder()
+    b.button(text="✅ Да, отметить возврат", callback_data=f"rf:go:{op}"[:64])
+    b.button(text="Отмена", callback_data="rf:no")
+    b.adjust(1)
+    await message.answer(f"Операция {op}: {pay['amount']} ₽, пользователь {pay['uid']}, тариф {pay['plan']}.\n\nПодписка сократится на {pay['days']} дн., платёж уйдёт из выручки и расчёта партнёра. "
+                         "Сами деньги возвращаются в кабинете платёжного сервиса.", reply_markup=b.as_markup(), parse_mode=None)
+
+
+@router.callback_query(F.data == "rf:no")
+async def refund_no(callback: CallbackQuery):
+    await callback.answer("Отменил")
+    await callback.message.edit_reply_markup()
+
+
+@router.callback_query(F.data.startswith("rf:go:"))
+async def refund_go(callback: CallbackQuery):
+    if not _is_admin(callback.message.chat.id):
+        await callback.answer()
+        return
+    op = callback.data.split(":", 2)[2]
+    res = accounts.refund_payment(op)
+    await callback.answer()
+    await callback.message.edit_reply_markup()
+    if not res:
+        await callback.message.answer("Платёж уже отмечен как возврат.", parse_mode=None)
+        return
+    accounts.admin_log("owner", "возврат", f"операция {op}, {res['amount']} ₽, пользователь {res['uid']}")
+    await callback.message.answer(f"✅ Возврат отмечен: операция {op}, {res['amount']} ₽.", parse_mode=None)
+
+
 @router.message(Command("testacc"))
 async def cmd_testacc(message: Message):
     """Две одноразовые ссылки: чистый гость и чистый вошедший. Для них подписка как будто включена, для остальных людей ничего не меняется."""

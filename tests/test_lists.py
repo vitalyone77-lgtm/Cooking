@@ -596,6 +596,24 @@ import payanyway as _pw2
 _chk = plans.is_preview("7400") and _pw2.__name__
 check("другие люди не затронуты", cl.get("/api/me", headers=H).json()["paywall"] is False and plans.plan_of("7001") == "open")
 
+# ---------- возвраты ----------
+accounts.set_ref(7600, "testpartner")
+_before = _pt.stats(_pt.get("testpartner"))["gross"]
+accounts.apply_payment("pw:9901", 7600, 290, "RUB", 30, "month")
+accounts.apply_payment("pw:9902", 7600, 10, "RUB", 1, "check")
+_until = accounts.premium_until(7600)
+_s1 = _pt.stats(_pt.get("testpartner"))
+check("возврат: до него оплаты считаются", _s1["gross"] == _before + 300, str(_s1))
+_m = accounts.money_stats()
+check("выручка: рубли PayAnyWay без деления на 100, тестовые не входят", _m["total_rub"] >= 300 and _m["total_rub"] == 1000 + 300, str(_m["total_rub"]))
+_rf = accounts.refund_payment("9901")
+check("возврат: отмечен, подписка короче на срок платежа", _rf and _rf["amount"] == 290 and abs(accounts.premium_until(7600) - (_until - 30 * 86400)) < 2, str(_rf))
+check("возврат: ушёл из доли партнёра и выручки", _pt.stats(_pt.get("testpartner"))["gross"] == _before + 10 and accounts.money_stats()["total_rub"] == 1000 + 10)
+check("возврат: второй раз ничего не меняет", accounts.refund_payment("9901") is None and accounts.refund_payment("нет") is None)
+check("возврат: повторное уведомление не выдаёт подписку заново", accounts.apply_payment("pw:9901", 7600, 290, "RUB", 30, "month") is None)
+import accounts as _ac2
+check("возврат: выручка партнёра по ссылкам без отменённого", any(x["ref"] == "testpartner" and x["amount"] == _before + 10 for x in accounts.ref_stats()), str(accounts.ref_stats()))
+
 # ---------- аналитика ----------
 import analytics as _an
 import usage as _us

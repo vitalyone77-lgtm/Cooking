@@ -185,7 +185,7 @@ check("промокод: дни по коду, регистр не важен", 
 check("промокод: один раз на аккаунт", accounts.use_promo(U2, "blogger") and not accounts.use_promo(U2, "BLOGGER"))
 accounts.set_ref(U2, "blog_anna")
 accounts.set_ref(U2, "other")
-check("ref: запоминается первый источник, видна оплата", accounts.ref_stats()[0] == {"ref": "blog_anna", "users": 1, "paid_users": 1, "amount": 150}, str(accounts.ref_stats()))
+check("ref: запоминается первый источник, видна оплата", accounts.ref_stats()[0] == {"ref": "blog_anna", "users": 1, "paid_users": 1, "amount": 0}, str(accounts.ref_stats()))
 
 # потолки и накрутка
 config.PAYWALL_ENABLED = False

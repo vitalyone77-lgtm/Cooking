@@ -402,6 +402,36 @@ def apply_payment(charge_id: str, uid, amount: int, currency: str, days: int, pl
             c.close()
 
 
+REFUNDED = "RUBREFUND"       # платёж возвращён: запись остаётся для истории, в выручку и долю партнёра не идёт
+RUB_SQL = "CASE WHEN p.charge_id LIKE 'pw:%' THEN p.amount ELSE p.amount / 100.0 END"     # PayAnyWay хранит рубли, Telegram копейки
+
+
+def payment_by_op(op: str) -> dict | None:
+    r = _q("SELECT charge_id, uid, amount, currency, days, plan FROM payments WHERE charge_id=? OR charge_id=?", (f"pw:{op}", str(op)), one=True)
+    return dict(zip(("charge_id", "uid", "amount", "currency", "days", "plan"), r)) if r else None
+
+
+def refund_payment(op: str) -> dict | None:
+    """Возврат сделан в кабинете платёжного сервиса: платёж больше не считается, а подписка сокращается на его срок. Повторно ничего не меняет.
+    -> {"uid", "amount", "until"} или None, если такого действующего платежа нет."""
+    with _lock:
+        c = _conn()
+        try:
+            with c:
+                r = c.execute("SELECT charge_id, uid, amount, days FROM payments WHERE (charge_id=? OR charge_id=?) AND currency='RUB'", (f"pw:{op}", str(op))).fetchone()
+                if not r:
+                    return None
+                c.execute("UPDATE payments SET currency=? WHERE charge_id=?", (REFUNDED, r[0]))
+                c.execute("UPDATE pay_orders SET status='refunded' WHERE op=?", (str(op),))
+                s = c.execute("SELECT until FROM subs WHERE uid=?", (r[1],)).fetchone()
+                until = (s[0] or 0) - r[3] * 86400 if s else 0
+                if s:
+                    c.execute("UPDATE subs SET until=? WHERE uid=?", (until, r[1]))
+                return {"uid": r[1], "amount": r[2], "until": until}
+        finally:
+            c.close()
+
+
 def use_promo(uid, code: str) -> bool:
     try:
         _q("INSERT INTO promo_used(uid, code, ts) VALUES(?,?,?)", (str(uid), code.upper(), time.time()))
@@ -419,8 +449,8 @@ def set_ref(uid, ref: str) -> None:
 
 def ref_stats() -> list[dict]:
     """Для админки: сколько людей пришло по каждой ссылке и сколько из них оплатили."""
-    rows = _q("SELECT r.ref, COUNT(*), COUNT(DISTINCT p.uid), COALESCE(SUM(p.amount), 0) FROM refs r "
-              "LEFT JOIN payments p ON p.uid = r.uid GROUP BY r.ref ORDER BY 2 DESC", all_=True)
+    rows = _q(f"SELECT r.ref, COUNT(DISTINCT r.uid), COUNT(DISTINCT p.uid), COALESCE(SUM(CASE WHEN p.currency = 'RUB' THEN {RUB_SQL} ELSE 0 END), 0) FROM refs r "
+              "LEFT JOIN payments p ON p.uid = r.uid AND p.currency NOT IN ('RUBTEST', 'RUBREFUND') GROUP BY r.ref ORDER BY 2 DESC", all_=True)
     return [{"ref": r[0], "users": r[1], "paid_users": r[2], "amount": r[3]} for r in rows]
 
 
@@ -599,16 +629,18 @@ def admin_log_list(limit: int = 100) -> list[dict]:
 def money_stats() -> dict:
     """Выручка по месяцам (рубли и звёзды отдельно), последние платежи, конверсия пробного периода."""
     by_month = {}
-    for ts, amount, cur in _q("SELECT ts, amount, currency FROM payments", all_=True):
+    for ts, amount, cur, charge in _q("SELECT ts, amount, currency, charge_id FROM payments", all_=True):
+        if cur in ("RUBTEST", REFUNDED):
+            continue
         m = time.strftime("%Y-%m", time.localtime(ts))
         d = by_month.setdefault(m, {"month": m, "rub": 0, "stars": 0, "count": 0})
         if cur == "XTR":
             d["stars"] += amount
         else:
-            d["rub"] += amount / 100       # Telegram присылает рубли в копейках
+            d["rub"] += amount if charge.startswith("pw:") else amount / 100       # PayAnyWay хранит рубли, Telegram присылает копейки
         d["count"] += 1
-    recent = [{"ts": r[0], "uid": r[1], "amount": (r[2] if r[3] == "XTR" else r[2] / 100), "currency": r[3], "plan": r[4]}
-              for r in _q("SELECT ts, uid, amount, currency, plan FROM payments ORDER BY ts DESC LIMIT 50", all_=True)]
+    recent = [{"ts": r[0], "uid": r[1], "amount": (r[2] if r[3] == "XTR" or r[5].startswith("pw") else r[2] / 100), "currency": r[3], "plan": r[4]}
+              for r in _q("SELECT ts, uid, amount, currency, plan, charge_id FROM payments ORDER BY ts DESC LIMIT 50", all_=True)]
 
     def one(q, *a):
         return _q(q, a, one=True)[0]

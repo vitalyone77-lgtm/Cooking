@@ -58,7 +58,7 @@ def _money(gross: float, p: dict) -> dict:
 def stats(p: dict) -> dict:
     """Пришло людей, оплатили, суммы всего и по месяцам. Только настоящие рубли: тестовые платежи и звёзды не считаем."""
     users = accounts._q("SELECT COUNT(*) FROM refs WHERE ref=?", (p["code"],), one=True)[0]
-    rows = accounts._q("SELECT p.uid, p.amount, p.ts FROM payments p JOIN refs r ON r.uid=p.uid WHERE r.ref=? AND p.currency='RUB' ORDER BY p.ts", (p["code"],), all_=True)
+    rows = accounts._q(f"SELECT p.uid, {accounts.RUB_SQL}, p.ts FROM payments p JOIN refs r ON r.uid=p.uid WHERE r.ref=? AND p.currency='RUB' ORDER BY p.ts", (p["code"],), all_=True)
     months: dict[str, float] = {}
     for _, amount, ts in rows:
         m = time.strftime("%Y-%m", time.localtime(ts))
