@@ -30,6 +30,10 @@ CREATE TABLE IF NOT EXISTS payments(charge_id TEXT PRIMARY KEY, uid TEXT, amount
   days INTEGER, plan TEXT, ts REAL);
 CREATE TABLE IF NOT EXISTS promo_used(uid TEXT, code TEXT, ts REAL, PRIMARY KEY(uid, code));
 CREATE TABLE IF NOT EXISTS refs(uid TEXT PRIMARY KEY, ref TEXT, ts REAL);
+CREATE TABLE IF NOT EXISTS friend_codes(code TEXT PRIMARY KEY, uid TEXT, ts REAL);
+CREATE INDEX IF NOT EXISTS friend_codes_uid ON friend_codes(uid);
+CREATE TABLE IF NOT EXISTS friend_rewards(friend TEXT PRIMARY KEY, inviter TEXT, base INTEGER, days INTEGER, paid INTEGER DEFAULT 0, ts REAL);
+CREATE INDEX IF NOT EXISTS friend_rewards_inviter ON friend_rewards(inviter, ts);
 CREATE TABLE IF NOT EXISTS sess(key TEXT PRIMARY KEY, data TEXT, ts REAL);
 CREATE INDEX IF NOT EXISTS sess_ts ON sess(ts);
 CREATE TABLE IF NOT EXISTS favs(uid TEXT, id TEXT, title TEXT, text TEXT, cuisine TEXT, ts REAL, PRIMARY KEY(uid, id));
@@ -358,6 +362,24 @@ def grant_days(uid, days: int, source: str) -> float:
             c.close()
 
 
+def add_bonus_days(uid, days: int) -> float:
+    """Дни за друзей: прибавить к сроку или убрать при возврате. Источник действующей подписки не меняем: оплаченная остаётся оплаченной и для партнёра."""
+    with _lock:
+        c = _conn()
+        try:
+            with c:
+                row = c.execute("SELECT until, source FROM subs WHERE uid=?", (str(uid),)).fetchone()
+                now, cur = time.time(), (row[0] or 0) if row else 0
+                if days < 0 and not row:
+                    return 0
+                until = (cur if days < 0 else max(now, cur)) + days * 86400
+                source = row[1] if row and cur > now else "friend"
+                c.execute("INSERT INTO subs(uid, until, source) VALUES(?,?,?) ON CONFLICT(uid) DO UPDATE SET until=excluded.until, source=excluded.source", (str(uid), until, source))
+                return until
+        finally:
+            c.close()
+
+
 def trial_used(uid) -> bool:
     """Пробный период уже был, либо человек уже платил: тогда бесплатная неделя не положена."""
     row = _q("SELECT trial_used FROM subs WHERE uid=?", (str(uid),), one=True)
@@ -466,8 +488,9 @@ def set_ref(uid, ref: str) -> None:
 
 def ref_stats() -> list[dict]:
     """Для админки: сколько людей пришло по каждой ссылке и сколько из них оплатили."""
-    rows = _q(f"SELECT r.ref, COUNT(DISTINCT r.uid), COUNT(DISTINCT p.uid), COALESCE(SUM(CASE WHEN p.currency = 'RUB' THEN {RUB_SQL} ELSE 0 END), 0) FROM refs r "
-              "LEFT JOIN payments p ON p.uid = r.uid AND p.currency NOT IN ('RUBTEST', 'RUBREFUND') GROUP BY r.ref ORDER BY 2 DESC", all_=True)
+    label = "CASE WHEN r.ref LIKE 'fr!_%' ESCAPE '!' THEN 'друзья' ELSE r.ref END"          # личные ссылки пользователей одной строкой
+    rows = _q(f"SELECT {label}, COUNT(DISTINCT r.uid), COUNT(DISTINCT p.uid), COALESCE(SUM(CASE WHEN p.currency = 'RUB' THEN {RUB_SQL} ELSE 0 END), 0) FROM refs r "
+              f"LEFT JOIN payments p ON p.uid = r.uid AND p.currency NOT IN ('RUBTEST', 'RUBREFUND') GROUP BY {label} ORDER BY 2 DESC", all_=True)
     return [{"ref": r[0], "users": r[1], "paid_users": r[2], "amount": r[3]} for r in rows]
 
 
@@ -564,6 +587,10 @@ def _merge_accounts(c, src: str, dst: str) -> None:
     c.execute("UPDATE payments SET uid=? WHERE uid=?", (dst, src))
     c.execute("UPDATE pay_orders SET uid=? WHERE uid=?", (dst, src))       # оплата, начатая до объединения, должна прийти в общий профиль
     c.execute("UPDATE shop_lists SET uid=? WHERE uid=?", (dst, src))
+    c.execute("UPDATE friend_codes SET uid=? WHERE uid=?", (dst, src))     # старая ссылка продолжает работать и начислять в общий аккаунт
+    c.execute("UPDATE friend_rewards SET inviter=? WHERE inviter=?", (dst, src))
+    c.execute("UPDATE OR IGNORE friend_rewards SET friend=? WHERE friend=?", (dst, src))
+    c.execute("DELETE FROM friend_rewards WHERE friend=?", (src,))
     s = c.execute("SELECT until, source, trial_used FROM subs WHERE uid=?", (src,)).fetchone()
     if s:
         d = c.execute("SELECT until, trial_used FROM subs WHERE uid=?", (dst,)).fetchone()

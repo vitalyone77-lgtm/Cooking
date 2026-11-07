@@ -41,6 +41,7 @@ import day_menu
 import week_menu
 import favorites as fav_mod
 import recipe_math
+import referrals
 
 # Данные веба — в отдельные файлы (до первого использования модулей)
 day_menu.DAY_MENU_FILE = web_db.DATA_DIR / "day_menu.json"
@@ -586,7 +587,7 @@ def me(x_device: str | None = Header(default=None)):
     feat = {f: plans.has_feature(uid, f) for f in ("memory", "pdf", "cart", "noads")}
     out = {"linked": bool(tg), "plan": plans.plan_of(uid), "status": plans.status_text(uid), "left": left,
            "paywall": plans.paywall_for(uid), "memory": memory, "shelf_on": shelf_on, "bot": config.BOT_USERNAME, "feat": feat, "via": ("vk" if tg and tg >= accounts.VK_OFFSET else "tg" if tg else ""),
-           "hint": plans.next_step(uid), "preview": plans.is_preview(uid), "stores": _stores_json(uid), "both_linked": bool(tg) and accounts.has_vk_merged(tg), "diary_on": plans.diary_on(uid), "seller": payinfo.seller(), "photo_on": plans.feature_on(uid, "photo_recipe"),
+           "hint": plans.next_step(uid), "preview": plans.is_preview(uid), "stores": _stores_json(uid), "both_linked": bool(tg) and accounts.has_vk_merged(tg), "diary_on": plans.diary_on(uid), "shelf_photo": plans.feature_on(uid, "photo_shelf") and plans.shelf_on(uid), "seller": payinfo.seller(), "photo_on": plans.feature_on(uid, "photo_recipe"),
            "vk_app": (config.VK_CLIENT_ID if config.VK_LOGIN else ""),
            "pay_rub": bool(tg) and payanyway.allowed_for(uid),
            "pay_offers": ([{"key": o["key"], "title": o["title"], "rub": o["rub"], "days": o["days"]} for o in plans.pay_offers_for(uid)]
@@ -1121,6 +1122,39 @@ async def photo_items(image: UploadFile = File(...), x_device: str | None = Head
         raise HTTPException(422, "Не вижу на фото продуктов, попробуйте снять поближе")
     usage.event("photo_recipe", _uid(dev_id))
     return {"items": items}
+
+
+@app.post("/api/shelf/photo")
+async def shelf_photo(image: UploadFile = File(...), x_device: str | None = Header(default=None)):
+    """Продукты на фото для полки: человек отмечает нужные, на полку они попадают обычным добавлением."""
+    dev_id = _dev(x_device)
+    uid = _uid(dev_id)
+    if not plans.feature_on(uid, "photo_shelf") or not plans.shelf_on(uid):
+        raise HTTPException(403, "Полка по фото недоступна")
+    if (image.content_type or "") not in PHOTO_TYPES:
+        raise HTTPException(400, "Нужна фотография: jpg, png или webp")
+    blob = await image.read(PHOTO_MAX_BYTES + 1)
+    if not blob or len(blob) > PHOTO_MAX_BYTES:
+        raise HTTPException(400, "Фото больше 10 МБ, снимите ещё раз")
+    sp = _spend(dev_id, "photo")
+    try:
+        items = await vision.photo_items([(blob, image.content_type)])
+    except vision.VisionError:
+        _refund(dev_id, sp)
+        raise HTTPException(502, "Не получилось разобрать фото, попробуйте ещё раз поближе и при хорошем свете")
+    if not items:
+        _refund(dev_id, sp)
+        raise HTTPException(422, "Не вижу на фото продуктов, попробуйте снять поближе")
+    usage.event("photo_shelf", uid)
+    return {"items": items}
+
+
+@app.get("/api/friends")
+def friends(x_device: str | None = Header(default=None)):
+    """«Получить бесплатно»: личная ссылка, правила и итоги. Кого именно привёл человек, не показываем."""
+    uid = _need_account(_dev(x_device))
+    usage.event("friend_view", uid)
+    return {"links": referrals.links(uid), "stats": referrals.stats(uid), "rules": referrals.rules(), "share_text": referrals.SHARE_TEXT, "name": plans.PREMIUM_NAME}
 
 
 @app.post("/api/label")

@@ -27,8 +27,8 @@ def site() -> str:
 
 def ensure(code: str) -> dict:
     """Партнёр по коду; нет — создаём с новой секретной ссылкой. ValueError, если код негодный."""
-    if not CODE_RE.match(code or ""):
-        raise ValueError("Код: от 3 до 32 латинских букв, цифр, - или _")
+    if not CODE_RE.match(code or "") or code.startswith("fr_"):      # fr_ занято личными ссылками пользователей
+        raise ValueError("Код: от 3 до 32 латинских букв, цифр, - или _, и не начинается с fr_")
     accounts._q("INSERT OR IGNORE INTO partners(code, token, share, tax, clicks, ts) VALUES(?,?,?,?,0,?)",
                 (code, secrets.token_urlsafe(18), DEFAULT_SHARE, DEFAULT_TAX, time.time()))
     return get(code)

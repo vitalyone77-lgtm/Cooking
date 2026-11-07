@@ -13,11 +13,14 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, LabeledPrice, Message, PreCheckoutQuery
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
+from urllib.parse import quote
+
 import accounts
 import charts
 import payanyway
 import ui
 import config
+import referrals
 import plans
 import usage
 from states import FeedbackForm, ProfileForm
@@ -646,8 +649,8 @@ def shelf_view(uid: int) -> tuple[str, InlineKeyboardMarkup]:
         text = ("🏠 *Моя полка* пока пустая.\n\nСюда попадают масло, специи, крупы и другие долгоживущие продукты, "
                 "когда вы отмечаете их в списке покупок «✅ куплено» или «🏠 есть дома». В следующих рецептах они будут отдельным списком, чтобы не покупать второй раз.")
     b.adjust(2)
-    b.row(InlineKeyboardButton(text="➕ Добавить (текстом или фото)" if plans.feature_on(uid, "photo_shelf")
-                               else "➕ Добавить продукт", callback_data="pf:shadd"))
+    b.row(InlineKeyboardButton(text="➕ Добавить продукт", callback_data="pf:shadd"),
+          *([InlineKeyboardButton(text="📷 Добавить по фото", callback_data="pf:shph")] if plans.feature_on(uid, "photo_shelf") else []))
     b.row(InlineKeyboardButton(text="⬅️ Профиль", callback_data="pf:back"))
     return text, b.as_markup()
 
@@ -684,12 +687,20 @@ async def shelf_add_start(callback: CallbackQuery, state: FSMContext):
     await state.set_state(ProfileForm.shelf_add)
     await callback.answer()
     uid = callback.message.chat.id
-    text = "➕ Напишите продукты через запятую — например: «оливковое масло, куркума, рис»."
-    if plans.feature_on(uid, "photo_shelf"):
-        text += "\n\n📷 Или пришли фото полки или холодильника — найду продукты, вы отметите нужные."
+    text = "➕ Напишите продукты через запятую, например: «оливковое масло, куркума, рис»."
     if plans.feature_on(uid, "voice"):
         text += "\n🎙 Можно и голосом."
     await callback.message.edit_text(text, reply_markup=_cancel_kb(), parse_mode=None)
+
+
+@router.callback_query(F.data == "pf:shph")
+async def shelf_photo_start(callback: CallbackQuery, state: FSMContext):
+    if not await _need_shelf(callback):
+        return
+    await state.set_state(ProfileForm.shelf_add)
+    await callback.answer()
+    await callback.message.edit_text("📷 Сфотографируйте полку или холодильник и пришлите фото, можно несколько сразу. Я найду продукты, вы отметите нужные, и они попадут на полку.",
+                                     reply_markup=_cancel_kb(), parse_mode=None)
 
 
 @router.message(ProfileForm.shelf_add, F.text)
@@ -783,6 +794,7 @@ def _sub_view(uid: int) -> tuple[str, InlineKeyboardMarkup]:
              "• замены продуктов, проверка состава, корзина ВкусВилла с ценами, PDF",
              "• полка и исключение продуктов, сайт без рекламы", ""]
     b = InlineKeyboardBuilder()
+    b.button(text="🎁 Получить бесплатно", callback_data="pf:fr")
     for o in plans.offers():
         if config.PAYMENT_STARS_ENABLED and o["stars"]:
             b.button(text=f"⭐ {o['title']} — {o['stars']} звёзд", callback_data=f"pf:buy:stars:{o['key']}")
@@ -820,6 +832,26 @@ async def sub_open(callback: CallbackQuery, state: FSMContext):
     usage.event("sub_view", callback.message.chat.id)
     await callback.answer()
     await show_subscription(callback.message, edit=True)
+
+
+def _friends_view(uid: int) -> tuple[str, InlineKeyboardMarkup]:
+    ln, st = referrals.links(uid), referrals.stats(uid)
+    lines = [f"🎁 «{plans.PREMIUM_NAME}» бесплатно за друзей", "", "Поделитесь своей ссылкой:"] + ["• " + r for r in referrals.rules()]
+    lines += ["", f"Пришло друзей: {st['friends']}, оплатили: {st['paid']}, начислено дней: {st['days']}.", f"Недель можно получить ещё: {st['weeks_left']}.", "",
+              f"Ссылка на сайт, работает без VPN:\n{ln['site']}", "", f"Ссылка на бота:\n{ln['bot']}"]
+    share = f"https://t.me/share/url?url={quote(ln['site'], safe='')}&text={quote(referrals.SHARE_TEXT, safe='')}"
+    return "\n".join(lines), InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="📤 Поделиться", url=share)],
+                                                                   [InlineKeyboardButton(text="⬅️ Подписка", callback_data="pf:sub")]])
+
+
+@router.callback_query(F.data == "pf:fr")
+async def friends_open(callback: CallbackQuery, state: FSMContext):
+    await state.clear()
+    uid = callback.message.chat.id
+    usage.event("friend_view", uid)
+    await callback.answer()
+    text, markup = _friends_view(uid)
+    await callback.message.edit_text(text, reply_markup=markup, parse_mode=None, disable_web_page_preview=True)
 
 
 @router.callback_query(F.data.startswith("pf:pw:"))

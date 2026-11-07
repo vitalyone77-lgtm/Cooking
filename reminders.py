@@ -138,7 +138,9 @@ def setup_scheduler(bot: Bot, dp: Dispatcher) -> AsyncIOScheduler:
     scheduler.add_job(social.daily_job, trigger=CronTrigger(hour=config.SOCIAL_POST_HOUR, minute=config.SOCIAL_POST_MINUTE),
                       args=[bot], id="social_daily", replace_existing=True)
     scheduler.add_job(trial_nudge_job, trigger=CronTrigger(hour=12, minute=30), args=[bot], id="trial_nudge", replace_existing=True)
+    import referrals
     import partners
+    scheduler.add_job(referrals.job, trigger=CronTrigger(minute="*/10"), args=[bot], id="friend_rewards", replace_existing=True)
     scheduler.add_job(partners.monthly_reminder, trigger=CronTrigger(day=1, hour=10, minute=0), args=[bot], id="partner_payouts", replace_existing=True)
     # недельные задания по продвижению владельцу (понедельник утром)
     import bot_promo

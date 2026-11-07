@@ -537,6 +537,36 @@ select{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--lin
       else box.innerHTML=favBody(st.fav,j.text);
     }).catch(function(e){b.disabled=false;alert(e.message);});
   }
+  // «Получить бесплатно»: личная ссылка и бонусы за друзей
+  function viewFriends(){
+    return call("GET","/api/friends").then(function(d){
+      window.__fr=d;var s=d.stats;
+      return '<button class="chip mini" data-tab-go="settings">← Настройки</button><h1 style="margin-top:10px">🎁 «'+esc(d.name)+'» бесплатно за друзей</h1><div class="card pcard"><p style="margin:0 0 6px">Поделитесь своей ссылкой:</p><ul style="margin:0;padding-left:20px">'+d.rules.map(function(r){return '<li style="margin:4px 0">'+esc(r)+'</li>';}).join("")+'</ul></div>'+
+        '<div class="card pcard"><h2>Ваша ссылка</h2><p style="margin:0 0 4px;word-break:break-all">'+esc(d.links.site)+'</p><button class="btn" data-fr-share="1">📤 Поделиться</button><p class="sub" style="margin:10px 0 0;word-break:break-all">Для Telegram: '+esc(d.links.bot)+'</p></div>'+
+        '<div class="card pcard"><p style="margin:0">Пришло друзей: <b>'+s.friends+'</b>, оплатили: <b>'+s.paid+'</b>, начислено дней: <b>'+s.days+'</b>.</p><p class="sub" style="margin:4px 0 0">Недель можно получить ещё: '+s.weeks_left+'.</p></div>';
+    });
+  }
+  function friendsShare(){
+    var d=window.__fr;if(!d)return;
+    if(navigator.share){navigator.share({title:"Кухонный помощник",text:d.share_text,url:d.links.site}).catch(function(){});return;}
+    if(navigator.clipboard){navigator.clipboard.writeText(d.share_text+" "+d.links.site).then(function(){toast("Ссылка скопирована");}).catch(function(){prompt("Ссылка",d.links.site);});return;}
+    prompt("Ссылка",d.links.site);
+  }
+  // полка по фото: продукты с фото отмечаем галочками, на полку добавляем обычным запросом
+  document.addEventListener("change",function(ev){
+    var inp=ev.target;if(!inp||inp.id!=="shelf-photo-in"||!inp.files||!inp.files[0])return;
+    var box=document.getElementById("shelf-photo-res"),fd=new FormData();fd.append("image",inp.files[0]);inp.value="";
+    box.innerHTML='<p class="sub">📷 Смотрю, что на фото…</p>';
+    fetch("/api/shelf/photo",{method:"POST",headers:{"X-Device":dev},body:fd}).then(function(r){return r.json().catch(function(){return {};}).then(function(j){if(!r.ok)throw new Error(typeof j.detail==="string"?j.detail:"Не получилось разобрать фото");return j;});})
+      .then(function(j){box.innerHTML='<p class="sub" style="margin:10px 0 4px">Снимите галочки с лишнего:</p>'+j.items.map(function(x){return '<label class="step"><input type="checkbox" checked data-sp-item="'+esc(x)+'"><span>'+esc(x)+'</span></label>';}).join("")+'<button class="btn" data-shelf-photo-add="1">🏠 Добавить на полку</button>';})
+      .catch(function(e){box.innerHTML="";alert(e.message);});
+  });
+  function shelfPhotoAdd(b){
+    var items=[];Array.prototype.forEach.call(document.querySelectorAll("[data-sp-item]"),function(c){if(c.checked)items.push(c.getAttribute("data-sp-item"));});
+    if(!items.length){alert("Отметьте хотя бы один продукт");return;}
+    b.disabled=true;
+    items.reduce(function(p,x){return p.then(function(){return call("POST","/api/shelf",{item:x});});},Promise.resolve()).then(function(){show("profile");}).catch(function(e){b.disabled=false;alert(e.message);});
+  }
   // общий список покупок из нескольких рецептов избранного
   function viewCombo(){
     return call("GET","/api/favorites").then(function(d){
@@ -649,7 +679,7 @@ select{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--lin
           else if(!m.shelf_on)h+='<div class="card pcard"><h2>Пока здесь пусто</h2><p class="sub" style="margin:0">В настройках можно включить дневник питания, вес и полку. Тогда они будут здесь.</p></div>';
           if(m.shelf_on)h+=accordion("🏠 Моя полка",(m.shelf||[]).length+" прод.","",'<p class="sub" style="margin:10px 0 8px">Долгоживущие продукты, которые уже есть дома. В списках покупок они идут отдельно.</p><div class="chips">'+
             (m.shelf||[]).map(function(x){return '<button class="chip" data-shelf-del="'+esc(x)+'">'+esc(x)+' ✕</button>';}).join("")+'</div>'+
-            '<div class="row" style="margin-top:8px"><input type="text" id="shelf-add" maxlength="60" placeholder="оливковое масло" aria-label="Добавить на полку"><button class="btn" style="width:auto;margin:0" data-shelf-add="1">Добавить</button></div>',false);
+            (m.shelf_photo?'<button class="btn ghost" data-shelf-photo="1">📷 Добавить по фото</button><input type="file" id="shelf-photo-in" accept="image/*" style="display:none"><div id="shelf-photo-res"></div>':'')+'<div class="row" style="margin-top:8px"><input type="text" id="shelf-add" maxlength="60" placeholder="оливковое масло" aria-label="Добавить на полку"><button class="btn" style="width:auto;margin:0" data-shelf-add="1">Добавить</button></div>',false);
           return h+profileNav();
         });
       });
@@ -665,6 +695,7 @@ select{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--lin
         if(m.paywall&&m.plan!=="premium"&&m.trial)pay+='<button class="btn" data-gate-trial="1">Попробовать тариф «'+esc(m.name||"Повар")+'» '+(m.trial_days||7)+' дней бесплатно</button>';
         if(m.pay_rub&&m.plan!=="premium")pay+='<h2 style="margin-top:12px">Оплатить подписку</h2><p class="sub" style="margin:0 0 4px">Картой или через СБП.</p>'+(m.pay_offers||[]).map(function(o){return '<button class="btn" data-pay="'+esc(o.key)+'">💳 '+esc(o.title)+' — '+o.rub+' ₽</button>';}).join("");
         if(m.paywall&&m.plan!=="premium")pay+='<a class="btn ghost" href="'+botLink("pay")+'" target="_blank" rel="noopener">Оформить подписку в Telegram</a>';
+        if(m.paywall&&m.linked)pay+='<button class="btn ghost" data-tab-go="friends">🎁 Получить бесплатно</button>';
         pay+='<a class="btn ghost" href="/oplata" target="_blank" rel="noopener">Условия оплаты и возврата</a>';
         var sl=m.seller||{},sr=[["Самозанятый",sl.name],["ИНН",sl.inn],["Телефон",sl.phone],["Эл. почта",sl.email]].filter(function(x){return x[1];});
         if(sr.length)pay+='<p class="sub" style="margin:12px 0 0;font-size:14px">'+sr.map(function(x){return esc(x[0])+': '+esc(x[1]);}).join("<br>")+'</p>';
@@ -772,12 +803,12 @@ select{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--lin
       return h;
     });
   }
-  var VIEWS={menus:viewMenus,favs:viewFavs,book:viewBook,profile:viewProfile,settings:viewSettings,label:viewLabel,combo:viewCombo,help:viewHelp};
+  var VIEWS={menus:viewMenus,favs:viewFavs,book:viewBook,profile:viewProfile,settings:viewSettings,label:viewLabel,combo:viewCombo,friends:viewFriends,help:viewHelp};
   function offlineBanner(){return '<div class="card" style="padding:12px 16px;margin:0 0 12px;border-left:4px solid var(--primary)"><strong>📴 Нет интернета.</strong> Показываю сохранённое с прошлого раза: меню, план, избранное, рецепты и таймеры работают. Новые подборы — когда появится сеть.</div>';}
   window.addEventListener("online",function(){if(OFFLINE&&(cur==="menus"||cur==="favs"))show(cur);});
   function show(tab){
     cur=tab;ls("tab",tab);
-    Array.prototype.forEach.call(document.querySelectorAll(".tab"),function(t){t.setAttribute("aria-selected",t.getAttribute("data-tab")===(tab==="settings"||tab==="label"?"profile":tab==="combo"?"favs":tab));});
+    Array.prototype.forEach.call(document.querySelectorAll(".tab"),function(t){t.setAttribute("aria-selected",t.getAttribute("data-tab")===(tab==="settings"||tab==="label"||tab==="friends"?"profile":tab==="combo"?"favs":tab));});
     if(tab==="new"){viewNew();window.scrollTo(0,0);return;}
     main.innerHTML='<div class="skeleton"></div><div class="skeleton"></div><div class="skeleton"></div>';
     OFFLINE=false;
@@ -1069,6 +1100,9 @@ select{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--lin
     if(b=t.closest("[data-install-close]")){ls("pwa_x",String(Date.now()));fillInstall();return;}
     if(b=t.closest("[data-done]")){b.disabled=true;call("POST","/api/week/done/"+b.getAttribute("data-done")).then(function(){show("menus");}).catch(fail);return;}
     if(b=t.closest("[data-scale]")){scaleGo(b);return;}
+    if(b=t.closest("[data-fr-share]")){friendsShare();return;}
+    if(b=t.closest("[data-shelf-photo-add]")){shelfPhotoAdd(b);return;}
+    if(b=t.closest("[data-shelf-photo]")){var spi=document.getElementById("shelf-photo-in");if(spi)spi.click();return;}
     if(b=t.closest("[data-combo-go]")){comboGo(b);return;}
     if(b=t.closest("[data-del]")){if(confirm("Удалить из избранного?"))call("DELETE","/api/favorites/"+b.getAttribute("data-del")).then(function(){cacheFavs();show("favs");}).catch(fail);return;}
     if(b=t.closest("[data-cook]")){runJob(call("POST","/api/week/cook"),"Готовлю меню на день…").then(function(){show("menus");}).catch(function(e){fail(e,"menus");});return;}
