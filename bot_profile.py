@@ -108,7 +108,7 @@ def _profile_view(uid: int) -> tuple[str, InlineKeyboardMarkup]:
     rows.append([("🔕 Напоминания" if reminders_enabled(uid) else "🔔 Напоминания", "pf:rem")]
                 + ([(f"🔓 Выйти на сайте ({devs})", "pf:unall")] if devs else []))
     rows.append(([("🧩 Функции", "pf:fts")] if consent else []) + [("🌐 Без VPN", "pf:site")] + ([("🗑 Удалить", "pf:del")] if consent else []))
-    rows.append([("❓ Справка", "help:open")] + ([("⬅️ Профиль", "pf:main")] if diary_on else []))
+    rows.append([("🔬 Проверить состав", "lb:o"), ("❓ Справка", "help:open")] + ([("⬅️ Профиль", "pf:main")] if diary_on else []))
     b = InlineKeyboardBuilder()
     for row in rows:
         b.row(*[InlineKeyboardButton(text=t, callback_data=d) for t, d in row])
@@ -780,8 +780,8 @@ def _sub_view(uid: int) -> tuple[str, InlineKeyboardMarkup]:
     lines = ["💎 *Подписка*", "", plans.status_text(uid), "",
              "Что даёт подписка:",
              f"• {plans.limits_of('premium').get('recipe', (0, 1))[0]} блюд в день, меню на день и планы на 3 дня",
-             "• замены продуктов, корзина ВкусВилла с ценами, PDF для чтения без интернета",
-             "• сайт без рекламы, всё общее с ботом", ""]
+             "• замены продуктов, проверка состава, корзина ВкусВилла с ценами, PDF",
+             "• полка и исключение продуктов, сайт без рекламы", ""]
     b = InlineKeyboardBuilder()
     for o in plans.offers():
         if config.PAYMENT_STARS_ENABLED and o["stars"]:

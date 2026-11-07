@@ -40,6 +40,7 @@ import missing as missing_mod
 import day_menu
 import week_menu
 import favorites as fav_mod
+import recipe_math
 
 # Данные веба — в отдельные файлы (до первого использования модулей)
 day_menu.DAY_MENU_FILE = web_db.DATA_DIR / "day_menu.json"
@@ -1216,6 +1217,37 @@ _list_log: dict[str, deque] = {}
 LIST_TOGGLES_PER_HOUR = 1000          # отметок в одном списке в час: хватит семье, но база не раздуется
 
 
+class ComboIn(BaseModel):
+    ids: list[str] = Field(max_length=50)
+
+
+@app.post("/api/favorites/list")
+def favorites_list(body: ComboIn, x_device: str | None = Header(default=None)):
+    """Общий список покупок из нескольких рецептов избранного."""
+    uid = _uid(_dev(x_device))
+    try:
+        res = shoplists.from_favorites(uid, body.ids)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    usage.event("list_combo", uid)
+    return res
+
+
+class ScaleIn(BaseModel):
+    text: str = Field(max_length=12000)
+    to: int = Field(ge=1, le=recipe_math.MAX_SERVINGS)
+    names: list[str] = Field(default_factory=list, max_length=100)
+
+
+@app.post("/api/scale")
+def scale_recipe(body: ScaleIn, x_device: str | None = Header(default=None)):
+    """Пересчёт рецепта на другое число порций: без ИИ и без лимитов. amounts: сколько купить, по порядку names."""
+    dev_id = _dev(x_device)
+    text = recipe_math.scale_text(body.text, body.to)
+    usage.event("portions", _uid(dev_id))
+    return {"text": text, "servings": recipe_math.base_servings(text), "amounts": item_amounts(body.names, amounts_from_recipe_text(text), text)}
+
+
 @app.post("/api/list")
 def list_create(body: ListIn, x_device: str | None = Header(default=None)):
     uid = _uid(_dev(x_device))
@@ -1785,8 +1817,8 @@ def sitemap():
 def llms():
     body = (
         "# Кухонный помощник\n\n"
-        "> Бесплатный русскоязычный веб-помощник по питанию без регистрации: рецепты по кухне и продуктам, "
-        "меню на день, план питания на 3 дня, калории и КБЖУ, список покупок, PDF.\n\n"
+        "> Русскоязычный веб-помощник по питанию: рецепты по кухне и продуктам, начать можно бесплатно и без регистрации; "
+        "меню на день и план питания на 3 дня после бесплатного входа, калории и КБЖУ, список покупок; больше подборов и PDF в подписке.\n\n"
         "## Возможности\n"
         "- Рецепт с калорийностью и КБЖУ на порцию, учитывает кухню (классическая, аюрведа, спорт и др.) и технику\n"
         "- Меню на день по приёмам пищи с общим списком покупок\n"

@@ -203,7 +203,7 @@ async def cmd_testacc(message: Message):
     accounts.sess_set(f"prev:{guest}", {"mode": "guest", "ts": time.time()})
     accounts.sess_set(f"prev:{acc}", {"mode": "account", "uid": accounts.VK_OFFSET + 9 * 10**11 + int(time.time()) % 10**8, "ts": time.time()})
     await message.answer("🧪 Чистый аккаунт для проверки. Откройте ссылку в режиме инкогнито, она одноразовая и действует час.\n\n"
-                         f"Как гость (без входа):\n{site}/?test={guest}\n\nКак новый вошедший пользователь (можно оплатить 10 ₽):\n{site}/?test={acc}\n\n"
+                         f"Как гость (без входа):\n{site}/?test={guest}\n\nКак новый вошедший пользователь:\n{site}/?test={acc}\n\n"
                          "Подписка включена только для этих аккаунтов. Для других людей ничего не меняется.", parse_mode=None, disable_web_page_preview=True)
 
 

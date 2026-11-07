@@ -39,7 +39,7 @@ def check(n, c, x=""):
 
 # ---------- тексты справки ----------
 titles = [t for _, t, _ in helpdata.SECTIONS]
-check("в справке 10 разделов с уникальными названиями", len(titles) == 10 and len(set(titles)) == 10, str(titles))
+check("в справке 11 разделов с уникальными названиями", len(titles) == 11 and len(set(titles)) == 11, str(titles))
 shops = helpdata.SECTION_BY_KEY["shops"][1]
 check("про магазины: ВкусВилл — корзина одной кнопкой", "ВкусВилл: корзина одной кнопкой" in shops)
 check("про магазины: остальные в перспективе, пока поиск магазина", "в перспективе" in shops and "откроется его поиск" in shops and "положить нужный товар в корзину для доставки" in shops, shops)
@@ -158,7 +158,7 @@ sent_web = []
 feedback.notify_sync = lambda text: sent_web.append(text)       # в тестах в Telegram ничего не отправляем
 with TestClient(web_api.app) as cl:
     h = cl.get("/api/help").json()
-    check("сайт получает разделы справки", len(h["sections"]) == 10 and h["sections"][0]["key"] == "start")
+    check("сайт получает разделы справки", len(h["sections"]) == 11 and h["sections"][0]["key"] == "start")
     dev = cl.post("/api/device").json()["device"]
     hd = {"X-Device": dev}
     check("пустое сообщение отклоняется", cl.post("/api/feedback", json={"kind": "idea", "text": " "}, headers=hd).status_code == 422)

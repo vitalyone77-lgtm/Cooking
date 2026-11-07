@@ -18,7 +18,7 @@
 <meta property="og:site_name" content="Кухонный помощник">
 <meta property="og:locale" content="ru_RU">
 <meta property="og:title" content="Кухонный помощник — рецепты, меню на день и план питания с КБЖУ">
-<meta property="og:description" content="Бесплатно и без регистрации: рецепт по вашим продуктам, меню на день, план на 3 дня, калории и КБЖУ, список покупок со ссылками на магазины, PDF.">
+<meta property="og:description" content="Начать можно бесплатно: рецепт по вашим продуктам, меню на день, план на 3 дня, калории и КБЖУ, список покупок со ссылками на магазины.">
 <meta property="og:url" content="https://menu.ymayaka.ru/">
 <meta property="og:image" content="https://menu.ymayaka.ru/icons/og-image.png">
 <meta property="og:image:width" content="1200">
@@ -26,7 +26,7 @@
 <meta name="twitter:card" content="summary_large_image">
 <!--VERIFY-->
 <script type="application/ld+json">{"@context":"https://schema.org","@type":"WebApplication","name":"Кухонный помощник","url":"https://menu.ymayaka.ru/","applicationCategory":"LifestyleApplication","operatingSystem":"Любой (веб, можно добавить на главный экран)","inLanguage":"ru","description":"Подбор рецептов по продуктам и кухне, меню на день и план питания на 3 дня с калориями и КБЖУ, список покупок со ссылками на магазины, скачивание в PDF. Без регистрации.","offers":{"@type":"Offer","price":"0","priceCurrency":"RUB"},"featureList":["Рецепт с калориями и КБЖУ","Меню на день","План питания на 3 дня","Список покупок и корзина ВкусВилл","Скачивание в PDF"]}</script>
-<script type="application/ld+json">{"@context":"https://schema.org","@type":"FAQPage","mainEntity":[{"@type":"Question","name":"Нужна ли регистрация?","acceptedAnswer":{"@type":"Answer","text":"Нет. Приложение работает без регистрации, данные хранятся на вашем устройстве."}},{"@type":"Question","name":"Сколько стоит?","acceptedAnswer":{"@type":"Answer","text":"Начать можно бесплатно. Есть дневные лимиты, с подпиской их больше."}},{"@type":"Question","name":"Как посчитать КБЖУ и калории блюда?","acceptedAnswer":{"@type":"Answer","text":"Выберите кухню и приём пищи — рецепт придёт с калорийностью и белками, жирами, углеводами на порцию."}},{"@type":"Question","name":"Можно ли получить список покупок?","acceptedAnswer":{"@type":"Answer","text":"Да. Выберите магазин (Пятёрочка, ВкусВилл, Перекрёсток, Яндекс Лавка, Купер) — откроются ссылки на поиск продуктов, для ВкусВилла можно собрать корзину с ценами."}}]}</script>
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"FAQPage","mainEntity":[{"@type":"Question","name":"Нужна ли регистрация?","acceptedAnswer":{"@type":"Answer","text":"Для первого рецепта нет. Вход бесплатный: он сохраняет избранное и открывает меню на день и план на 3 дня."}},{"@type":"Question","name":"Сколько стоит?","acceptedAnswer":{"@type":"Answer","text":"Начать можно бесплатно. Есть дневные лимиты, с подпиской их больше."}},{"@type":"Question","name":"Как посчитать КБЖУ и калории блюда?","acceptedAnswer":{"@type":"Answer","text":"Выберите кухню и приём пищи — рецепт придёт с калорийностью и белками, жирами, углеводами на порцию."}},{"@type":"Question","name":"Можно ли получить список покупок?","acceptedAnswer":{"@type":"Answer","text":"Да. Выберите магазин (Пятёрочка, ВкусВилл, Перекрёсток, Яндекс Лавка, Купер) — откроются ссылки на поиск продуктов, для ВкусВилла можно собрать корзину с ценами."}}]}</script>
 
 <style>
 :root{--bg:#FBF7F2;--surface:#fff;--text:#2B2622;--muted:#6B625A;--line:#E7DED3;--primary:#2F6B4F;--on-primary:#fff;--soft:#E6F0EA;--accent:#FBE3C4;--danger:#A33A2B;--r:16px;--tap:52px;--m-p:#2a78d6;--m-f:#eb6834;--m-c:#1baf7a;--m-x:#C9C2B8}
@@ -66,7 +66,7 @@ input[type=text]{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid
 .ad{display:block;margin:0 0 12px;text-align:center}.ad img{max-width:100%;border-radius:12px;display:block;margin:0 auto}.ad small{color:var(--muted);font-size:12px}
 .progress{padding:28px 16px;text-align:center}.spin{width:36px;height:36px;border:4px solid var(--line);border-top-color:var(--primary);border-radius:50%;margin:0 auto 12px;animation:rot 1s linear infinite}@keyframes rot{to{transform:rotate(360deg)}}
 .toggle{display:flex;align-items:center;gap:10px;min-height:44px;font-size:15px;color:var(--muted)}
-.seg{display:flex;gap:6px;margin:0 0 14px}.seg .chip{flex:1;padding:0 6px}
+.scalebar{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:12px 0}.scalebar .chip{padding:0 14px}.cline{display:flex;justify-content:space-between;gap:12px;padding:8px 0;border-top:1px solid var(--line)}.cline:first-of-type{border-top:0}.seg{display:flex;gap:6px;margin:0 0 14px}.seg .chip{flex:1;padding:0 6px}
 .install{display:flex;gap:12px;align-items:center;padding:14px 8px 14px 16px;background:var(--soft);border-color:transparent}
 .install .t{flex:1;font-size:15px;line-height:1.4}.install .t strong{display:block;font-size:16px}
 .install .btn{width:auto;margin:0;min-height:44px;padding:8px 16px;white-space:nowrap}
@@ -135,7 +135,7 @@ select{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--lin
 <!-- /Yandex.Metrika counter -->
 </head>
 <body>
-<div class="wrap" id="main" aria-live="polite"><h1>Кухонный помощник</h1><p>Бесплатный помощник по питанию без регистрации: подбирает рецепты по кухне и продуктам, составляет меню на день и план питания на 3 дня с калориями и КБЖУ, делает список покупок со ссылками на Пятёрочку, ВкусВилл, Яндекс Лавку и Купер и скачивает рецепты в PDF. Работает в браузере, можно добавить на главный экран телефона.</p><p><a href="/pitanie/menu-na-den">Меню на день с КБЖУ</a> · <a href="/pitanie/plan-pitaniya-na-3-dnya">План питания на 3 дня</a> · <a href="/pitanie/chto-prigotovit-iz-produktov">Что приготовить из продуктов</a> · <a href="/pitanie/podbor-po-kbzhu">Подбор по КБЖУ</a> · <a href="/pitanie">Все статьи</a></p><noscript><p>Для работы приложения включите JavaScript.</p></noscript></div>
+<div class="wrap" id="main" aria-live="polite"><h1>Кухонный помощник</h1><p>Помощник по питанию: начать можно бесплатно, подбирает рецепты по кухне и продуктам, составляет меню на день и план питания на 3 дня с калориями и КБЖУ, делает список покупок со ссылками на Пятёрочку, ВкусВилл, Яндекс Лавку и Купер и скачивает рецепты в PDF. Работает в браузере, можно добавить на главный экран телефона.</p><p><a href="/pitanie/menu-na-den">Меню на день с КБЖУ</a> · <a href="/pitanie/plan-pitaniya-na-3-dnya">План питания на 3 дня</a> · <a href="/pitanie/chto-prigotovit-iz-produktov">Что приготовить из продуктов</a> · <a href="/pitanie/podbor-po-kbzhu">Подбор по КБЖУ</a> · <a href="/pitanie">Все статьи</a></p><noscript><p>Для работы приложения включите JavaScript.</p></noscript></div>
 <nav class="tabs" role="tablist" aria-label="Разделы">
   <button class="tab" role="tab" data-tab="new"><span class="ic">🍳</span>Создать</button>
   <button class="tab" role="tab" data-tab="menus"><span class="ic">🗂</span>Готовые меню</button>
@@ -516,10 +516,45 @@ select{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--lin
   function showRecipe(res){
     LAST_RECIPE=res.text;
     try{ls("lastrecipe",JSON.stringify(res));}catch(e){}
-        main.innerHTML='<h1>'+esc(res.title)+'</h1><div class="card" style="padding:4px 16px 16px">'+(res.card?'<img class="rcard" src="'+esc(res.card)+'" alt="" loading="lazy">':'')+recipeHTML(res.text)+actions(res.title,res.text)+'</div>'+shoppingHTML(res.shopping,"Найти продукты в магазине","recipe")+hintHTML()+adSlot("inline")+'<button class="btn ghost" id="again">🍳 Подобрать ещё</button>';
+        res.base=res.base||res.text;var sid="s"+Math.random().toString(36).slice(2,8);window.__r[sid]={base:res.base,res:res};
+        main.innerHTML='<h1>'+esc(res.title)+'</h1><div class="card" data-sc="'+sid+'" style="padding:4px 16px 16px">'+(res.card?'<img class="rcard" src="'+esc(res.card)+'" alt="" loading="lazy">':'')+scaleBar(res.text)+recipeHTML(res.text)+actions(res.title,res.text)+'</div>'+shoppingHTML(res.shopping,"Найти продукты в магазине","recipe")+hintHTML()+adSlot("inline")+'<button class="btn ghost" id="again">🍳 Подобрать ещё</button>';
         document.getElementById("again").onclick=function(){show("new");};
     if(Object.keys(TM).length)tmEnsureTick();
-    window.scrollTo(0,0);
+    if(!res.keep)window.scrollTo(0,0);
+  }
+  // пересчёт порций: считает сервер, без ИИ и лимитов; база всегда исходный текст, чтобы округления не накапливались
+  function scaleBar(text){
+    var m=/👥\s*Порци[йия]\s*:?\s*(\d+)/.exec(text||"");if(!m)return "";
+    var n=+m[1],opts=[1,2,3,4,6];if(opts.indexOf(n)<0){opts.push(n);opts.sort(function(a,b){return a-b;});}
+    return '<div class="scalebar"><span class="sub">Порций:</span>'+opts.map(function(k){return '<button class="chip" data-scale="'+k+'" aria-pressed="'+(k===n)+'">'+k+'</button>';}).join("")+'</div>';
+  }
+  function favBody(f,text){return scaleBar(text)+recipeHTML(text)+actions(f.title,text,true)+'<button class="btn ghost" data-del="'+esc(f.id)+'">🗑 Удалить</button>';}
+  function scaleGo(b){
+    var box=b.closest("[data-sc]"),st=box&&window.__r[box.getAttribute("data-sc")],to=+b.getAttribute("data-scale");if(!st)return;
+    var shop=st.res&&st.res.shopping||[];b.disabled=true;
+    call("POST","/api/scale",{text:st.base,to:to,names:shop.map(function(i){return i.name;})}).then(function(j){
+      if(st.res){var r={};Object.keys(st.res).forEach(function(k){r[k]=st.res[k];});r.text=j.text;r.keep=true;r.shopping=shop.map(function(it,i){var c={};Object.keys(it).forEach(function(k){c[k]=it[k];});if(j.amounts[i])c.amount=j.amounts[i];return c;});showRecipe(r);}
+      else box.innerHTML=favBody(st.fav,j.text);
+    }).catch(function(e){b.disabled=false;alert(e.message);});
+  }
+  // общий список покупок из нескольких рецептов избранного
+  function viewCombo(){
+    return call("GET","/api/favorites").then(function(d){
+      return '<button class="chip mini" data-tab-go="favs">← Любимые</button><h1 style="margin-top:10px">🛒 Общий список покупок</h1><p class="sub">Отметьте рецепты, которые будете готовить. Одинаковые продукты сложатся.</p><div class="card pcard">'+
+        d.items.slice().reverse().map(function(f){return '<label class="step"><input type="checkbox" data-combo-id="'+esc(f.id)+'"><span>'+esc(f.title)+'</span></label>';}).join("")+
+        '<button class="btn" data-combo-go="1">Собрать список</button></div><div id="combo-res"></div>';
+    });
+  }
+  function comboGo(b){
+    var ids=[];Array.prototype.forEach.call(document.querySelectorAll("[data-combo-id]"),function(c){if(c.checked)ids.push(c.getAttribute("data-combo-id"));});
+    if(!ids.length){alert("Отметьте хотя бы один рецепт");return;}
+    b.disabled=true;
+    call("POST","/api/favorites/list",{ids:ids}).then(function(r){
+      b.disabled=false;
+      var box=document.getElementById("combo-res");
+      box.innerHTML='<div class="card pcard"><h2>'+esc(r.title)+'</h2>'+r.items.map(function(i){return '<div class="cline"><span>'+esc(i.name)+'</span><span class="sub">'+esc(i.amount||"")+'</span></div>';}).join("")+(r.home.length?'<div class="home">🏠 Есть дома: '+esc(r.home.join(", "))+'</div>':'')+'<a class="btn" style="display:block;text-align:center;margin-top:12px" href="'+esc(r.url)+'" target="_blank" rel="noopener">☑️ Открыть с галочками и поделиться</a></div>';
+      box.scrollIntoView({behavior:"smooth",block:"start"});
+    }).catch(function(e){b.disabled=false;alert(e.message);});
   }
 
   // ---- вкладка «Готовые меню» ----
@@ -581,7 +616,8 @@ select{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--lin
       if(!items.length) return '<h1>❤️ Любимые рецепты</h1>'+favNote()+'<div class="card empty">Пока пусто. Нажмите «⭐ Сохранить» под понравившимся рецептом.</div>';
       var h='<h1>❤️ Любимые рецепты</h1>'+favNote();
       h+=bulkButton("📄 Всё избранное — одним PDF",items.map(function(f){return {title:f.title,text:f.text};}),"Избранные рецепты")+'<div style="height:12px"></div>';
-      items.forEach(function(f){h+=accordion(esc(f.title),"","",recipeHTML(f.text)+actions(f.title,f.text,true)+'<button class="btn ghost" data-del="'+esc(f.id)+'">🗑 Удалить</button>',false);});
+      if(items.length>=2)h+='<button class="btn ghost" data-tab-go="combo" style="margin-bottom:12px">🛒 Общий список покупок</button>';
+      items.forEach(function(f){var sid="s"+Math.random().toString(36).slice(2,8);window.__r[sid]={base:f.text,fav:f};h+=accordion(esc(f.title),"","",'<div data-sc="'+sid+'">'+favBody(f,f.text)+'</div>',false);});
       return h;});
   }
 
@@ -736,12 +772,12 @@ select{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--lin
       return h;
     });
   }
-  var VIEWS={menus:viewMenus,favs:viewFavs,book:viewBook,profile:viewProfile,settings:viewSettings,label:viewLabel,help:viewHelp};
+  var VIEWS={menus:viewMenus,favs:viewFavs,book:viewBook,profile:viewProfile,settings:viewSettings,label:viewLabel,combo:viewCombo,help:viewHelp};
   function offlineBanner(){return '<div class="card" style="padding:12px 16px;margin:0 0 12px;border-left:4px solid var(--primary)"><strong>📴 Нет интернета.</strong> Показываю сохранённое с прошлого раза: меню, план, избранное, рецепты и таймеры работают. Новые подборы — когда появится сеть.</div>';}
   window.addEventListener("online",function(){if(OFFLINE&&(cur==="menus"||cur==="favs"))show(cur);});
   function show(tab){
     cur=tab;ls("tab",tab);
-    Array.prototype.forEach.call(document.querySelectorAll(".tab"),function(t){t.setAttribute("aria-selected",t.getAttribute("data-tab")===(tab==="settings"||tab==="label"?"profile":tab));});
+    Array.prototype.forEach.call(document.querySelectorAll(".tab"),function(t){t.setAttribute("aria-selected",t.getAttribute("data-tab")===(tab==="settings"||tab==="label"?"profile":tab==="combo"?"favs":tab));});
     if(tab==="new"){viewNew();window.scrollTo(0,0);return;}
     main.innerHTML='<div class="skeleton"></div><div class="skeleton"></div><div class="skeleton"></div>';
     OFFLINE=false;
@@ -1032,6 +1068,8 @@ select{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--lin
     if(b=t.closest("[data-install]")){doInstall(b.getAttribute("data-install"));return;}
     if(b=t.closest("[data-install-close]")){ls("pwa_x",String(Date.now()));fillInstall();return;}
     if(b=t.closest("[data-done]")){b.disabled=true;call("POST","/api/week/done/"+b.getAttribute("data-done")).then(function(){show("menus");}).catch(fail);return;}
+    if(b=t.closest("[data-scale]")){scaleGo(b);return;}
+    if(b=t.closest("[data-combo-go]")){comboGo(b);return;}
     if(b=t.closest("[data-del]")){if(confirm("Удалить из избранного?"))call("DELETE","/api/favorites/"+b.getAttribute("data-del")).then(function(){cacheFavs();show("favs");}).catch(fail);return;}
     if(b=t.closest("[data-cook]")){runJob(call("POST","/api/week/cook"),"Готовлю меню на день…").then(function(){show("menus");}).catch(function(e){fail(e,"menus");});return;}
   });

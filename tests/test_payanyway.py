@@ -82,6 +82,7 @@ f = payanyway.form_fields(payanyway.get_order(o["id"]))
 check("поля формы: счёт, заказ, сумма, валюта, режим, подпись", f["MNT_ID"] == MID and f["MNT_TRANSACTION_ID"] == o["id"] and f["MNT_AMOUNT"] == AM and f["MNT_CURRENCY_CODE"] == "RUB" and f["MNT_TEST_MODE"] == "0")
 check("подпись формы по формуле документации и без кода в открытом виде", f["MNT_SIGNATURE"] == payanyway.form_signature(MID, o["id"], AM, "RUB", "", 0, CODE) and CODE not in str(f))
 _t = plans.is_tester
+config.PAYANYWAY_CHECK_RUB = 10         # служебный тариф по умолчанию выключен, механизм проверяем
 plans.is_tester = lambda u: str(u) == "777"
 check("тариф «Проверка оплаты» 10 ₽ виден только тестировщику", [x["key"] for x in plans.pay_offers_for("777")][-1] == "check" and "check" not in [x["key"] for x in plans.pay_offers_for("888")] and plans.offer("check")["rub"] == 10)
 try:

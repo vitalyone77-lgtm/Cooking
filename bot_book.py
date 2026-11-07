@@ -347,6 +347,8 @@ async def show_favorites(event, page: int = 0, mode: str = "auto") -> None:
         nav += [InlineKeyboardButton(text=f"{page + 1}/{pages}", callback_data="bk:noop")]
         nav += ([InlineKeyboardButton(text="▶️", callback_data=f"bk:fav:{page + 1}")] if page < pages - 1 else [])
         b.row(*nav)
+    if len(favs) >= 2:
+        b.row(InlineKeyboardButton(text="🛒 Общий список покупок", callback_data="cb:o"))
     b.row(InlineKeyboardButton(text="📖 Книга рецептов", callback_data="bk:h"), InlineKeyboardButton(text="⬅️ Меню", callback_data="menu:open"))
     if favs:
         text = f"⭐ Моё избранное ({len(favs)})\n\nСохранить рецепт можно кнопкой «⭐ В избранное» под ним."

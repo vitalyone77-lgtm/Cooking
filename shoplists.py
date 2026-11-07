@@ -11,11 +11,15 @@ from html import escape
 
 import accounts
 import config
+import favorites
+import plans
+import recipe_math
 
 TTL = 30 * 86400
 MAX_ITEMS = 80
 MAX_NEW_PER_HOUR = 30
 ID_RE = re.compile(r"^[A-Za-z0-9_-]{8,24}$")
+MAX_RECIPES = 30
 
 
 def _clean(items: list) -> list[dict]:
@@ -43,6 +47,21 @@ def create(uid, title: str, items: list, done: list | None = None) -> str:
                 (lid, str(uid), re.sub(r"\s+", " ", title or "").strip()[:100] or "Список покупок",
                  json.dumps(clean, ensure_ascii=False), json.dumps(marks), now))
     return lid
+
+
+def from_favorites(uid, ids: list[str]) -> dict:
+    """Один список из нескольких рецептов избранного. То, что уже на полке, не покупаем. ValueError — понятный текст. -> {url, title, items, home}"""
+    chosen = [f for f in favorites.get_favorites(uid) if f["id"] in set(ids)][:MAX_RECIPES]
+    if not chosen:
+        raise ValueError("Отметьте хотя бы один рецепт")
+    items = recipe_math.merge_recipes([f["text"] for f in chosen])
+    if not items:
+        raise ValueError("В этих рецептах не нашёл список продуктов")
+    home_idx = accounts.shelf_match(uid, [i["name"] for i in items]) if plans.shelf_on(uid) else set()
+    buy = [it for i, it in enumerate(items) if i not in home_idx] or items
+    title = chosen[0]["title"][:80] if len(chosen) == 1 else f"Покупки на {len(chosen)} рецепт" + ("а" if len(chosen) < 5 else "ов")
+    lid = create(uid, title, buy)
+    return {"url": url(lid), "title": title, "items": buy, "home": [it["name"] for i, it in enumerate(items) if i in home_idx]}
 
 
 def get(lid: str) -> dict | None:
