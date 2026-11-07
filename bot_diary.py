@@ -226,37 +226,60 @@ async def category_items(callback: CallbackQuery):
 PORTIONS = (("Малая", 7), ("Стандарт", 10), ("Большая", 15))      # доли обычной порции в десятых
 
 
-def _portion_view(food: dict) -> tuple[str, InlineKeyboardMarkup]:
-    g = food["grams"]
+UNIT_COUNTS = {"pc": (1, 2, 3, 4), "tb": (1, 2, 3, 4), "ts": (1, 2, 3)}
+
+
+def _ask_cb(food: dict, ask: dict) -> str:
+    return f"dy:u:{food['id']}:{ask['unit']}:{ask['n']:g}" if ask["unit"] else f"dy:w:{food['id']}:{int(round(ask['grams']))}"
+
+
+def _portion_view(food: dict, qty: str = "") -> tuple[str, InlineKeyboardMarkup]:
+    """Сколько съели: штуки и ложки кнопками (если продукт так меряют), порции, своё количество текстом. qty — количество из поиска («2 яйца»)."""
+    g, us = food["grams"], foods.units(food)
     lines = [food["name"], f"Обычная порция: {food['label']}. На 100 г: {int(food['kcal100'])} ккал.", ""]
     if food.get("ai"):
         lines[1:1] = ["🤖 Оценка ИИ, может ошибаться."]
-    for label, m in PORTIONS:
-        gr = int(round(g * m / 10))
-        n = foods.nutrition(food, gr)
-        lines.append(f"{label}: {gr} г ≈ {n['kcal']} ккал (Б {n['protein']:g} · Ж {n['fat']:g} · У {n['carb']:g})")
-    lines += ["", "Сколько съели?"]
+    ask = foods.parse_qty(qty, food) if qty else None
+    ask = ask if ask and 1 <= ask["grams"] <= 2000 else None
+    if ask:
+        n = foods.nutrition(food, ask["grams"])
+        lines += [f"Вы написали: {ask['desc'] or str(int(round(ask['grams']))) + ' г'} ≈ {int(round(ask['grams']))} г, {n['kcal']} ккал", ""]
+    for u in us:
+        n = foods.nutrition(food, u["grams"])
+        lines.append(f"1 {u['title']} ≈ {u['grams']:g} г, {n['kcal']} ккал")
+    if not any(u["key"] == "pc" for u in us):
+        for label, m in PORTIONS:
+            gr = int(round(g * m / 10))
+            n = foods.nutrition(food, gr)
+            lines.append(f"{label}: {gr} г ≈ {n['kcal']} ккал (Б {n['protein']:g} · Ж {n['fat']:g} · У {n['carb']:g})")
+    lines += ["", "Сколько съели? Можно написать: «2 шт», «3 ложки» или «180 г»."]
     b = InlineKeyboardBuilder()
-    b.row(*[InlineKeyboardButton(text=label, callback_data=f"dy:p:{food['id']}:{m}") for label, m in PORTIONS],
-          InlineKeyboardButton(text="✏️ Граммы", callback_data=f"dy:g:{food['id']}"))
-    b.row(InlineKeyboardButton(text="⬅️ Назад", callback_data="dy:cat"))
+    if ask:
+        n = foods.nutrition(food, ask["grams"])
+        b.row(InlineKeyboardButton(text=f"✅ {ask['desc'] or str(int(round(ask['grams']))) + ' г'} · {n['kcal']} ккал", callback_data=_ask_cb(food, ask)))
+    for u in us:
+        b.row(*[InlineKeyboardButton(text=f"{k} {u['title'] if u['key'] == 'pc' else u['title'].split(' с ')[0]}", callback_data=f"dy:u:{food['id']}:{u['key']}:{k}")
+                for k in UNIT_COUNTS[u["key"]]])
+    if not any(u["key"] == "pc" for u in us):
+        b.row(*[InlineKeyboardButton(text=label, callback_data=f"dy:p:{food['id']}:{m}") for label, m in PORTIONS])
+    b.row(InlineKeyboardButton(text="✏️ Своё количество", callback_data=f"dy:g:{food['id']}"), InlineKeyboardButton(text="⬅️ Назад", callback_data="dy:cat"))
     return "\n".join(lines), b.as_markup()
 
 
 @router.callback_query(F.data.startswith("dy:f:"))
-async def choose_portion(callback: CallbackQuery):
+async def choose_portion(callback: CallbackQuery, state: FSMContext):
     food = food_ai.lookup(callback.data.split(":", 2)[2])
     if not food or not await _need_diary(callback):
         await callback.answer()
         return
     await callback.answer()
-    text, markup = _portion_view(food)
+    text, markup = _portion_view(food, (await state.get_data()).get("dy_qty") or "")
     await ui.show(callback, text, markup, mode="edit")
 
 
-def _add_food(uid: int, food: dict, grams: float) -> dict:
+def _add_food(uid: int, food: dict, grams: float, desc: str = "") -> dict:
     n = foods.nutrition(food, grams)
-    accounts.diary_add(uid, f"{food['name']} ({int(round(grams))} г)", n["kcal"], n["protein"], n["fat"], n["carb"], "ai" if food.get("ai") else "list")
+    accounts.diary_add(uid, foods.entry_title(food, grams, desc), n["kcal"], n["protein"], n["fat"], n["carb"], "ai" if food.get("ai") else "list")
     usage.event("diary_add", uid)
     return n
 
@@ -282,6 +305,49 @@ async def add_portion(callback: CallbackQuery):
     await _show(callback, f"✅ Записал: {n['kcal']} ккал")
 
 
+async def _record(callback: CallbackQuery, food: dict, grams: float, desc: str = "") -> None:
+    if not await _need_diary(callback):
+        return
+    try:
+        n = _add_food(callback.message.chat.id, food, grams, desc)
+    except ValueError as e:
+        await callback.answer(str(e), show_alert=True)
+        return
+    await callback.answer(f"Записал: {n['kcal']} ккал")
+    await _show(callback, f"✅ Записал: {n['kcal']} ккал")
+
+
+@router.callback_query(F.data.startswith("dy:u:"))
+async def add_units(callback: CallbackQuery, state: FSMContext):
+    """Штуки или ложки кнопкой: dy:u:<продукт>:<pc|tb|ts>:<сколько>."""
+    try:
+        _, _, fid, key, cnt = callback.data.split(":")
+        food, n = food_ai.lookup(fid), float(cnt)
+        u = foods.unit_of(food, key) if food else None
+        if not u or not 0 < n <= 50:
+            raise ValueError(cnt)
+    except ValueError:
+        await callback.answer()
+        return
+    await state.update_data(dy_qty=None)
+    await _record(callback, food, n * u["grams"], f"{n:g} {u['title']}")
+
+
+@router.callback_query(F.data.startswith("dy:w:"))
+async def add_grams_button(callback: CallbackQuery, state: FSMContext):
+    """Граммы из запроса («банан 150 г») одной кнопкой."""
+    try:
+        _, _, fid, gr = callback.data.split(":")
+        food, grams = food_ai.lookup(fid), int(gr)
+        if not food or not 1 <= grams <= 2000:
+            raise ValueError(gr)
+    except ValueError:
+        await callback.answer()
+        return
+    await state.update_data(dy_qty=None)
+    await _record(callback, food, grams)
+
+
 @router.callback_query(F.data.startswith("dy:g:"))
 async def ask_grams(callback: CallbackQuery, state: FSMContext):
     food = food_ai.lookup(callback.data.split(":", 2)[2])
@@ -291,7 +357,8 @@ async def ask_grams(callback: CallbackQuery, state: FSMContext):
     await state.set_state(DiaryForm.grams)
     await state.update_data(dy_food=food["id"])
     await callback.answer()
-    await ui.show(callback, f"{food['name']}: сколько граммов съели? Напишите число, например 180.",
+    hint = ", ".join(f"«2 {u['title']}»" for u in foods.units(food))
+    await ui.show(callback, f"{food['name']}: сколько съели? Напишите, например, {hint + ' или ' if hint else ''}«180 г».",
                   _cancel_kb(), mode="edit")
 
 
@@ -300,14 +367,14 @@ async def got_grams(message: Message, state: FSMContext):
     uid = message.chat.id
     await ui.drop(message)
     food = food_ai.lookup((await state.get_data()).get("dy_food"))
-    m = re.search(r"\d+[.,]?\d*", message.text or "")
-    grams = float(m.group(0).replace(",", ".")) if m else 0
-    if not food or not 5 <= grams <= 2000:
-        await ui.show(message, f"{food['name'] if food else 'Продукт'}: напишите вес в граммах от 5 до 2000, например 180.", _cancel_kb(), mode="tracked")
+    q = foods.parse_qty(message.text or "", food) if food else None
+    if not food or not q or not 1 <= q["grams"] <= 2000:
+        await ui.show(message, f"{food['name'] if food else 'Продукт'}: не понял количество. Напишите, например, «2 шт», «3 ложки» или «180 г» (до 2 кг).",
+                      _cancel_kb(), mode="tracked")
         return
     await state.clear()
     try:
-        n = _add_food(uid, food, grams)
+        n = _add_food(uid, food, q["grams"], q["desc"])
     except ValueError as e:
         await ui.show(message, str(e), _cancel_kb(), mode="tracked")
         return
@@ -323,8 +390,8 @@ async def ask_find(callback: CallbackQuery, state: FSMContext):
         return
     await state.set_state(DiaryForm.find)
     await callback.answer()
-    await ui.show(callback, "🔎 Напишите название, например «борщ» или «куриная грудка». Если в справочнике такого нет, спрошу у ИИ.\n\n"
-                  "Своё блюдо можно записать сразу с калориями: «пицца 450».", _cancel_kb(), mode="edit")
+    await ui.show(callback, "🔎 Напишите название, например «борщ» или «куриная грудка». Можно сразу с количеством: «2 яйца», «овсянка 3 ложки». "
+                  "Если в справочнике такого нет, спрошу у ИИ.\n\nСвоё блюдо можно записать сразу с калориями: «пицца 450».", _cancel_kb(), mode="edit")
 
 
 def parse_manual(text: str) -> tuple[str, int] | None:
@@ -348,7 +415,7 @@ async def got_find(message: Message, state: FSMContext):
         text, markup = diary_view(uid, f"✅ Записал: {manual[0]}, {manual[1]} ккал")
         await ui.show(message, text, markup, mode="tracked")
         return
-    query = (message.text or "").strip()[:60]
+    query, qty = foods.split_qty((message.text or "").strip()[:60])      # «2 яйца»: ищем «яйца», количество предложим сразу
     found = foods.search(query)
     if not found:
         await ui.show(message, "В справочнике такого нет, спрашиваю у ИИ…", None, mode="tracked")
@@ -357,10 +424,11 @@ async def got_find(message: Message, state: FSMContext):
             await ui.show(message, why, _cancel_kb(), mode="tracked")     # состояние поиска остаётся: можно написать ещё раз
             return
         await state.clear()
-        text, markup = _portion_view(food)
+        await state.update_data(dy_qty=qty)
+        text, markup = _portion_view(food, qty)
         await ui.show(message, text, markup, mode="tracked")
         return
-    await state.update_data(dy_q=query)
+    await state.update_data(dy_q=query, dy_qty=qty)
     await state.set_state(None)
     b = InlineKeyboardBuilder()
     for f in found:
@@ -385,8 +453,10 @@ async def ask_ai(callback: CallbackQuery, state: FSMContext):
     if not food:
         await ui.show(callback, why, _cancel_kb(), mode="edit")
         return
+    qty = (await state.get_data()).get("dy_qty") or ""
     await state.clear()
-    text, markup = _portion_view(food)
+    await state.update_data(dy_qty=qty)
+    text, markup = _portion_view(food, qty)
     await ui.show(callback, text, markup, mode="edit")
 
 

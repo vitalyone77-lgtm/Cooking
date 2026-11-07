@@ -227,6 +227,8 @@ def resolve_shopping_amounts(message: Message, ctx: str) -> dict[str, int]:
     if ctx == "w":
         info = week_menu.get_basket_info(chat_id)
         return dict(info["inventory_initial"]) if info else {}
+    if ctx.startswith("wd") and ctx[2:].isdigit():
+        return week_menu.get_day_shopping_amounts(chat_id, int(ctx[2:]))
     return {}
 
 

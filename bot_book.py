@@ -165,7 +165,8 @@ async def noop(callback: CallbackQuery):
 async def pick_meal(callback: CallbackQuery):
     meal = callback.data.split(":")[2]
     uid = callback.message.chat.id
-    _save(uid, {"meal": meal} if meal in book.MEALS else {})
+    f = {k: v for k, v in _flt(uid).items() if k != "meal"}         # остальные условия (техника, время, тег, слово) сохраняем
+    _save(uid, {**f, "meal": meal} if meal in book.MEALS else f)
     await callback.answer()
     text, markup = list_view(uid, 0)
     await ui.show(callback, text, markup, mode="edit")

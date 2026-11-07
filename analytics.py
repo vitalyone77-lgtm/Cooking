@@ -28,7 +28,7 @@ def funnel(days: int = 30) -> list[dict]:
     ev = lambda *names: _uids(f"SELECT uid FROM events WHERE ts >= ? AND name IN ({','.join('?' * len(names))})", (since, *names))
     limit = _uids("SELECT uid FROM events WHERE ts >= ? AND name LIKE 'limit_%'", (since,))
     gate = _uids("SELECT uid FROM events WHERE ts >= ? AND name LIKE 'gate_%'", (since,))
-    paid = {r[0] for r in accounts._q("SELECT uid FROM payments WHERE ts >= ? AND currency NOT IN ('RUBTEST', 'RUBREFUND')", (since,), all_=True)}
+    paid = {r[0] for r in accounts._q("SELECT uid FROM payments WHERE ts >= ? AND currency NOT IN ('RUBTEST', 'RUBREFUND', 'XTRREFUND')", (since,), all_=True)}
     steps = [("Новые люди", new), ("Сделали подбор", made), ("Вернулись в другой день", back), ("Вошли на сайте", ev("site_link", "site_link_vk")), ("Упёрлись в лимит", limit),
              ("Нажали закрытую функцию", gate), ("Начали пробный период", ev("trial_start")), ("Открыли подписку", ev("sub_view", "pay_start")), ("Оплатили", paid)]
     return [{"step": t, "users": len(s)} for t, s in steps]

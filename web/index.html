@@ -958,7 +958,7 @@ select{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--lin
     h+='<h2 style="margin-top:16px">Сегодня</h2><p class="dy-hero"><b>'+dyN(t.kcal)+'</b> ккал'+(tg?' из ≈'+dyN(tg.kcal)+' <span class="sub">('+esc(tg.title)+')</span>':'')+'</p>';
     if(tg)h+='<div class="dy-bar" role="img" aria-label="Съедено '+Math.round(t.kcal/tg.kcal*100)+'%"><i style="width:'+Math.min(100,Math.round(t.kcal/tg.kcal*100))+'%"></i></div>';
     h+='<p class="sub" style="margin:0">'+[["Б","protein"],["Ж","fat"],["У","carb"]].map(function(m){var gg=(d.goal_grams||{})[m[1]];return m[0]+' '+Math.round(t[m[1]])+(gg?' из '+gg:'')+' г';}).join(" · ")+(tg?'':' · <button class="chip mini" data-tab-go="settings">Задать цель</button>')+'</p>';
-    h+='<form data-dy-form="1" class="row" style="margin-top:12px"><input type="text" id="dy-q" maxlength="60" placeholder="Что съели? борщ или «пицца 450»" aria-label="Что съели"><button class="btn" style="width:auto;margin:0">Найти</button></form><div id="dy-res" class="dy-res"></div>';
+    h+='<form data-dy-form="1" class="row" style="margin-top:12px"><input type="text" id="dy-q" maxlength="60" placeholder="Что съели? «2 яйца», борщ или «пицца 450»" aria-label="Что съели"><button class="btn" style="width:auto;margin:0">Найти</button></form><div id="dy-res" class="dy-res"></div>';
     DY.foods={};(d.frequent||[]).forEach(function(f){DY.foods[f.id]=f;});
     if((d.frequent||[]).length)h+='<div class="chips tight">'+d.frequent.map(function(f){return '<button class="chip mini" data-dy-food="'+esc(f.id)+'">⭐ '+esc(f.name)+'</button>';}).join("")+'</div>';
     if((d.yesterday||[]).length)h+='<details><summary>🔁 Как вчера</summary><div class="chips tight">'+d.yesterday.map(function(y){return '<button class="chip mini" data-dy-copy="'+y.id+'">'+esc(y.title)+' · '+dyN(y.kcal)+'</button>';}).join("")+'</div></details>';
@@ -975,9 +975,14 @@ select{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--lin
     if(items.length&&!items[0].ai)h+='<button class="chip mini" style="margin-top:6px" data-dy-ai="1">🤖 Нет нужного: спросить ИИ</button>';
     return h;
   }
+  // сколько съели: штуки и ложки (если продукт так меряют), порции, своё количество текстом («2 шт», «3 ложки», «180 г»)
   function dyPortion(f){
-    var row=[["Малая",0.7],["Стандарт",1],["Большая",1.5]].map(function(p){var g=Math.round(f.grams*p[1]);return '<button class="chip mini" data-dy-add="'+esc(f.id)+'" data-g="'+g+'">'+p[0]+' '+g+' г · '+dyN(f.kcal100*g/100)+'</button>';}).join("");
-    return '<div class="item"><strong>'+esc(f.name)+'</strong>'+(f.ai?'<br><span class="sub">🤖 Оценка ИИ, может ошибаться.</span>':'')+'<div class="chips tight">'+row+'</div><div class="row" style="margin-top:8px"><input type="text" inputmode="numeric" id="dy-g" placeholder="Или сколько граммов" aria-label="Граммы"><button class="btn ghost" style="width:auto;margin:0" data-dy-add="'+esc(f.id)+'">Записать</button></div></div>';
+    var us=f.units||[],pc=us.some(function(u){return u.key==="pc";}),h="";
+    if(f.ask)h+='<div class="chips tight"><button class="chip mini" data-dy-add="'+esc(f.id)+'" data-q="'+esc(f.ask.qty)+'">✅ '+esc(f.ask.title)+' · '+dyN(f.kcal100*f.ask.grams/100)+' ккал</button></div>';
+    us.forEach(function(u){var ns=u.key==="ts"?[1,2,3]:[1,2,3,4],short=u.key==="pc"?"шт":u.title.split(" с ")[0];
+      h+='<p class="sub" style="margin:8px 0 2px">1 '+esc(u.title)+' ≈ '+u.grams+' г, '+dyN(f.kcal100*u.grams/100)+' ккал</p><div class="chips tight">'+ns.map(function(n){return '<button class="chip mini" data-dy-add="'+esc(f.id)+'" data-q="'+n+' '+esc(short)+'">'+n+' '+esc(short)+' · '+dyN(f.kcal100*u.grams*n/100)+'</button>';}).join("")+'</div>';});
+    if(!pc)h+='<div class="chips tight" style="margin-top:6px">'+[["Малая",0.7],["Стандарт",1],["Большая",1.5]].map(function(p){var g=Math.round(f.grams*p[1]);return '<button class="chip mini" data-dy-add="'+esc(f.id)+'" data-g="'+g+'">'+p[0]+' '+g+' г · '+dyN(f.kcal100*g/100)+'</button>';}).join("")+'</div>';
+    return '<div class="item"><strong>'+esc(f.name)+'</strong>'+(f.ai?'<br><span class="sub">🤖 Оценка ИИ, может ошибаться.</span>':'')+h+'<div class="row" style="margin-top:8px"><input type="text" id="dy-g" placeholder="Или сколько: 2 шт, 3 ложки, 180 г" aria-label="Сколько съели"><button class="btn ghost" style="width:auto;margin:0" data-dy-add="'+esc(f.id)+'">Записать</button></div></div>';
   }
   function dyFind(mode){
     var box=document.getElementById("dy-res");if(!box||!DY.q)return;
@@ -1072,7 +1077,7 @@ select{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--lin
     if(b=t.closest("[data-dy-days]")){DY.days=+b.getAttribute("data-dy-days")||30;show("profile");return;}
     if(b=t.closest("[data-dy-ai]")){dyFind(2);return;}
     if(b=t.closest("[data-dy-food]")){var ff=DY.foods[b.getAttribute("data-dy-food")],rb=document.getElementById("dy-res");if(ff&&rb){rb.innerHTML=dyPortion(ff);rb.scrollIntoView({block:"nearest"});}return;}
-    if(b=t.closest("[data-dy-add]")){var dg=b.getAttribute("data-g")||val("dy-g");if(!dg){alert("Напишите вес в граммах");return;}b.disabled=true;call("POST","/api/diary",{food:b.getAttribute("data-dy-add"),grams:parseFloat(String(dg).replace(",","."))||0}).then(function(j){toast("Записал: "+dyN(j.kcal)+" ккал");return profileReload();}).catch(function(e){b.disabled=false;alert(e.message);});return;}
+    if(b=t.closest("[data-dy-add]")){var dg=b.getAttribute("data-g"),dq=b.getAttribute("data-q")||(dg?"":val("dy-g"));if(!dg&&!dq){alert("Напишите, сколько съели: 2 шт, 3 ложки или 180 г");return;}b.disabled=true;call("POST","/api/diary",dg?{food:b.getAttribute("data-dy-add"),grams:parseFloat(dg)||0}:{food:b.getAttribute("data-dy-add"),qty:dq}).then(function(j){toast("Записал: "+dyN(j.kcal)+" ккал");return profileReload();}).catch(function(e){b.disabled=false;alert(e.message);});return;}
     if(b=t.closest("[data-dy-copy]")){b.disabled=true;call("POST","/api/diary/"+encodeURIComponent(b.getAttribute("data-dy-copy"))+"/copy").then(function(j){toast("Записал: "+dyN(j.kcal)+" ккал");return profileReload();}).catch(function(e){b.disabled=false;alert(e.message);});return;}
     if(b=t.closest("[data-dy-del]")){call("DELETE","/api/diary/"+encodeURIComponent(b.getAttribute("data-dy-del"))).then(profileReload).catch(function(e){alert(e.message);});return;}
     if(b=t.closest("[data-dy-eat]")){var rr=window.__r[b.getAttribute("data-dy-eat")];if(!rr)return;b.disabled=true;call("POST","/api/diary/recipe",{title:rr.title,text:rr.text}).then(function(j){toast("В дневник: "+dyN(j.kcal)+" ккал. Оценка примерная.");b.disabled=false;}).catch(function(e){b.disabled=false;alert(e.message);});return;}

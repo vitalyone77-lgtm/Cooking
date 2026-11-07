@@ -953,6 +953,7 @@ def weight_del(day: str = "", x_device: str | None = Header(default=None)):
 class DiaryIn(BaseModel):
     food: str | None = Field(None, max_length=20)
     grams: float | None = None
+    qty: str | None = Field(None, max_length=40)              # «2 шт», «3 ложки», «180 г»: сервер переводит в граммы
     title: str | None = Field(None, max_length=80)
     kcal: int | float | str | None = None
 
@@ -977,9 +978,13 @@ def _need_diary(dev_id: int) -> str:
     return uid
 
 
-def _food_json(f: dict) -> dict:
-    return {"id": f["id"], "name": f["name"], "label": f["label"], "grams": f["grams"], "kcal100": f["kcal100"],
-            "portion_kcal": foods.portion_kcal(f), "ai": bool(f.get("ai"))}
+def _food_json(f: dict, qty: str = "") -> dict:
+    out = {"id": f["id"], "name": f["name"], "label": f["label"], "grams": f["grams"], "kcal100": f["kcal100"],
+           "portion_kcal": foods.portion_kcal(f), "ai": bool(f.get("ai")), "units": foods.units(f)}
+    ask = foods.parse_qty(qty, f) if qty else None
+    if ask and 1 <= ask["grams"] <= 2000:
+        out["ask"] = {"qty": qty, "title": ask["desc"] or f"{int(round(ask['grams']))} г", "grams": ask["grams"]}
+    return out
 
 
 @app.get("/api/diary")
@@ -1001,12 +1006,12 @@ def diary_get(days: int = 30, x_device: str | None = Header(default=None)):
 async def foods_find(q: str = "", ai: int = 0, x_device: str | None = Header(default=None)):
     """Поиск продукта: сначала справочник; если там пусто или попросили (ai=2), оценка ИИ. ai=0: только справочник."""
     uid = await asyncio.to_thread(lambda: _need_diary(_dev(x_device)))
-    q = q.strip()[:60]
+    q, qty = foods.split_qty(q.strip()[:60])          # «2 яйца»: ищем «яйца», количество предлагаем сразу
     found = foods.search(q) if ai != 2 else []
     if found or not ai:
-        return {"items": [_food_json(f) for f in found], "why": ""}
+        return {"items": [_food_json(f, qty) for f in found], "why": ""}
     food, why = await food_ai.estimate(uid, q)
-    return {"items": [_food_json(food)] if food else [], "why": why}
+    return {"items": [_food_json(food, qty)] if food else [], "why": why}
 
 
 @app.post("/api/diary")
@@ -1015,10 +1020,19 @@ def diary_add(body: DiaryIn, x_device: str | None = Header(default=None)):
     try:
         if body.food:
             food = food_ai.lookup(body.food)
-            if not food or body.grams is None or not 5 <= body.grams <= 2000:
-                raise ValueError("Нужен вес от 5 до 2000 г")
-            n = foods.nutrition(food, body.grams)
-            accounts.diary_add(uid, f"{food['name']} ({int(round(body.grams))} г)", n["kcal"], n["protein"], n["fat"], n["carb"], "ai" if food.get("ai") else "list")
+            if not food:
+                raise ValueError("Продукт не найден, найдите его ещё раз")
+            if body.qty:
+                q = foods.parse_qty(body.qty, food)
+                if not q:
+                    raise ValueError("Не понял количество. Напишите, например, «2 шт», «3 ложки» или «180 г»")
+                grams, desc = q["grams"], q["desc"]
+            else:
+                grams, desc = body.grams, ""
+            if grams is None or not 1 <= grams <= 2000:
+                raise ValueError("Нужно от 1 г до 2 кг")
+            n = foods.nutrition(food, grams)
+            accounts.diary_add(uid, foods.entry_title(food, grams, desc), n["kcal"], n["protein"], n["fat"], n["carb"], "ai" if food.get("ai") else "list")
             kcal = n["kcal"]
         else:
             accounts.diary_add(uid, body.title or "", body.kcal, src="manual")

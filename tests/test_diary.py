@@ -255,7 +255,8 @@ async def main():
     await botmod.dp.feed_update(b, cb("dy:f:grechka"))
     m = last("EditMessageText")
     rows_ = m["reply_markup"]["inline_keyboard"]
-    check("порция в одну строку: Малая, Стандарт, Большая, граммы вручную", [x["text"] for x in rows_[0]] == ["Малая", "Стандарт", "Большая", "✏️ Граммы"]
+    check("порции: ложки с горкой строкой, Малая, Стандарт, Большая строкой, своё количество", [x["text"] for x in rows_[0]] == ["1 ст. л.", "2 ст. л.", "3 ст. л.", "4 ст. л."]
+          and [x["text"] for x in rows_[1]] == ["Малая", "Стандарт", "Большая"] and rows_[2][0]["text"] == "✏️ Своё количество"
           and "Малая: 105 г" in m["text"] and "Стандарт: 150 г ≈ 165 ккал" in m["text"] and "Большая: 225 г ≈ 248 ккал" in m["text"], m["text"])
     await botmod.dp.feed_update(b, cb("dy:p:grechka:999"))
     check("выдуманная доля порции не записывается", accounts.diary_day(C)["kcal"] == 0)
@@ -271,7 +272,7 @@ async def main():
     n_send1 = sends()
     n_del = len([1 for n, _ in s.calls if n == "DeleteMessage"])
     await botmod.dp.feed_update(b, msg("много"))
-    check("не число — подсказка на том же экране, ждём дальше", await st.get_state() == DiaryForm.grams.state and "от 5 до 2000" in last("EditMessageText")["text"])
+    check("не число — подсказка на том же экране, ждём дальше", await st.get_state() == DiaryForm.grams.state and "не понял количество" in last("EditMessageText")["text"])
     check("ответ человека удалён из чата, новых сообщений нет", len([1 for n, _ in s.calls if n == "DeleteMessage"]) == n_del + 1 and sends() == n_send1)
     await botmod.dp.feed_update(b, msg("99999"))
     check("нелепый вес отклоняется", await st.get_state() == DiaryForm.grams.state and accounts.diary_day(C)["kcal"] == 248)

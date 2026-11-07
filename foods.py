@@ -378,3 +378,110 @@ def nutrition(food: dict, grams: float) -> dict:
 
 def portion_kcal(food: dict) -> int:
     return nutrition(food, food["grams"])["kcal"]
+
+
+# ---------- количество: штуки и ложки ----------
+# Ложка с горкой (сыпучее и густое): сколько граммов. Числа средние, как в кулинарных таблицах мер и весов.
+SPOON_HEAP = {"hlopya": 15, "granola": 15, "myusli": 15, "grechka_suh": 25, "ris_suh": 25, "sahar": 25, "chia": 15, "izyum": 25,
+              "tvorog": 30, "tvorog_0": 30, "tvorog_9": 30, "smetana": 25, "yogurt_grech": 30,
+              "grechka": 30, "ris": 30, "ris_buryi": 30, "ovsyanka": 30, "ovsyanka_mol": 30, "ris_mol": 30, "pshenka": 30, "manka": 30,
+              "perlovka": 30, "bulgur": 30, "kuskus": 30, "kinoa": 30, "chechevitsa": 30, "pyure": 30, "goroshek": 25, "kukuruza": 25}
+SPOON_LEVEL = {"maslo_podsol": 17, "maslo_olivk": 17}           # жидкое: ложка без горки
+PIECE_GRAMS = {"avokado": 200, "kartofel_var": 100, "kartofel_zap": 100}     # где подпись порции не про одну штуку
+_NUMWORDS = {"пол": 0.5, "половина": 0.5, "половину": 0.5, "половинка": 0.5, "половинку": 0.5, "полтора": 1.5, "полторы": 1.5,
+             "один": 1, "одна": 1, "одно": 1, "одну": 1, "два": 2, "две": 2, "три": 3, "четыре": 4, "пять": 5, "шесть": 6}
+_NUM = r"\d+(?:[.,]\d+)?|" + "|".join(sorted(_NUMWORDS, key=len, reverse=True))
+_UNIT = (r"шт\w*|штук\w*|ст\.?\s*л\.?|ч\.?\s*л\.?|столов\w*\s+ложк\w*|чайн\w*\s+ложк\w*|ложк\w*|ложек|"
+         r"кг|килограмм\w*|грамм\w*|гр|г|мл|л|литр\w*")
+_HEAP_RE = re.compile(r"\s*(?:с\s+горкой|без\s+горки)\s*", re.I)
+_LEAD_RE = re.compile(rf"^\s*((?:{_NUM})\s*(?:(?:{_UNIT})(?![а-яё]))?)\s+(.+)$", re.I)
+_TAIL_RE = re.compile(rf"^(.+?)\s+((?:{_NUM})\s*(?:(?:{_UNIT})(?![а-яё]))?)\s*$", re.I)
+
+
+def units(food: dict) -> list[dict]:
+    """Чем удобно мерить: [{key, title, grams}]. pc: штука, tb: столовая ложка (с горкой для сыпучего), ts: чайная ложка."""
+    label, out = _norm(food.get("label", "")), []
+    pc = PIECE_GRAMS.get(food.get("id"))
+    if not pc and "ложк" not in label:
+        m = re.match(r"(\d+)\s+(?!г\b|мл\b|гр\b)[а-я]", label)
+        if re.match(r"(один|одна|одно|одни)\b", label):
+            pc = food["grams"]
+        elif m and 2 <= int(m.group(1)) <= 12:
+            pc = food["grams"] / int(m.group(1))
+    if pc:
+        out.append({"key": "pc", "title": "шт", "grams": round(pc, 1)})
+    if food.get("id") in SPOON_HEAP:
+        out.append({"key": "tb", "title": "ст. л. с горкой", "grams": SPOON_HEAP[food["id"]]})
+    elif food.get("id") in SPOON_LEVEL:
+        out.append({"key": "tb", "title": "ст. л.", "grams": SPOON_LEVEL[food["id"]]})
+    elif "столов" in label and "ложк" in label:
+        out.append({"key": "tb", "title": "ст. л.", "grams": food["grams"]})
+    if "чайн" in label and "ложк" in label:
+        out.append({"key": "ts", "title": "ч. л.", "grams": food["grams"]})
+    return out
+
+
+def unit_of(food: dict, key: str) -> dict | None:
+    return next((u for u in units(food) if u["key"] == key), None)
+
+
+def _number(t: str) -> float | None:
+    m = re.search(r"\d+(?:[.,]\d+)?", t)
+    if m:
+        return float(m.group(0).replace(",", "."))
+    w = re.search(r"[а-яё]+", t)
+    return _NUMWORDS.get(w.group(0)) if w else None
+
+
+def parse_qty(text: str, food: dict) -> dict | None:
+    """«2», «2 шт», «две», «3 ложки с горкой», «1 ч. л.», «180 г», «0,5 кг» -> {grams, n, unit: pc|tb|ts|None, desc}.
+    Просто число: штуки, если продукт меряют штуками и число небольшое; ложки, если только ложками; иначе граммы. None — не понял."""
+    t = _HEAP_RE.sub(" ", _norm(text)).strip()
+    n = _number(t)
+    if not n or n <= 0:
+        return None
+    if re.search(r"(кг|килограмм)", t):
+        grams, unit = n * 1000, None
+    elif re.search(r"\d\s*(г|гр|грамм\w*|мл)(?![а-я])|(^|\s)(г|гр|грамм\w*|мл)(?![а-я])", t):
+        grams, unit = n, None
+    elif re.search(r"\d\s*(л|литр\w*)(?![а-я])", t):
+        grams, unit = n * 1000, None
+    else:
+        has = {u["key"] for u in units(food)}
+        if re.search(r"чайн|ч\.?\s*л", t):
+            unit = "ts"
+        elif re.search(r"ложк|ложек|ст\.?\s*л|столов", t):
+            unit = "tb"
+        elif re.search(r"шт", t):
+            unit = "pc"
+        elif "pc" in has and n <= 20:
+            unit = "pc"
+        elif "tb" in has and "pc" not in has and n <= 10:
+            unit = "tb"
+        else:
+            unit = None
+        if unit:
+            u = unit_of(food, unit) or ({"key": unit, "title": "ч. л.", "grams": 5} if unit == "ts" else
+                                         {"key": unit, "title": "ст. л.", "grams": 20} if unit == "tb" else None)
+            if not u:
+                return None                         # «2 шт» у продукта, который штуками не меряют
+            return {"grams": round(n * u["grams"], 1), "n": n, "unit": unit, "desc": f"{n:g} {u['title']}".replace(".", ",", 1) if n % 1 else f"{n:g} {u['title']}"}
+        grams = n
+    return {"grams": round(grams, 1), "n": n, "unit": None, "desc": ""}
+
+
+def split_qty(query: str) -> tuple[str, str]:
+    """«2 яйца» -> («яйца», «2»), «овсянка 3 ложки с горкой» -> («овсянка», «3 ложки»). Нет количества: (запрос, "")."""
+    q = _HEAP_RE.sub(" ", query or "").strip()
+    m = _LEAD_RE.match(q)
+    if m and content_words(m.group(2)):
+        return m.group(2).strip(), m.group(1).strip()
+    m = _TAIL_RE.match(q)
+    if m and content_words(m.group(1)):
+        return m.group(1).strip(), m.group(2).strip()
+    return (query or "").strip(), ""
+
+
+def entry_title(food: dict, grams: float, desc: str = "") -> str:
+    """Запись дневника: «Яйцо варёное (2 шт, 110 г)»."""
+    return f"{food['name']} ({desc + ', ' if desc else ''}{int(round(grams))} г)"

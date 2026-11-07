@@ -398,6 +398,14 @@ def current_day_first_index(chat_id: int) -> int | None:
     return (state["current_day"] - 1) * len(state["meal_keys"])
 
 
+def get_day_shopping_amounts(chat_id: int, day_number: int) -> dict[str, int]:
+    """Сколько чего нужно на блюда этого дня (граммы, яйца штуками): для «Докупить к дню N»."""
+    from shopping import amounts_from_recipe_text, merge_amounts
+    state = _load(chat_id)
+    day = state["days"].get(str(day_number)) if state else None
+    return merge_amounts([amounts_from_recipe_text(m.get("text", "")) for m in (day or {}).get("meals", {}).values()]) if day else {}
+
+
 def get_day_shopping_terms(chat_id: int, day_number: int) -> list[str]:
     """Продукты, которые нужно докупить к дню плана сверх общей корзины (для кнопки «Найти продукты в магазине»)."""
     state = _load(chat_id)

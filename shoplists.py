@@ -64,6 +64,24 @@ def from_favorites(uid, ids: list[str]) -> dict:
     return {"url": url(lid), "title": title, "items": buy, "home": [it["name"] for i, it in enumerate(items) if i in home_idx]}
 
 
+def set_done(lid: str, done: list[int]) -> bool:
+    """Отметки из бота переносим на уже отправленную страницу (список тот же)."""
+    if not ID_RE.match(lid or ""):
+        return False
+    with accounts._lock:
+        c = accounts._conn()
+        try:
+            with c:
+                r = c.execute("SELECT items, ts FROM shop_lists WHERE id=?", (lid,)).fetchone()
+                if not r or time.time() - r[1] > TTL:
+                    return False
+                n = len(json.loads(r[0]))
+                c.execute("UPDATE shop_lists SET done=? WHERE id=?", (json.dumps(sorted({int(i) for i in done if 0 <= int(i) < n})), lid))
+                return True
+        finally:
+            c.close()
+
+
 def get(lid: str) -> dict | None:
     if not ID_RE.match(lid or ""):
         return None

@@ -160,15 +160,18 @@ async def cmd_refund(message: Message, command: CommandObject):
     if not pay:
         await message.answer("Формат: /refund номер_операции из кабинета платёжного сервиса. Такой операции не нашёл.", parse_mode=None)
         return
-    if pay["currency"] != "RUB":
-        await message.answer("Этот платёж уже отмечен как возврат или не является настоящей оплатой в рублях.", parse_mode=None)
+    if pay["currency"] not in ("RUB", "XTR"):
+        await message.answer("Этот платёж уже отмечен как возврат или не является настоящей оплатой.", parse_mode=None)
         return
+    token = secrets.token_hex(6)                       # номер операции звёзд длинный и в кнопку не помещается
+    accounts.sess_set(f"rf:{token}", {"op": op})
     b = InlineKeyboardBuilder()
-    b.button(text="✅ Да, отметить возврат", callback_data=f"rf:go:{op}"[:64])
+    b.button(text="✅ Да, вернуть звёзды" if pay["currency"] == "XTR" else "✅ Да, отметить возврат", callback_data=f"rf:go:{token}")
     b.button(text="Отмена", callback_data="rf:no")
     b.adjust(1)
     await message.answer(f"Операция {op}: {pay['amount']} ₽, пользователь {pay['uid']}, тариф {pay['plan']}.\n\nПодписка сократится на {pay['days']} дн., платёж уйдёт из выручки и расчёта партнёра. "
-                         "Сами деньги возвращаются в кабинете платёжного сервиса.", reply_markup=b.as_markup(), parse_mode=None)
+                         + ("Звёзды бот вернёт сам." if pay["currency"] == "XTR" else "Сами деньги возвращаются в кабинете платёжного сервиса."),
+                         reply_markup=b.as_markup(), parse_mode=None)
 
 
 @router.callback_query(F.data == "rf:no")
@@ -182,15 +185,24 @@ async def refund_go(callback: CallbackQuery):
     if not _is_admin(callback.message.chat.id):
         await callback.answer()
         return
-    op = callback.data.split(":", 2)[2]
-    res = accounts.refund_payment(op)
+    rec = accounts.sess_get(f"rf:{callback.data.split(':', 2)[2]}") or {}
+    op = rec.get("op") or ""
+    pay = accounts.payment_by_op(op) if op else None
     await callback.answer()
     await callback.message.edit_reply_markup()
+    if pay and pay["currency"] == "XTR":
+        try:                                          # звёзды возвращает сам Telegram по номеру операции; сначала деньги, потом отметка
+            await callback.bot.refund_star_payment(user_id=int(pay["uid"]), telegram_payment_charge_id=pay["charge_id"])
+        except Exception as e:  # noqa: BLE001
+            await callback.message.answer(f"Telegram не вернул звёзды: {str(e)[:200]}. Ничего не отмечено.", parse_mode=None)
+            return
+    res = accounts.refund_payment(op) if op else None
     if not res:
         await callback.message.answer("Платёж уже отмечен как возврат.", parse_mode=None)
         return
-    accounts.admin_log("owner", "возврат", f"операция {op}, {res['amount']} ₽, пользователь {res['uid']}")
-    await callback.message.answer(f"✅ Возврат отмечен: операция {op}, {res['amount']} ₽.", parse_mode=None)
+    what = f"{res['amount']} ⭐" if res.get("currency") == "XTR" else f"{res['amount']} ₽"
+    accounts.admin_log("owner", "возврат", f"операция {op}, {what}, пользователь {res['uid']}")
+    await callback.message.answer(f"✅ Возврат {'сделан' if res.get('currency') == 'XTR' else 'отмечен'}: операция {op}, {what}.", parse_mode=None)
 
 
 @router.message(Command("testacc"))

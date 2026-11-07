@@ -350,8 +350,11 @@ async def list_text(callback: CallbackQuery):
     usage.event("list_share", msg.chat.id)
     rows = []
     try:
-        lid = s.get("share") or shoplists.create(msg.chat.id, title, items, done)
-        s["share"] = lid
+        lid = s.get("share") if s.get("share_items") == items else None      # тот же список: обновляем отметки на странице
+        if lid and not shoplists.set_done(lid, done):
+            lid = None
+        lid = lid or shoplists.create(msg.chat.id, title, items, done)
+        s["share"], s["share_items"] = lid, items
         _save(msg, s)
         link = shoplists.url(lid)
         lines += ["", f"☑️ Отмечать галочками, можно вместе (без VPN и входа): {link}"]

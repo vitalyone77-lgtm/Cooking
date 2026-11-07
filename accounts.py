@@ -387,7 +387,7 @@ def trial_used(uid) -> bool:
     row = _q("SELECT trial_used FROM subs WHERE uid=?", (str(uid),), one=True)
     if row and row[0]:
         return True
-    return bool(_q("SELECT 1 FROM payments WHERE uid=? AND currency NOT IN ('RUBTEST', 'RUBREFUND') LIMIT 1", (str(uid),), one=True))
+    return bool(_q("SELECT 1 FROM payments WHERE uid=? AND currency NOT IN ('RUBTEST', 'RUBREFUND', 'XTRREFUND') LIMIT 1", (str(uid),), one=True))
 
 
 def start_trial(uid, days: int) -> float | None:
@@ -399,7 +399,7 @@ def start_trial(uid, days: int) -> float | None:
         try:
             with c:
                 row = c.execute("SELECT until, trial_used FROM subs WHERE uid=?", (str(uid),)).fetchone()
-                paid = c.execute("SELECT 1 FROM payments WHERE uid=? AND currency NOT IN ('RUBTEST', 'RUBREFUND') LIMIT 1", (str(uid),)).fetchone()
+                paid = c.execute("SELECT 1 FROM payments WHERE uid=? AND currency NOT IN ('RUBTEST', 'RUBREFUND', 'XTRREFUND') LIMIT 1", (str(uid),)).fetchone()
                 if (row and row[1]) or paid:
                     return None
                 until = max(time.time(), (row[0] or 0) if row else 0) + days * 86400
@@ -442,6 +442,7 @@ def apply_payment(charge_id: str, uid, amount: int, currency: str, days: int, pl
 
 
 REFUNDED = "RUBREFUND"       # платёж возвращён: запись остаётся для истории, в выручку и долю партнёра не идёт
+REFUNDED_XTR = "XTRREFUND"   # то же для звёзд
 RUB_SQL = "CASE WHEN p.charge_id LIKE 'pw:%' THEN p.amount ELSE p.amount / 100.0 END"     # PayAnyWay хранит рубли, Telegram копейки
 
 
@@ -457,16 +458,17 @@ def refund_payment(op: str) -> dict | None:
         c = _conn()
         try:
             with c:
-                r = c.execute("SELECT charge_id, uid, amount, days FROM payments WHERE (charge_id=? OR charge_id=?) AND currency='RUB'", (f"pw:{op}", str(op))).fetchone()
+                r = c.execute("SELECT charge_id, uid, amount, days, currency FROM payments WHERE (charge_id=? OR charge_id=?) AND currency IN ('RUB', 'XTR')",
+                              (f"pw:{op}", str(op))).fetchone()
                 if not r:
                     return None
-                c.execute("UPDATE payments SET currency=? WHERE charge_id=?", (REFUNDED, r[0]))
+                c.execute("UPDATE payments SET currency=? WHERE charge_id=?", (REFUNDED if r[4] == "RUB" else REFUNDED_XTR, r[0]))
                 c.execute("UPDATE pay_orders SET status='refunded' WHERE op=?", (str(op),))
                 s = c.execute("SELECT until FROM subs WHERE uid=?", (r[1],)).fetchone()
                 until = (s[0] or 0) - r[3] * 86400 if s else 0
                 if s:
                     c.execute("UPDATE subs SET until=? WHERE uid=?", (until, r[1]))
-                return {"uid": r[1], "amount": r[2], "until": until}
+                return {"uid": r[1], "amount": r[2], "until": until, "currency": r[4]}
         finally:
             c.close()
 
@@ -492,7 +494,7 @@ def ref_stats() -> list[dict]:
     """Для админки: сколько людей пришло по каждой ссылке и сколько из них оплатили."""
     label = "CASE WHEN r.ref LIKE 'fr!_%' ESCAPE '!' THEN 'друзья' ELSE r.ref END"          # личные ссылки пользователей одной строкой
     rows = _q(f"SELECT {label}, COUNT(DISTINCT r.uid), COUNT(DISTINCT p.uid), COALESCE(SUM(CASE WHEN p.currency = 'RUB' THEN {RUB_SQL} ELSE 0 END), 0) FROM refs r "
-              f"LEFT JOIN payments p ON p.uid = r.uid AND p.currency NOT IN ('RUBTEST', 'RUBREFUND') GROUP BY {label} ORDER BY 2 DESC", all_=True)
+              f"LEFT JOIN payments p ON p.uid = r.uid AND p.currency NOT IN ('RUBTEST', 'RUBREFUND', 'XTRREFUND') GROUP BY {label} ORDER BY 2 DESC", all_=True)
     return [{"ref": r[0], "users": r[1], "paid_users": r[2], "amount": r[3]} for r in rows]
 
 
@@ -681,7 +683,7 @@ def money_stats() -> dict:
     """Выручка по месяцам (рубли и звёзды отдельно), последние платежи, конверсия пробного периода."""
     by_month = {}
     for ts, amount, cur, charge in _q("SELECT ts, amount, currency, charge_id FROM payments", all_=True):
-        if cur in ("RUBTEST", REFUNDED):
+        if cur in ("RUBTEST", REFUNDED, REFUNDED_XTR):
             continue
         m = time.strftime("%Y-%m", time.localtime(ts))
         d = by_month.setdefault(m, {"month": m, "rub": 0, "stars": 0, "count": 0})
@@ -697,7 +699,7 @@ def money_stats() -> dict:
         return _q(q, a, one=True)[0]
     now = time.time()
     trials = one("SELECT COUNT(*) FROM subs WHERE trial_used=1")
-    paid_after_trial = one("SELECT COUNT(DISTINCT p.uid) FROM payments p JOIN subs s ON s.uid=p.uid WHERE s.trial_used=1 AND p.currency NOT IN ('RUBTEST', 'RUBREFUND')")
+    paid_after_trial = one("SELECT COUNT(DISTINCT p.uid) FROM payments p JOIN subs s ON s.uid=p.uid WHERE s.trial_used=1 AND p.currency NOT IN ('RUBTEST', 'RUBREFUND', 'XTRREFUND')")
     return {
         "months": sorted(by_month.values(), key=lambda d: d["month"], reverse=True),
         "recent": recent,
@@ -708,7 +710,7 @@ def money_stats() -> dict:
         "active_trial": one("SELECT COUNT(*) FROM subs WHERE until > ? AND source='trial'", now),
         "active_promo": one("SELECT COUNT(*) FROM subs WHERE until > ? AND source LIKE 'promo:%'", now),
         "trials_started": trials,
-        "paid_users": one("SELECT COUNT(DISTINCT uid) FROM payments WHERE currency NOT IN ('RUBTEST', 'RUBREFUND')"),
+        "paid_users": one("SELECT COUNT(DISTINCT uid) FROM payments WHERE currency NOT IN ('RUBTEST', 'RUBREFUND', 'XTRREFUND')"),
         "trial_to_paid_pct": round(100 * paid_after_trial / trials, 1) if trials else 0,
         "expiring_7d": one("SELECT COUNT(*) FROM subs WHERE until > ? AND until < ?", now, now + 7 * 86400),
     }
