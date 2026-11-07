@@ -68,7 +68,7 @@ import vision
 from cuisines import CUISINE_LABELS, PORTION_LABELS, PORTION_ORDER
 from keyboards import MEAL_LABELS, sort_meals, CUISINE_BUTTONS
 from search import search_recipes, format_results_for_prompt
-from shopping import extract_shopping_terms, extract_dish_title, amounts_from_recipe_text, item_amounts, _fmt_amount, _find_amount
+from shopping import terms_from_recipe_text, extract_shopping_terms, extract_dish_title, amounts_from_recipe_text, item_amounts, _fmt_amount, _find_amount
 from storage import get_all_users
 from stores import prefs as store_prefs
 from stores.links import STORES, DEFAULT_STORES, search_url, short_name
@@ -1280,6 +1280,19 @@ def favorites_list(body: ComboIn, x_device: str | None = Header(default=None)):
         raise HTTPException(400, str(e))
     usage.event("list_combo", uid)
     return res
+
+
+class ShopIn(BaseModel):
+    text: str = Field(max_length=12000)
+
+
+@app.post("/api/shopping")
+def recipe_shopping(body: ShopIn, x_device: str | None = Header(default=None)):
+    """«Продукты и магазины» для готового текста рецепта (книга, любимые): ссылки на магазины и количества. Без ИИ и без лимитов."""
+    dev_id = _dev(x_device)
+    terms = terms_from_recipe_text(body.text)
+    usage.event("book_shop", _uid(dev_id))
+    return {"items": _mark_home(dev_id, with_amounts(links_for(terms), amounts_from_recipe_text(body.text), body.text))}
 
 
 class ScaleIn(BaseModel):

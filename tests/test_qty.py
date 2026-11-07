@@ -197,5 +197,10 @@ check("сайт: граммами как раньше", r.status_code == 200)
 idx = open("web/index.html", encoding="utf-8").read()
 check("сайт: кнопки штук и поле «2 шт, 3 ложки»", "data-q=" in idx and "2 шт, 3 ложки, 180 г" in idx)
 
+foods_text = "🍽 Суп\n\n👥 Порций: 4\n\n*Продукты:*\n- Курица — 600 г\n- Рис — 100 г\n\n*Инструкция:*\n1. Варите."
+r = cl.post("/api/shopping", json={"text": foods_text}, headers=hdr)
+check("сайт: продукты и магазины для рецепта из книги, с количеством", r.status_code == 200 and any(i["name"].lower() == "курица" and i.get("amount") == "600 г" and i["links"] for i in r.json()["items"]), r.text[:300])
+check("сайт: в книге порции и кнопка продуктов", "bookBody" in idx and "data-shop-load" in idx)
+
 print("ИТОГО: упало", len(fails))
 sys.exit(1 if fails else 0)
