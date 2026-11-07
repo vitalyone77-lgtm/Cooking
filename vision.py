@@ -63,9 +63,10 @@ async def photo_items(images: list[tuple[bytes, str]]) -> list[str]:
         raise VisionError(str(e)) from e
     m = re.search(r"\{.*\}", content, re.S)
     try:
-        return _clean(json.loads(m.group(0)).get("items") if m else [])
+        d = json.loads(m.group(0)) if m else {}
     except ValueError as e:
         raise VisionError("ответ не JSON") from e
+    return _clean(d.get("items") if isinstance(d, dict) else [])
 
 
 LABEL_PROMPT = (
@@ -96,7 +97,9 @@ async def check_label(images: list[tuple[bytes, str]]) -> dict:
             content = resp.json()["choices"][0]["message"]["content"] or ""
         m = re.search(r"\{.*\}", content, re.S)
         d = json.loads(m.group(0)) if m else {}
-    except (httpx.HTTPError, KeyError, IndexError, ValueError) as e:
+        if not isinstance(d, dict):
+            raise ValueError("ответ не объект")
+    except (httpx.HTTPError, KeyError, IndexError, ValueError, TypeError) as e:
         logger.warning("Состав не прочитан: %s", e)
         raise VisionError(str(e)) from e
     products = [{"name": str(p.get("name") or "")[:80], "ingredients": _texts(p.get("ingredients"), 12), "additives": _texts(p.get("additives"), 12), "attention": _texts(p.get("attention"), 6)}

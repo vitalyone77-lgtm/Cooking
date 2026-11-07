@@ -352,9 +352,11 @@ def grant_days(uid, days: int, source: str) -> float:
         c = _conn()
         try:
             with c:
-                row = c.execute("SELECT until FROM subs WHERE uid=?", (str(uid),)).fetchone()
+                row = c.execute("SELECT until, source FROM subs WHERE uid=?", (str(uid),)).fetchone()
                 start = max(time.time(), (row[0] or 0) if row else 0)
                 until = start + days * 86400
+                if row and (row[0] or 0) > time.time() and row[1] == "payment":
+                    source = "payment"              # оплаченная остаётся оплаченной: по источнику считают подписки партнёра и сообщения о пробном периоде
                 c.execute("INSERT INTO subs(uid, until, source) VALUES(?,?,?) ON CONFLICT(uid) DO UPDATE SET "
                           "until=excluded.until, source=excluded.source", (str(uid), until, source))
                 return until
@@ -595,7 +597,9 @@ def _merge_accounts(c, src: str, dst: str) -> None:
     if s:
         d = c.execute("SELECT until, trial_used FROM subs WHERE uid=?", (dst,)).fetchone()
         if d:
-            c.execute("UPDATE subs SET until=?, trial_used=? WHERE uid=?", (max(s[0] or 0, d[0] or 0), max(s[2] or 0, d[1] or 0), dst))
+            src_longer = (s[0] or 0) > (d[0] or 0)       # источник от более длинной подписки: оплаченная не должна стать «пробной»
+            c.execute("UPDATE subs SET until=?, trial_used=?, source=CASE WHEN ? THEN ? ELSE source END WHERE uid=?",
+                      (max(s[0] or 0, d[0] or 0), max(s[2] or 0, d[1] or 0), int(src_longer), s[1], dst))
         else:
             c.execute("INSERT INTO subs(uid, until, source, trial_used) VALUES(?,?,?,?)", (dst, s[0], s[1], s[2]))
         c.execute("DELETE FROM subs WHERE uid=?", (src,))
@@ -704,7 +708,7 @@ def money_stats() -> dict:
         "active_trial": one("SELECT COUNT(*) FROM subs WHERE until > ? AND source='trial'", now),
         "active_promo": one("SELECT COUNT(*) FROM subs WHERE until > ? AND source LIKE 'promo:%'", now),
         "trials_started": trials,
-        "paid_users": one("SELECT COUNT(DISTINCT uid) FROM payments"),
+        "paid_users": one("SELECT COUNT(DISTINCT uid) FROM payments WHERE currency NOT IN ('RUBTEST', 'RUBREFUND')"),
         "trial_to_paid_pct": round(100 * paid_after_trial / trials, 1) if trials else 0,
         "expiring_7d": one("SELECT COUNT(*) FROM subs WHERE until > ? AND until < ?", now, now + 7 * 86400),
     }

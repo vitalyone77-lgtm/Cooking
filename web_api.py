@@ -1622,7 +1622,9 @@ async def admin_stats(request: Request):
 
 def _limits_spec(d: dict) -> str:
     parts = []
-    for kind in ("recipe", "daymenu", "week", "missing", "photo"):
+    for kind in ("recipe", "daymenu", "week", "missing", "photo", "label"):
+        if kind not in d:
+            continue              # вида нет в форме: не затираем его значением по умолчанию
         n, days = (d.get(kind) or [0, 1])[:2]
         parts.append(f"{kind}={max(0, min(int(n), 100))}/{max(1, min(int(days), 30))}")
     return ",".join(parts)
