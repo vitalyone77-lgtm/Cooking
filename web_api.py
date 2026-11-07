@@ -42,6 +42,7 @@ import week_menu
 import favorites as fav_mod
 import recipe_math
 import referrals
+import stars_rate
 
 # Данные веба — в отдельные файлы (до первого использования модулей)
 day_menu.DAY_MENU_FILE = web_db.DATA_DIR / "day_menu.json"
@@ -1575,6 +1576,8 @@ def _settings_view() -> dict:
     plans.reload()
     return {
         "paywall": plans.paywall(),
+        "stars_auto": stars_rate.auto_on(),
+        "stars_usd": (stars_rate.last_rate() or {}).get("usd"),
         "limits": {p: {k: list(v) for k, v in plans.limits_of(p).items()} for p in ("free", "premium", "anon")},
         "features": list(plans.cfg("PREMIUM_FEATURES") or []),
         "feature_titles": plans.FEATURE_TITLES,
@@ -1636,6 +1639,8 @@ async def admin_settings(request: Request):
         raise HTTPException(400, "Неверный запрос")
     new: dict = {}
     try:
+        if "stars_auto" in body:
+            new["STARS_AUTO"] = bool(body["stars_auto"])
         if "paywall" in body:
             new["PAYWALL_ENABLED"] = bool(body["paywall"])
         for key, name in (("daily_cap", "DAILY_GEN_CAP"), ("anon_cap", "DAILY_GEN_CAP_ANON"),
@@ -1663,7 +1668,7 @@ async def admin_settings(request: Request):
                 days, rub, stars = int(o.get("days", 0)), int(o.get("rub", 0)), int(o.get("stars", 0))
                 if key and 1 <= days <= 3650 and rub >= 0 and stars >= 0:
                     rows.append(f"{key}={days}:{rub}:{stars}")
-            new["PREMIUM_PLANS"] = ",".join(rows)
+            new["PREMIUM_PLANS"] = stars_rate.on_admin_save(",".join(rows))
         if "promo" in body:
             rows = []
             for code, days in (body["promo"] or {}).items():

@@ -87,6 +87,7 @@ code{background:var(--soft);padding:2px 6px;border-radius:6px;font-size:13px}
     <p class="note">Telegram id через запятую или с новой строки (свой id можно узнать у @userinfobot). Тестировщикам видны функции в режиме «тестировщики», а когда подписка включена — у них полный доступ бесплатно.</p>
     <textarea id="s-testers" rows="3" style="width:100%;max-width:520px" placeholder="123456789, 987654321"></textarea>
     <h2>Цены</h2>
+    <label class="row" style="margin-bottom:8px"><input type="checkbox" id="s-stars-auto"> <strong>Цену в звёздах считать по курсу</strong> <span class="note" id="s-stars-note"></span></label>
     <div class="tbl"><table><thead><tr><th>Код</th><th>Дней</th><th>₽</th><th>⭐ звёзд</th><th></th></tr></thead><tbody id="s-offers"></tbody></table></div>
     <div class="row" style="margin-top:8px"><button id="add-offer">+ тариф</button><span class="note">Пробный период: <input type="number" id="s-trial" min="0" max="60"> дней (включается сам при первом упоре в лимит, 0 — без пробного)</span></div>
     <h2>Промокоды</h2>
@@ -187,6 +188,7 @@ function renderSettings(st){
   $("p-role").textContent=owner?"Вы владелец — можно менять всё. Изменения доходят до бота и сайта примерно за 15 секунд.":
     "Вы партнёр: доступ только для просмотра. Менять настройки, цены и функции может владелец.";
   $("s-paywall").checked=st.paywall;$("s-paywall").disabled=!owner;
+  $("s-stars-auto").checked=st.stars_auto;$("s-stars-auto").disabled=!owner;$("s-stars-note").textContent="— раз в день по курсу ЦБ"+(st.stars_usd?" ("+st.stars_usd.toFixed(2)+" ₽ за доллар)":"")+", если цена разошлась больше чем на 5%. Чтобы ввести звёзды вручную, снимите галочку.";
   var kinds=["recipe","daymenu","week","missing","photo"];
   $("s-limits").innerHTML=kinds.map(function(k){return '<tr><td>'+esc(st.kind_titles[k]||k)+'</td>'+["anon","free","premium"].map(function(p){var v=(st.limits[p]||{})[k]||[0,1];
     return '<td><input type="number" min="0" max="100" data-lim="'+p+':'+k+':n" value="'+v[0]+'"> / <input type="number" min="1" max="30" data-lim="'+p+':'+k+':d" value="'+v[1]+'"> дн.</td>';}).join("")+'</tr>';}).join("");
@@ -244,7 +246,7 @@ function collect(){
   var rollout={};Array.prototype.forEach.call(document.querySelectorAll("[data-roll]"),function(s){rollout[s.getAttribute("data-roll")]=s.value;});
   var body={limits:limits,offers:offers,promo:promo,rollout:rollout,testers:$("s-testers").value,trial_days:parseInt($("s-trial").value||"0",10),
     features:Array.prototype.filter.call(document.querySelectorAll("[data-feat]"),function(i){return i.checked;}).map(function(i){return i.getAttribute("data-feat");})};
-  if(ROLE==="owner"){body.paywall=$("s-paywall").checked;body.daily_cap=parseInt($("s-cap").value,10);body.anon_cap=parseInt($("s-anon").value,10);body.ip_cap=parseInt($("s-ip").value,10);body.partner_share=parseInt($("s-share").value,10);}
+  if(ROLE==="owner"){body.stars_auto=$("s-stars-auto").checked;body.paywall=$("s-paywall").checked;body.daily_cap=parseInt($("s-cap").value,10);body.anon_cap=parseInt($("s-anon").value,10);body.ip_cap=parseInt($("s-ip").value,10);body.partner_share=parseInt($("s-share").value,10);}
   return body;
 }
 function loadMsgs(){

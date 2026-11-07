@@ -911,8 +911,15 @@ def _parse_payload(payload: str) -> tuple[dict, int] | None:
 @router.pre_checkout_query()
 async def pre_checkout(query: PreCheckoutQuery):
     # Telegram ждёт ответ не дольше 10 секунд — только быстрая проверка, без сети
-    ok = _parse_payload(query.invoice_payload) is not None
-    await query.answer(ok=ok, error_message=None if ok else "Тариф устарел — откройте «Подписку» заново.")
+    parsed = _parse_payload(query.invoice_payload)
+    if not parsed:
+        await query.answer(ok=False, error_message="Тариф устарел — откройте «Подписку» заново.")
+        return
+    # счёт живёт долго: заплатить по цене намного ниже нынешней нельзя, небольшая разница от смены курса не мешает
+    if query.currency == "XTR" and parsed[0]["stars"] and query.total_amount < parsed[0]["stars"] * 0.85:
+        await query.answer(ok=False, error_message=f"Цена обновилась: {parsed[0]['stars']} звёзд. Откройте «Подписку» заново.")
+        return
+    await query.answer(ok=True)
 
 
 @router.message(F.successful_payment)

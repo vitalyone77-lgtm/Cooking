@@ -29,6 +29,7 @@ EDITABLE = {
     "PREMIUM_FEATURES": ("all", list),
     "TRIAL_DAYS": ("all", int),
     "PREMIUM_PLANS": ("all", str),
+    "STARS_AUTO": ("owner", bool),
     "PROMO_CODES": ("all", str),
     "FEATURE_ROLLOUT": ("all", dict),
     "TESTER_IDS": ("all", list),
