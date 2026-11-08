@@ -261,7 +261,7 @@ async def main():
     await botmod.dp.feed_update(b, cb("dy:p:grechka:999"))
     check("выдуманная доля порции не записывается", accounts.diary_day(C)["kcal"] == 0)
     await botmod.dp.feed_update(b, cb("dy:p:grechka:15"))
-    check("«1½»: записано 248 ккал", accounts.diary_day(C)["kcal"] == 248 and "Гречка варёная (225 г)" in accounts.diary_day(C)["items"][0]["title"], str(accounts.diary_day(C)))
+    check("«1½»: записано 248 ккал", accounts.diary_day(C)["kcal"] == 248 and "Гречка варёная (большая порция, 225 г)" in accounts.diary_day(C)["items"][0]["title"], str(accounts.diary_day(C)))
     check("после записи тот же экран показывает итог", "Съедено: 248 ккал" in last("EditMessageText")["text"])
     check("весь путь профиль → список → порция прошёл без единого нового сообщения", sends(since=0) == n_send0, str(sends()))
     await botmod.dp.feed_update(b, cb("dy:cat"))
@@ -298,7 +298,7 @@ async def main():
     await botmod.dp.feed_update(b, msg("шаурма дворовая"))
     t = last("EditMessageText")
     check("поиск: ИИ оценил, кнопки порции и пометка", "Оценка ИИ" in t["text"] and "Шаурма" in t["text"], t["text"])
-    check("поиск: кнопки порции ведут на запись", any("dy:p:a" in x.callback_data for r in t["reply_markup"].inline_keyboard for x in r), str(t.get("reply_markup"))[:200]) if not isinstance(t.get("reply_markup"), dict) else check("поиск: кнопки порции ведут на запись", "dy:p:a" in str(t["reply_markup"]))
+    check("поиск: кнопки порции ведут на запись", any(("dy:p:a" in x.callback_data or "dy:u:a" in x.callback_data) for r in t["reply_markup"].inline_keyboard for x in r), str(t.get("reply_markup"))[:200]) if not isinstance(t.get("reply_markup"), dict) else check("поиск: кнопки порции ведут на запись", "dy:p:a" in str(t["reply_markup"]) or "dy:u:a" in str(t["reply_markup"]))
     _ai.call_llm_with_fallback = _real_llm
     await botmod.dp.feed_update(b, cb("dy:find"))
     await botmod.dp.feed_update(b, msg("куриная грудка"))

@@ -1032,15 +1032,16 @@ def diary_add(body: DiaryIn, x_device: str | None = Header(default=None)):
             if grams is None or not 1 <= grams <= 2000:
                 raise ValueError("Нужно от 1 г до 2 кг")
             n = foods.nutrition(food, grams)
-            accounts.diary_add(uid, foods.entry_title(food, grams, desc), n["kcal"], n["protein"], n["fat"], n["carb"], "ai" if food.get("ai") else "list")
+            title = foods.entry_title(food, grams, desc)
+            accounts.diary_add(uid, title, n["kcal"], n["protein"], n["fat"], n["carb"], "ai" if food.get("ai") else "list")
             kcal = n["kcal"]
         else:
             accounts.diary_add(uid, body.title or "", body.kcal, src="manual")
-            kcal = int(float(str(body.kcal).replace(",", ".")))
+            kcal, title = int(float(str(body.kcal).replace(",", "."))), body.title or ""
     except ValueError as e:
         raise HTTPException(400, str(e))
     usage.event("diary_add", uid)
-    return {"ok": True, "kcal": kcal}
+    return {"ok": True, "kcal": kcal, "title": title}
 
 
 @app.post("/api/diary/recipe")

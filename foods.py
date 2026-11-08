@@ -402,11 +402,11 @@ def units(food: dict) -> list[dict]:
     """Чем удобно мерить: [{key, title, grams}]. pc: штука, tb: столовая ложка (с горкой для сыпучего), ts: чайная ложка."""
     label, out = _norm(food.get("label", "")), []
     pc = PIECE_GRAMS.get(food.get("id"))
-    if not pc and "ложк" not in label:
-        m = re.match(r"(\d+)\s+(?!г\b|мл\b|гр\b)[а-я]", label)
+    if not pc and "ложк" not in label and not re.search(r"порци|тарелк|гарнир", label):
+        m = re.match(r"(\d+)\s*(?!г\b|мл\b|гр\b|кг\b|л\b)[а-я]", label)          # «1 бутерброд, 120 г» (так пишет ИИ), «2 ломтика 40 г»
         if re.match(r"(один|одна|одно|одни)\b", label):
             pc = food["grams"]
-        elif m and 2 <= int(m.group(1)) <= 12:
+        elif m and 1 <= int(m.group(1)) <= 12:
             pc = food["grams"] / int(m.group(1))
     if pc:
         out.append({"key": "pc", "title": "шт", "grams": round(pc, 1)})
@@ -458,8 +458,14 @@ def parse_qty(text: str, food: dict) -> dict | None:
             unit = "pc"
         elif "tb" in has and "pc" not in has and n <= 10:
             unit = "tb"
+        elif not has and n <= 10:
+            unit = "portion"                    # «2» у борща: две порции, а не 2 грамма
         else:
             unit = None
+        if unit == "pc" and "pc" not in has:
+            unit = "portion"                    # «2 шт» у продукта без штук: порции
+        if unit == "portion":
+            return {"grams": round(n * food["grams"], 1), "n": n, "unit": None, "desc": f"{n:g} порц.".replace(".", ",", 1) if n % 1 else f"{n:g} порц."}
         if unit:
             u = unit_of(food, unit) or ({"key": unit, "title": "ч. л.", "grams": 5} if unit == "ts" else
                                          {"key": unit, "title": "ст. л.", "grams": 20} if unit == "tb" else None)
@@ -467,6 +473,8 @@ def parse_qty(text: str, food: dict) -> dict | None:
                 return None                         # «2 шт» у продукта, который штуками не меряют
             return {"grams": round(n * u["grams"], 1), "n": n, "unit": unit, "desc": f"{n:g} {u['title']}".replace(".", ",", 1) if n % 1 else f"{n:g} {u['title']}"}
         grams = n
+    if grams < 5:
+        return None                             # «2» граммами быть не может: просим написать понятнее
     return {"grams": round(grams, 1), "n": n, "unit": None, "desc": ""}
 
 

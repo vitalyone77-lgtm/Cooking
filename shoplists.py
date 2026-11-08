@@ -127,9 +127,12 @@ input{width:24px;height:24px;flex:none;accent-color:var(--primary)}.n{flex:1}.a{
 .done .n,.done .a{opacity:.5;text-decoration:line-through}
 button,.link{display:block;width:100%%;min-height:48px;margin-top:12px;border-radius:14px;border:2px solid var(--primary);background:transparent;color:var(--primary);font:600 16px/1 inherit;text-align:center;padding:14px;text-decoration:none}
 .note{color:var(--muted);font-size:14px;margin-top:14px}
+.promo{margin-top:22px;padding:16px;border-radius:16px;background:var(--surface);border:1px solid var(--line);display:flex;flex-direction:column;gap:6px}.promo span{color:var(--muted);font-size:15px}
 </style></head><body><h1>%(title)s</h1><p class="sub" id="count" aria-live="polite"></p><div class="list" id="list"></div>
 <button id="share" type="button">Поделиться списком</button>
-<p class="note">Отметки общие: их видят все, у кого есть ссылка. Список хранится 30 дней. <a href="%(site)s">Кухонный помощник</a></p>
+<p class="note">Отметки общие: их видят все, у кого есть ссылка. Список хранится 30 дней.</p>
+<div class="promo"><strong>Список сделан в «Кухонном помощнике»</strong><span>Рецепт из ваших продуктов за минуту, с калориями и списком покупок. Начать можно бесплатно, работает без VPN.</span>
+<a class="link" href="%(site)s?utm_source=list">🍳 Открыть помощника</a></div>
 <script>
 (function(){var id=%(id)s,box=document.getElementById("list"),count=document.getElementById("count"),S=null,busy=0;
 function draw(){var d={};S.done.forEach(function(i){d[i]=1;});box.textContent="";S.items.forEach(function(it,i){var l=document.createElement("label");if(d[i])l.className="done";

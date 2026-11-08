@@ -294,15 +294,7 @@ async def add_portion(callback: CallbackQuery):
     except ValueError:
         await callback.answer()
         return
-    if not await _need_diary(callback):
-        return
-    try:
-        n = _add_food(callback.message.chat.id, food, food["grams"] * m / 10)
-    except ValueError as e:
-        await callback.answer(str(e), show_alert=True)
-        return
-    await callback.answer(f"Записал: {n['kcal']} ккал")
-    await _show(callback, f"✅ Записал: {n['kcal']} ккал")
+    await _record(callback, food, food["grams"] * m / 10, {7: "малая порция", 15: "большая порция"}.get(m, ""))
 
 
 async def _record(callback: CallbackQuery, food: dict, grams: float, desc: str = "") -> None:
@@ -313,8 +305,8 @@ async def _record(callback: CallbackQuery, food: dict, grams: float, desc: str =
     except ValueError as e:
         await callback.answer(str(e), show_alert=True)
         return
-    await callback.answer(f"Записал: {n['kcal']} ккал")
-    await _show(callback, f"✅ Записал: {n['kcal']} ккал")
+    await callback.answer(f"✅ Записал: {n['kcal']} ккал")
+    await _show(callback, f"✅ Записал: {food['name']}, {n['kcal']} ккал")
 
 
 @router.callback_query(F.data.startswith("dy:u:"))

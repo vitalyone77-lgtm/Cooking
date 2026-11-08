@@ -45,7 +45,7 @@ button:focus-visible,a:focus-visible,input:focus-visible{outline:3px solid var(-
 .btn[disabled]{opacity:.6}
 .row{display:flex;gap:10px}
 .chips{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 6px}
-.chip{min-height:44px;padding:0 16px;border-radius:99px;border:1.5px solid var(--line);background:var(--surface);font-size:16px}
+.chip:disabled,.btn:disabled{opacity:.55}.chip{min-height:44px;padding:0 16px;border-radius:99px;border:1.5px solid var(--line);background:var(--surface);font-size:16px}
 .chip[aria-pressed=true]{background:var(--primary);color:var(--on-primary);border-color:var(--primary);font-weight:600}
 label.f{display:block;font-weight:600;margin:16px 0 6px}
 input[type=text]{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--line);border-radius:12px;background:var(--surface);color:var(--text);font:inherit}
@@ -667,6 +667,9 @@ select{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--lin
   function consentCard(p){return '<div class="card pcard"><h2>Данные профиля</h2><p class="sub" style="margin:0">'+esc(p.text||"")+'</p><button class="btn" data-consent="1">Согласен</button></div>';}
   // в профиле только то, чем пользуются каждый день; цели, функции, оплата и вход лежат в «Настройках»
   function viewProfile(){
+    // данные профиля и дневника просим сразу, параллельно с /api/me (раньше три запроса шли по очереди)
+    var pP=ME&&ME.linked?call("GET","/api/profile").catch(function(){return null;}):null;
+    var dP=ME&&ME.linked&&ME.diary_on?call("GET","/api/diary?days="+DY.days).catch(function(){return null;}):null;
     return loadMe().then(function(m){
       var h='<div class="phead" style="margin-bottom:12px"><h1>Профиль</h1><button class="lcheck" data-tab-go="label">🔬 Проверить состав</button></div>';
       if(!m.linked){
@@ -679,10 +682,10 @@ select{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--lin
         return h;
         });
       }
-      return call("GET","/api/profile").then(function(p){
+      return Promise.resolve(pP).then(function(p){return p||call("GET","/api/profile");}).then(function(p){
         if(!p.consent)return h+consentCard(p)+profileNav();
         var on=function(f){return p.feats.indexOf(f)>=0;};
-        return (on("diary")?call("GET","/api/diary?days="+DY.days):Promise.resolve(null)).then(function(d){
+        return (on("diary")?Promise.resolve(dP).then(function(d){return d||call("GET","/api/diary?days="+DY.days);}):Promise.resolve(null)).then(function(d){
           if(d)h+=diaryCards(d);
           else if(on("weight"))h+=weightCard(p);
           else if(!m.shelf_on)h+='<div class="card pcard"><h2>Пока здесь пусто</h2><p class="sub" style="margin:0">В настройках можно включить дневник питания, вес и полку. Тогда они будут здесь.</p></div>';
@@ -816,14 +819,41 @@ select{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--lin
   var VIEWS={menus:viewMenus,favs:viewFavs,book:viewBook,profile:viewProfile,settings:viewSettings,label:viewLabel,combo:viewCombo,friends:viewFriends,help:viewHelp};
   function offlineBanner(){return '<div class="card" style="padding:12px 16px;margin:0 0 12px;border-left:4px solid var(--primary)"><strong>📴 Нет интернета.</strong> Показываю сохранённое с прошлого раза: меню, план, избранное, рецепты и таймеры работают. Новые подборы — когда появится сеть.</div>';}
   window.addEventListener("online",function(){if(OFFLINE&&(cur==="menus"||cur==="favs"))show(cur);});
+  // вкладку, которую уже открывали, показываем сразу из памяти, а свежие данные подставляем, как только придут
+  var VC={},CACHED={book:1,profile:1,favs:1,menus:1,help:1},KEEP={book:1,profile:1,favs:1,menus:1};
+  // между визитами: последние вкладки лежат в браузере, при новом открытии видны сразу (профиль только у вошедшего)
+  try{VC=JSON.parse(ls("vc")||"{}")||{};}catch(e){VC={};}
+  function vcSave(){try{var o={};Object.keys(VC).forEach(function(k){var t=k.split("?")[0];if(KEEP[t]&&(t!=="profile"||(ME&&ME.linked))&&VC[k].length<300000)o[k]=VC[k];});ls("vc",JSON.stringify(o));}catch(e){}}
+  function vcClear(){VC={};ls("vc","{}");}
+  function vcKey(tab){return tab==="book"?"book?"+bkQuery():tab;}
+  function typing(){var a=document.activeElement;return a&&main.contains(a)&&/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName);}
   function show(tab){
     cur=tab;ls("tab",tab);
     Array.prototype.forEach.call(document.querySelectorAll(".tab"),function(t){t.setAttribute("aria-selected",t.getAttribute("data-tab")===(tab==="settings"||tab==="label"||tab==="friends"?"profile":tab==="combo"?"favs":tab));});
     if(tab==="new"){viewNew();window.scrollTo(0,0);return;}
-    main.innerHTML='<div class="skeleton"></div><div class="skeleton"></div><div class="skeleton"></div>';
+    var key=vcKey(tab),had=CACHED[tab]&&VC[key];
+    main.innerHTML=had?VC[key]:'<div class="skeleton"></div><div class="skeleton"></div><div class="skeleton"></div>';
+    window.scrollTo(0,0);
+    if(had&&(cur==="profile"||cur==="settings"))vkMount();
     OFFLINE=false;
-    Promise.resolve(VIEWS[tab]()).then(function(h){if(OFFLINE)h=offlineBanner()+h;main.innerHTML=h;if(Object.keys(TM).length)tmEnsureTick();window.scrollTo(0,0);if(cur==="profile"||cur==="settings")vkMount();}).catch(fail);
+    Promise.resolve(VIEWS[tab]()).then(function(h){
+      if(cur!==tab)return;                                   // пока грузилось, человек ушёл на другую вкладку
+      if(OFFLINE)h=offlineBanner()+h;
+      if(CACHED[tab]){VC[key]=h;vcSave();}
+      if(had&&h===had)return;
+      var apply=function(){if(cur!==tab)return;var y=window.scrollY;main.innerHTML=h;if(had)window.scrollTo(0,y);if(Object.keys(TM).length)tmEnsureTick();if(cur==="profile"||cur==="settings")vkMount();};
+      if(had&&typing())main.addEventListener("focusout",function once(){main.removeEventListener("focusout",once);setTimeout(apply,0);});
+      else apply();
+    }).catch(function(e){if(cur===tab&&!had)fail(e);});
   }
+  // книгу (и профиль вошедшего) готовим заранее, пока человек на другой вкладке
+  function warm(){
+    ["book","profile"].forEach(function(tab){
+      if(cur===tab||(tab==="profile"&&!(ME&&ME.linked)))return;      // даже если есть сохранённое: освежаем
+      Promise.resolve(VIEWS[tab]()).then(function(h){if(!OFFLINE){VC[vcKey(tab)]=h;vcSave();}}).catch(function(){});
+    });
+  }
+  window.addEventListener("load",function(){setTimeout(warm,2500);});
 
   // ---- замки на функциях тарифа, окно «попробовать» ----
   var GEM='<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h12l4 6-10 12L2 9Z"/><path d="M11 3 8 9l4 12 4-12-3-6"/><path d="M2 9h20"/></svg>';
@@ -1076,7 +1106,7 @@ select{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--lin
     if(b=t.closest("[data-tab-go]")){show(b.getAttribute("data-tab-go"));return;}
     if(b=t.closest("[data-vk-go]")){vkWait();return;}
     if(b=t.closest("[data-link-go]")){linkWait();return;}   // ссылка откроется сама, ждём подтверждения
-    if(b=t.closest("[data-unlink]")){if(confirm("Выйти из профиля на этом устройстве? В Telegram всё останется."))call("POST","/api/unlink").then(function(){ocClear();return loadMe();}).then(function(){show("profile");}).catch(fail);return;}
+    if(b=t.closest("[data-unlink]")){if(confirm("Выйти из профиля на этом устройстве? В Telegram всё останется."))call("POST","/api/unlink").then(function(){vcClear();ocClear();return loadMe();}).then(function(){show("profile");}).catch(fail);return;}
     if(b=t.closest("[data-shelf-del]")){call("DELETE","/api/shelf?item="+encodeURIComponent(b.getAttribute("data-shelf-del"))).then(function(){show("profile");}).catch(fail);return;}
     if(b=t.closest("[data-shelf-add]")){var si=document.getElementById("shelf-add");if(si&&si.value.trim())call("POST","/api/shelf",{item:si.value.trim()}).then(function(){show("profile");}).catch(function(e){alert(e.message);});return;}
     if(b=t.closest("[data-home]")){b.disabled=true;call("POST","/api/shelf",{item:b.getAttribute("data-home")}).then(function(){b.textContent="🏠 на полке";}).catch(function(e){b.disabled=false;alert(e.message);});return;}
@@ -1087,7 +1117,12 @@ select{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--lin
     if(b=t.closest("[data-dy-days]")){DY.days=+b.getAttribute("data-dy-days")||30;show("profile");return;}
     if(b=t.closest("[data-dy-ai]")){dyFind(2);return;}
     if(b=t.closest("[data-dy-food]")){var ff=DY.foods[b.getAttribute("data-dy-food")],rb=document.getElementById("dy-res");if(ff&&rb){rb.innerHTML=dyPortion(ff);rb.scrollIntoView({block:"nearest"});}return;}
-    if(b=t.closest("[data-dy-add]")){var dg=b.getAttribute("data-g"),dq=b.getAttribute("data-q")||(dg?"":val("dy-g"));if(!dg&&!dq){alert("Напишите, сколько съели: 2 шт, 3 ложки или 180 г");return;}b.disabled=true;call("POST","/api/diary",dg?{food:b.getAttribute("data-dy-add"),grams:parseFloat(dg)||0}:{food:b.getAttribute("data-dy-add"),qty:dq}).then(function(j){toast("Записал: "+dyN(j.kcal)+" ккал");return profileReload();}).catch(function(e){b.disabled=false;alert(e.message);});return;}
+    if(b=t.closest("[data-dy-add]")){var dg=b.getAttribute("data-g"),dq=b.getAttribute("data-q")||(dg?"":val("dy-g"));if(!dg&&!dq){alert("Напишите, сколько съели: 2 шт, 3 ложки или 180 г");return;}
+      var it=b.closest(".item")||b.parentNode;if(it.getAttribute("data-busy"))return;   // пока пишем, второе нажатие ничего не делает
+      it.setAttribute("data-busy","1");var bs=it.querySelectorAll("button");Array.prototype.forEach.call(bs,function(x){x.disabled=true;});var was=b.textContent;b.textContent="⏳ Записываю…";
+      call("POST","/api/diary",dg?{food:b.getAttribute("data-dy-add"),grams:parseFloat(dg)||0}:{food:b.getAttribute("data-dy-add"),qty:dq}).then(function(j){
+        it.innerHTML='<p style="margin:4px 0"><strong>✅ Записал:</strong> '+esc(j.title||"")+' · '+dyN(j.kcal)+' ккал</p>';toast("Записал: "+dyN(j.kcal)+" ккал");return profileReload();
+      }).catch(function(e){it.removeAttribute("data-busy");Array.prototype.forEach.call(bs,function(x){x.disabled=false;});b.textContent=was;alert(e.message);});return;}
     if(b=t.closest("[data-dy-copy]")){b.disabled=true;call("POST","/api/diary/"+encodeURIComponent(b.getAttribute("data-dy-copy"))+"/copy").then(function(j){toast("Записал: "+dyN(j.kcal)+" ккал");return profileReload();}).catch(function(e){b.disabled=false;alert(e.message);});return;}
     if(b=t.closest("[data-dy-del]")){call("DELETE","/api/diary/"+encodeURIComponent(b.getAttribute("data-dy-del"))).then(profileReload).catch(function(e){alert(e.message);});return;}
     if(b=t.closest("[data-dy-eat]")){var rr=window.__r[b.getAttribute("data-dy-eat")];if(!rr)return;b.disabled=true;call("POST","/api/diary/recipe",{title:rr.title,text:rr.text}).then(function(j){toast("В дневник: "+dyN(j.kcal)+" ккал. Оценка примерная.");b.disabled=false;}).catch(function(e){b.disabled=false;alert(e.message);});return;}
@@ -1100,6 +1135,7 @@ select{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--lin
     if(b=t.closest("[data-store-pick]")){pickStore(b);return;}
     if(b=t.closest("[data-miss-open]")){var pn=b.parentNode.querySelector(".misspanel");pn.style.display=pn.style.display==="none"?"":"none";return;}
     if(b=t.closest("[data-miss-go]")){missingGo(b);return;}
+    if(b=t.closest("[data-scale]")){scaleGo(b);return;}      // до общего обработчика «чипов», иначе нажатие терялось
     if(b=t.closest(".chip")){
       if(b.hasAttribute("data-sub")){ls("sub",b.getAttribute("data-sub"));show("menus");return;}
       var box=b.parentNode,name=box.getAttribute("data-name"); if(!name) return;
@@ -1114,7 +1150,6 @@ select{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--lin
     if(b=t.closest("[data-install]")){doInstall(b.getAttribute("data-install"));return;}
     if(b=t.closest("[data-install-close]")){ls("pwa_x",String(Date.now()));fillInstall();return;}
     if(b=t.closest("[data-done]")){b.disabled=true;call("POST","/api/week/done/"+b.getAttribute("data-done")).then(function(){show("menus");}).catch(fail);return;}
-    if(b=t.closest("[data-scale]")){scaleGo(b);return;}
     if(b=t.closest("[data-fr-share]")){friendsShare();return;}
     if(b=t.closest("[data-shop-load]")){shopLoad(b);return;}
     if(b=t.closest("[data-shelf-photo-add]")){shelfPhotoAdd(b);return;}

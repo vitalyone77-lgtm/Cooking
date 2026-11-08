@@ -844,6 +844,7 @@ ACTIVITY = {
     "active": (1.725, "Активная работа на ногах или ежедневный спорт"),
 }
 DIARY_DAILY_MAX = 60
+DIARY_DUP_SECONDS = 15
 
 
 def calc_tdee(sex: str, age, height_cm, weight_kg, activity: str) -> int:
@@ -882,6 +883,10 @@ def diary_add(uid, title: str, kcal, protein=0, fat=0, carb=0, src: str = "manua
         c = _conn()
         try:
             with c:
+                dup = c.execute("SELECT id FROM diary WHERE uid=? AND day=? AND title=? AND kcal=? AND ts>? ORDER BY id DESC LIMIT 1",
+                                (str(uid), day, title, kcal, time.time() - DIARY_DUP_SECONDS)).fetchone()
+                if dup:
+                    return dup[0]                  # та же запись только что: несколько нажатий подряд, второй раз не пишем
                 n = c.execute("SELECT COUNT(*) FROM diary WHERE uid=? AND day=?", (str(uid), day)).fetchone()[0]
                 if n >= DIARY_DAILY_MAX:
                     raise ValueError("За день уже много записей")

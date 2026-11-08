@@ -49,7 +49,7 @@ check("каша: ложками", pq("3 ложки", "grechka")["grams"] == 90)
 check("бутерброд штуками", pq("2", "buterbrod")["grams"] == 240)
 check("колбаса: ломтики из подписи «2 ломтика 40 г»", pq("3", "kolbasa")["grams"] == 60)
 check("пол авокадо", pq("пол", "avokado")["grams"] == 100 and pq("пол", "avokado")["desc"] == "0,5 шт")
-check("молоко штуками не меряют", pq("2 шт", "moloko") is None and pq("200 мл", "moloko")["grams"] == 200)
+check("молоко «2 шт»: два стакана", pq("2 шт", "moloko")["grams"] == 400 and pq("200 мл", "moloko")["grams"] == 200)
 check("килограммы", pq("0,2 кг", "tvorog")["grams"] == 200)
 check("масло: ложка 17 г, а не 10", foods.units(B["maslo_podsol"])[0]["grams"] == 17)
 check("бессмыслица не принимается", pq("много", "yaitso") is None)
@@ -191,7 +191,7 @@ check("сайт: поиск «2 яйца» с готовой записью", eg
 r = cl.post("/api/diary", json={"food": "hlopya", "qty": "2 ложки"}, headers=hdr)
 check("сайт: запись «2 ложки»", r.status_code == 200 and any(t.startswith("Овсяные хлопья сухие (2 ст. л. с горкой, 30 г)") for t in [i["title"] for i in accounts.diary_day(C)["items"]]), r.text)
 r = cl.post("/api/diary", json={"food": "moloko", "qty": "2 шт"}, headers=hdr)
-check("сайт: молоко штуками понятной ошибкой", r.status_code == 400 and "количество" in r.text)
+check("сайт: молоко «2 шт» записано двумя стаканами", r.status_code == 200 and any(i["title"] == "Молоко 2,5% (2 порц., 400 г)" for i in accounts.diary_day(C)["items"]), r.text)
 r = cl.post("/api/diary", json={"food": "banan", "grams": 120}, headers=hdr)
 check("сайт: граммами как раньше", r.status_code == 200)
 idx = open("web/index.html", encoding="utf-8").read()
@@ -201,6 +201,26 @@ foods_text = "🍽 Суп\n\n👥 Порций: 4\n\n*Продукты:*\n- Ку
 r = cl.post("/api/shopping", json={"text": foods_text}, headers=hdr)
 check("сайт: продукты и магазины для рецепта из книги, с количеством", r.status_code == 200 and any(i["name"].lower() == "курица" and i.get("amount") == "600 г" and i["links"] for i in r.json()["items"]), r.text[:300])
 check("сайт: в книге порции и кнопка продуктов", "bookBody" in idx and "data-shop-load" in idx)
+
+
+ai = {"id": "a1", "name": "бутерброд с урбечом", "grams": 120.0, "label": "1 бутерброд, 120 г", "kcal100": 300, "p100": 8, "f100": 15, "c100": 30}
+check("оценка ИИ «1 бутерброд»: штуками", foods.parse_qty("2шт", ai)["grams"] == 240 and foods.parse_qty("2", ai)["desc"] == "2 шт")
+check("«2 ломтика, 60 г»: ломтик 30 г", foods.units({"id": "a2", "grams": 60.0, "label": "2 ломтика, 60 г"})[0]["grams"] == 30)
+check("борщ «2»: две тарелки, а не 2 грамма", foods.parse_qty("2", B["borsh"])["grams"] == 600 and foods.parse_qty("2", B["borsh"])["desc"] == "2 порц.")
+check("граммов меньше 5 не бывает", foods.parse_qty("3 г", B["borsh"]) is None)
+check("тарелка и порция не штуки", not foods.units(B["borsh"]) and not foods.units({"id": "a3", "grams": 250.0, "label": "1 порция, 250 г"}))
+check("сайт: порции проверяются до общего обработчика", idx.index("[data-scale]") < idx.index('t.closest(".chip")'))
+check("сайт: вкладки из памяти и книга заранее", "function warm()" in idx and "VC[key]" in idx)
+lp = shoplists.page(lid, shoplists.get(lid))
+check("страница списка: ссылка на помощника", "Открыть помощника" in lp and "utm_source=list" in lp and "?ref=" not in lp and "start=ref_" not in lp)
+
+
+n0 = len(accounts.diary_day(C)["items"])
+for _ in range(4):
+    cl.post("/api/diary", json={"food": "borsh", "grams": 210}, headers=hdr)
+check("много нажатий подряд: записано один раз", len(accounts.diary_day(C)["items"]) == n0 + 1)
+check("ответ сайта содержит, что записано", cl.post("/api/diary", json={"food": "pomidor", "qty": "1"}, headers=hdr).json()["title"] == "Помидор (1 шт, 100 г)")
+check("сайт: кнопка сразу «Записываю…», второе нажатие игнорируется", "⏳ Записываю…" in idx and "data-busy" in idx)
 
 print("ИТОГО: упало", len(fails))
 sys.exit(1 if fails else 0)
