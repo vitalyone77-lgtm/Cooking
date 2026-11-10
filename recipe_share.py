@@ -1,7 +1,7 @@
 """
 Рецепт по ссылке /rc/<номер>: отправить другу целиком. Продукты с количеством и галочками, кнопка магазина превращает их в ссылки на поиск,
 пересчёт порций, шаги с галочками и таймерами. Открывается в любом браузере, без бота, входа и VPN.
-Ссылка постоянная (год), отметки галочек хранятся у каждого в браузере.
+Ссылка живёт 30 дней. Отметки галочек хранятся у каждого в браузере, рецепт можно сохранить в избранное на сайте или в боте.
 """
 import json
 import re
@@ -15,7 +15,7 @@ import recipe_math
 import timers
 from stores.links import DEFAULT_STORES, search_url, short_name
 
-TTL = 365 * 86400
+TTL = 30 * 86400
 MAX_NEW_PER_HOUR = 30
 ID_RE = re.compile(r"^[A-Za-z0-9_-]{8,24}$")
 _BULLET = re.compile(r"^\s*[-•–*]\s+")
@@ -133,8 +133,10 @@ img.card{width:100%%;border-radius:16px;display:block;margin:6px 0 10px}
 <h2>Продукты</h2><div class="chips" id="srv"></div><div class="box" id="prod"></div>
 <p class="sub" style="margin-top:10px">Где купить:</p><div class="chips" id="st"></div>
 <h2>Как готовить</h2><div class="box" id="steps"></div><div id="tips"></div>
+<a class="btn" href="%(site)s/?rc=%(rid)s" style="background:var(--primary);color:var(--on)">⭐ Сохранить в избранное</a>
+<p class="sub" style="text-align:center;margin-top:6px">Откроется «Кухонный помощник», рецепт будет в «Любимых». Есть Telegram? <a href="https://t.me/%(bot)s?start=rc_%(rid)s">Сохранить в боте</a></p>
 <button class="btn" id="share" type="button">📤 Поделиться рецептом</button>
-<p class="note">Рецепт составил ИИ: проверяйте готовность мяса, птицы, рыбы и яиц, а при аллергии сверяйте состав. Галочки видны только вам.</p>
+<p class="note">Рецепт составил ИИ: проверяйте готовность мяса, птицы, рыбы и яиц, а при аллергии сверяйте состав. Галочки видны только вам. Ссылка работает 30 дней: чтобы рецепт не пропал, сохраните его в избранное.</p>
 <div class="promo"><strong>Рецепт из «Кухонного помощника»</strong><span>Рецепт из ваших продуктов за минуту, с калориями, списком покупок и таймерами. Начать можно бесплатно, работает без VPN.</span>
 <a class="btn" style="margin-top:6px" href="%(site)s/?utm_source=recipe">🍳 Открыть помощника</a></div>
 <script>
@@ -191,7 +193,8 @@ def page(rid: str, rec: dict) -> str:
     d["title"] = d["title"] or rec["title"]
     desc = " · ".join(d["info"][:2])[:200] or "Рецепт с продуктами, шагами и таймерами"
     return _PAGE % {"title": escape(d["title"]), "desc": escape(desc, quote=True), "img": escape(f"{_site()}/rc/{rid}.png", quote=True),
-                    "site": escape(_site(), quote=True), "id": json.dumps(rid), "data": json.dumps(d, ensure_ascii=False).replace("</", "<\\/")}
+                    "site": escape(_site(), quote=True), "id": json.dumps(rid), "rid": escape(rid, quote=True),
+                    "bot": escape(config.BOT_USERNAME or "Cookingvkusno_bot", quote=True), "data": json.dumps(d, ensure_ascii=False).replace("</", "<\\/")}
 
 
 def data(rec: dict, to: int | None = None) -> dict:

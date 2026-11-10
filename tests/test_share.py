@@ -123,5 +123,37 @@ if node:
     os.unlink(f.name)
     check("скрипт страницы без синтаксических ошибок", r.returncode == 0, r.stderr[:300])
 
+
+check("ссылка живёт 30 дней", rs.TTL == 30 * 86400)
+pg2 = cl.get(f"/rc/{rid3}").text
+check("страница: сохранить в избранное на сайте и в боте", f"/?rc={rid3}" in pg2 and f"start=rc_{rid3}" in pg2 and "30 дней" in pg2)
+dev2 = cl.post("/api/device").json()["device"]
+r = cl.post("/api/favorites/from-share", json={"id": rid3}, headers={"X-Device": dev2})
+favs = cl.get("/api/favorites", headers={"X-Device": dev2}).json()["items"]
+check("сайт: рецепт по ссылке в «Любимых»", r.status_code == 200 and any(f["title"] == "Куриный суп" for f in favs), r.text)
+cl.post("/api/favorites/from-share", json={"id": rid3}, headers={"X-Device": dev2})
+check("повторное сохранение не дублирует", len(cl.get("/api/favorites", headers={"X-Device": dev2}).json()["items"]) == len(favs))
+check("устаревшая ссылка: понятный текст", cl.post("/api/favorites/from-share", json={"id": "zzzzzzzzzzzz"}, headers={"X-Device": dev2}).status_code == 404)
+accounts._q("UPDATE shared_recipes SET ts=? WHERE id=?", (time.time() - 31 * 86400, rid3))
+check("через 30 дней страница не открывается", cl.get(f"/rc/{rid3}").status_code == 404)
+idx2 = open("web/index.html", encoding="utf-8").read()
+check("сайт: открытие с ?rc= сохраняет и показывает «Любимые»", "/api/favorites/from-share" in idx2 and "|rc)=" in idx2)
+
+
+async def bot_start():
+    s = FakeSession()
+    b = Bot(token="42:TEST", session=s)
+    rid4 = rs.create(5, "", R)
+    await botmod.dp.feed_update(b, Update(update_id=50, message=Message(message_id=60, date=dt.now(), chat=chat, from_user=user, text=f"/start rc_{rid4}")))
+    texts = [d.get("text", "") for n, d in s.calls if n == "SendMessage"]
+    import favorites
+    check("бот: /start rc_ сохраняет в избранное и присылает рецепт", any("сохранён в избранное" in t for t in texts) and any("Куриный суп" in t and "Продукты" in t for t in texts)
+          and any(f["title"] == "Куриный суп" for f in favorites.get_favorites(C)), str(texts)[:300])
+    await botmod.dp.feed_update(b, Update(update_id=51, message=Message(message_id=61, date=dt.now(), chat=chat, from_user=user, text="/start rc_zzzzzzzzzzzz")))
+    check("бот: устаревшая ссылка", "устарела" in [d.get("text", "") for n, d in s.calls if n == "SendMessage"][-1])
+
+
+asyncio.run(bot_start())
+
 print("ИТОГО: упало", len(fails))
 sys.exit(1 if fails else 0)

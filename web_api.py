@@ -1313,6 +1313,24 @@ class ShareRecipeIn(BaseModel):
     text: str = Field(min_length=20, max_length=12000)
 
 
+class RcSaveIn(BaseModel):
+    id: str = Field(min_length=8, max_length=24)
+
+
+@app.post("/api/favorites/from-share")
+def favorites_from_share(body: RcSaveIn, x_device: str | None = Header(default=None)):
+    """Рецепт, присланный ссылкой, в «Любимые» этого человека."""
+    uid = _uid(_dev(x_device))
+    rec = recipe_share.get(body.id)
+    if not rec:
+        raise HTTPException(404, "Ссылка на рецепт устарела. Попросите прислать её ещё раз")
+    if len(fav_mod.get_favorites(uid)) >= 200:
+        raise HTTPException(400, "Слишком много сохранённых рецептов (лимит 200)")
+    fav_mod.add_favorite(uid, rec["title"], rec["text"], "")
+    usage.event("rc_save", uid)
+    return {"ok": True, "title": rec["title"]}
+
+
 @app.post("/api/share-recipe")
 def share_recipe(body: ShareRecipeIn, x_device: str | None = Header(default=None)):
     """«Поделиться рецептом»: постоянная ссылка на страницу с продуктами, галочками и таймерами."""

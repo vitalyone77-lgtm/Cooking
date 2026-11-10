@@ -755,6 +755,19 @@ async def handle_start_args(message: Message, args: str | None) -> bool:
     if args == "pay":
         await show_subscription(message)
         return True
+    if args.startswith("rc_"):                       # рецепт прислали ссылкой: в избранное и сразу показать
+        import bot_book
+        import favorites
+        import recipe_share
+        rec = recipe_share.get(args[3:])
+        if not rec:
+            await message.answer("😔 Ссылка на рецепт устарела (они живут 30 дней). Попросите прислать её ещё раз.", parse_mode=None)
+            return True
+        favorites.add_favorite(uid, rec["title"], rec["text"], "")
+        usage.event("rc_save", uid)
+        await message.answer(f"⭐ «{rec['title']}» сохранён в избранное.", parse_mode=None)
+        await message.answer(rec["text"], reply_markup=bot_book.recipe_kb(rec["text"], uid))
+        return True
     return False
 
 

@@ -1240,7 +1240,7 @@ select{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--lin
 
   // повторный заход: сразу рисуем из сохранённого, свежие данные подтягиваем в фоне (на медленной связи это десятки секунд)
   var cMeta=null,cMe=null;try{cMeta=JSON.parse(ls("metacache")||"null");cMe=JSON.parse(ls("mecache")||"null");}catch(e){}
-  if(cMeta&&ls("dev")&&!/[?&](login|ref|test|vk|pay)=/.test(location.search)){
+  if(cMeta&&ls("dev")&&!/[?&](login|ref|test|vk|pay|rc)=/.test(location.search)){
     dev=ls("dev");META=cMeta;if(cMe)ME=cMe;show("new");
     fetch("/api/meta").then(function(r){return r.ok?r.json():null;}).then(function(m){if(m){META=m;ls("metacache",JSON.stringify(m));}}).catch(function(){});
     loadMe();call("POST","/api/visit").catch(function(){});
@@ -1262,6 +1262,10 @@ select{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--lin
       var uq=new URLSearchParams(location.search),rfq=uq.get("ref"),tq=uq.get("test");
       if(rfq){call("POST","/api/ref",{ref:rfq}).catch(function(){});try{history.replaceState(null,"",location.pathname);}catch(e){}}
       if(tq){try{history.replaceState(null,"",location.pathname);}catch(e){}return call("POST","/api/preview/claim",{code:tq}).then(function(j){toast(j.mode==="account"?"🧪 Чистый аккаунт: подписка как будто включена":"🧪 Чистый гость: подписка как будто включена");},function(e){alert(e.message);}).then(loadMe).then(function(){show("new");});}
+      var rcq=null;try{rcq=new URLSearchParams(location.search).get("rc");}catch(e){}
+      if(rcq){try{history.replaceState(null,"",location.pathname);}catch(e){}           // рецепт прислали ссылкой: сохраняем в «Любимые»
+        return call("POST","/api/favorites/from-share",{id:rcq}).then(function(j){toast("⭐ «"+j.title+"» в Любимых");cacheFavs();},function(e){toast(e.message);})
+          .then(loadMe).then(function(){show("favs");});}
       var vkq=null;try{vkq=new URLSearchParams(location.search).get("vk");}catch(e){}
       if(vkq){try{history.replaceState(null,"",location.pathname);}catch(e){}return loadMe().then(function(){toast("✅ Вход выполнен через ВКонтакте");show("profile");});}
       return loadMe().then(function(){show("new");});

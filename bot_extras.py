@@ -141,7 +141,7 @@ async def share_recipe(callback: CallbackQuery):
     rows = [[InlineKeyboardButton(text="🔗 Открыть", url=link)],
             [InlineKeyboardButton(text="📤 Переслать", url=f"https://t.me/share/url?url={quote(link, safe='')}&text={quote(title, safe='')}")]]
     await msg.reply(f"📤 «{title}» по ссылке: продукты с галочками и количеством, где купить, шаги с таймерами, пересчёт порций. "
-                    f"Открывается в любом браузере, без бота и VPN.\n\n{link}", reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
+                    f"Открывается в любом браузере, без бота и VPN, оттуда рецепт можно сохранить в избранное. Ссылка работает 30 дней.\n\n{link}", reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
                     parse_mode=None, disable_web_page_preview=True)
 
 
