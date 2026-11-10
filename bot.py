@@ -853,6 +853,7 @@ def recipe_kb(recipe_text: str, chat_id: int | None = None):
                 if btn.callback_data == "pdf:r":
                     btn.text = "💎 PDF"
     bot_extras.add_portions(markup, recipe_text)
+    bot_extras.add_share(markup)
     if chat_id is not None and plans.diary_on(chat_id):          # «Съел порцию»: только у тех, кто включил дневник
         markup.inline_keyboard.append([InlineKeyboardButton(text="🍽 Записать в дневник", callback_data="dy:eat")])
     return markup
@@ -1779,7 +1780,7 @@ async def favorite_view(callback: CallbackQuery):
     if not fav:
         await callback.answer("Рецепт не найден (возможно, уже удалён).", show_alert=True)
         return
-    await callback.message.answer(fav["text"], reply_markup=bot_extras.add_portions(kb.favorite_view_kb(fav_id), fav["text"]))
+    await callback.message.answer(fav["text"], reply_markup=bot_extras.add_share(bot_extras.add_portions(kb.favorite_view_kb(fav_id), fav["text"])))
     await callback.answer()
 
 

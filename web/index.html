@@ -347,6 +347,7 @@ select{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--lin
   function actions(title,text,noSave){
     var id="r"+Math.random().toString(36).slice(2,8); window.__r[id]={title:title,text:text};
     return (ME&&ME.diary_on&&!noSave?'<button class="btn ghost" data-dy-eat="'+id+'">🍽 Записать в дневник</button>':'')+'<div class="row">'+(isLocked("pdf")?'<button class="btn locked" data-gate="pdf">'+lockIc()+'Скачать PDF</button>':'<button class="btn" data-pdf="'+id+'">📄 Скачать PDF</button>')+(noSave?'':'<button class="btn ghost" data-save="'+id+'">⭐ Сохранить</button>')+'</div>'+
+      '<button class="btn ghost" data-share-r="'+id+'">📤 Поделиться рецептом</button>'+
       ('wakeLock' in navigator?'<label class="toggle"><input type="checkbox" class="k-wake"> Не гасить экран, пока готовлю</label>':'');
   }
 
@@ -1224,6 +1225,11 @@ select{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--lin
     if(b=t.closest("[data-install-close]")){ls("pwa_x",String(Date.now()));fillInstall();return;}
     if(b=t.closest("[data-done]")){b.disabled=true;call("POST","/api/week/done/"+b.getAttribute("data-done")).then(function(){show("menus");}).catch(fail);return;}
     if(b=t.closest("[data-fr-share]")){friendsShare();return;}
+    if(b=t.closest("[data-share-r]")){var sr=window.__r[b.getAttribute("data-share-r")];if(!sr||b.disabled)return;b.disabled=true;var sw=b.textContent;b.textContent="⏳ Готовлю ссылку…";
+      call("POST","/api/share-recipe",{title:sr.title||"",text:sr.text}).then(function(j){b.disabled=false;b.textContent=sw;
+        if(navigator.share){navigator.share({title:sr.title||"Рецепт",url:j.url}).catch(function(){});return;}
+        if(navigator.clipboard){navigator.clipboard.writeText(j.url).then(function(){toast("Ссылка на рецепт скопирована");}).catch(function(){prompt("Ссылка на рецепт",j.url);});return;}
+        prompt("Ссылка на рецепт",j.url);}).catch(function(e){b.disabled=false;b.textContent=sw;alert(e.message);});return;}
     if(b=t.closest("[data-shop-load]")){shopLoad(b);return;}
     if(b=t.closest("[data-shelf-photo-add]")){shelfPhotoAdd(b);return;}
     if(b=t.closest("[data-shelf-photo]")){var spi=document.getElementById("shelf-photo-in");if(spi)spi.click();return;}

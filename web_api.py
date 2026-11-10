@@ -42,6 +42,7 @@ import week_menu
 import favorites as fav_mod
 import recipe_math
 import referrals
+import recipe_share
 import stars_rate
 
 # Данные веба — в отдельные файлы (до первого использования модулей)
@@ -1305,6 +1306,57 @@ def favorites_list(body: ComboIn, x_device: str | None = Header(default=None)):
         raise HTTPException(400, str(e))
     usage.event("list_combo", uid)
     return res
+
+
+class ShareRecipeIn(BaseModel):
+    title: str = Field("", max_length=120)
+    text: str = Field(min_length=20, max_length=12000)
+
+
+@app.post("/api/share-recipe")
+def share_recipe(body: ShareRecipeIn, x_device: str | None = Header(default=None)):
+    """«Поделиться рецептом»: постоянная ссылка на страницу с продуктами, галочками и таймерами."""
+    uid = _uid(_dev(x_device))
+    try:
+        rid = recipe_share.create(uid, body.title, body.text)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    usage.event("recipe_share", uid)
+    return {"url": recipe_share.url(rid)}
+
+
+_rc_cards: dict[str, bytes] = {}
+
+
+@app.api_route("/rc/{rid}.png", methods=["GET", "HEAD"])
+def shared_recipe_card(rid: str):
+    rec = recipe_share.get(rid)
+    if not rec:
+        raise HTTPException(404, "Рецепт не найден")
+    if rid not in _rc_cards:
+        import cards
+        if len(_rc_cards) > 300:
+            _rc_cards.clear()
+        _rc_cards[rid] = cards.make_card(rec["title"], rec["text"])
+    return Response(content=_rc_cards[rid], media_type="image/png", headers={"Cache-Control": "public, max-age=86400"})
+
+
+@app.get("/rc/{rid}/data")
+def shared_recipe_data(rid: str, to: int = 0):
+    """Пересчёт порций на странице рецепта: только этот рецепт, без входа."""
+    rec = recipe_share.get(rid)
+    if not rec:
+        raise HTTPException(404, "Рецепт не найден")
+    return recipe_share.data(rec, to if 1 <= to <= recipe_math.MAX_SERVINGS else None)
+
+
+@app.api_route("/rc/{rid}", methods=["GET", "HEAD"], response_class=HTMLResponse)
+def shared_recipe_page(rid: str):
+    rec = recipe_share.get(rid)
+    if not rec:
+        raise HTTPException(404, "Рецепт не найден или ссылка устарела")
+    usage.event("recipe_open", "web")
+    return HTMLResponse(recipe_share.page(rid, rec), headers={"Cache-Control": "no-cache", "X-Robots-Tag": "noindex"})
 
 
 class ShopIn(BaseModel):

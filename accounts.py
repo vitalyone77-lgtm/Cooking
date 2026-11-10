@@ -35,6 +35,8 @@ CREATE INDEX IF NOT EXISTS friend_codes_uid ON friend_codes(uid);
 CREATE TABLE IF NOT EXISTS friend_rewards(friend TEXT PRIMARY KEY, inviter TEXT, base INTEGER, days INTEGER, paid INTEGER DEFAULT 0, ts REAL);
 CREATE INDEX IF NOT EXISTS friend_rewards_inviter ON friend_rewards(inviter, ts);
 CREATE TABLE IF NOT EXISTS sess(key TEXT PRIMARY KEY, data TEXT, ts REAL);
+CREATE TABLE IF NOT EXISTS shared_recipes(id TEXT PRIMARY KEY, uid TEXT, title TEXT, text TEXT, ts REAL);
+CREATE INDEX IF NOT EXISTS shared_recipes_uid ON shared_recipes(uid, ts);
 CREATE TABLE IF NOT EXISTS menus(kind TEXT, chat_id TEXT, data TEXT, ts REAL, PRIMARY KEY(kind, chat_id));
 CREATE INDEX IF NOT EXISTS sess_ts ON sess(ts);
 CREATE TABLE IF NOT EXISTS favs(uid TEXT, id TEXT, title TEXT, text TEXT, cuisine TEXT, ts REAL, PRIMARY KEY(uid, id));

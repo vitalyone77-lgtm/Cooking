@@ -112,6 +112,39 @@ async def portions_close(callback: CallbackQuery):
     await callback.message.edit_reply_markup(reply_markup=markup)
 
 
+# ---------- поделиться рецептом ----------
+
+def add_share(markup: InlineKeyboardMarkup) -> InlineKeyboardMarkup:
+    """«📤 Поделиться» в ряд с PDF (или отдельной строкой перед последней)."""
+    btn = InlineKeyboardButton(text="📤 Поделиться", callback_data="rs:mk")
+    for row in markup.inline_keyboard:
+        if any((x.callback_data or "") == "pdf:r" for x in row) and len(row) < 3:
+            row.append(btn)
+            return markup
+    markup.inline_keyboard.insert(max(len(markup.inline_keyboard) - 1, 0), [btn])
+    return markup
+
+
+@router.callback_query(F.data == "rs:mk")
+async def share_recipe(callback: CallbackQuery):
+    import recipe_share
+    msg = callback.message
+    try:
+        rid = recipe_share.create(msg.chat.id, "", msg.text or msg.caption or "")
+    except ValueError as e:
+        await callback.answer(str(e), show_alert=True)
+        return
+    link = recipe_share.url(rid)
+    usage.event("recipe_share", msg.chat.id)
+    await callback.answer()
+    title = recipe_share.get(rid)["title"]
+    rows = [[InlineKeyboardButton(text="🔗 Открыть", url=link)],
+            [InlineKeyboardButton(text="📤 Переслать", url=f"https://t.me/share/url?url={quote(link, safe='')}&text={quote(title, safe='')}")]]
+    await msg.reply(f"📤 «{title}» по ссылке: продукты с галочками и количеством, где купить, шаги с таймерами, пересчёт порций. "
+                    f"Открывается в любом браузере, без бота и VPN.\n\n{link}", reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
+                    parse_mode=None, disable_web_page_preview=True)
+
+
 # ---------- общий список покупок из избранного ----------
 
 COMBO_PAGE = 8
