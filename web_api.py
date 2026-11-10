@@ -108,7 +108,18 @@ def _mark_home(dev_id: int, items: list[dict]) -> list[dict]:
 
 
 def _cid(dev_id: int) -> int:
-    return web_db.chat_id_of(dev_id)
+    """Чьи готовые меню: у вошедшего это его аккаунт (то же, что в боте), у гостя устройство.
+    Меню, составленное на этом устройстве до входа, переносим в аккаунт, если там своего ещё нет."""
+    dev_cid = web_db.chat_id_of(dev_id)
+    acc = accounts.tg_of_device(dev_id)
+    if not acc:
+        return dev_cid
+    for load, save in ((day_menu._load_menu, day_menu._save_menu), (week_menu._load, week_menu._save)):
+        if load(acc) is None:
+            mine = load(dev_cid)
+            if mine is not None:
+                save(acc, mine)
+    return int(acc)
 
 
 def parse_shopping(md: str) -> list[dict]:
@@ -953,6 +964,7 @@ def weight_del(day: str = "", x_device: str | None = Header(default=None)):
 class DiaryIn(BaseModel):
     food: str | None = Field(None, max_length=20)
     grams: float | None = None
+    days: int = 30                                            # за какой период вернуть дневник в ответе
     qty: str | None = Field(None, max_length=40)              # «2 шт», «3 ложки», «180 г»: сервер переводит в граммы
     title: str | None = Field(None, max_length=80)
     kcal: int | float | str | None = None
@@ -989,7 +1001,11 @@ def _food_json(f: dict, qty: str = "") -> dict:
 
 @app.get("/api/diary")
 def diary_get(days: int = 30, x_device: str | None = Header(default=None)):
-    uid = _need_diary(_dev(x_device))
+    return _diary_payload(_need_diary(_dev(x_device)), days)
+
+
+def _diary_payload(uid: str, days: int = 30) -> dict:
+    """Всё для экрана дневника. Отдаём и в ответ на запись: на медленной связи каждый лишний запрос это секунды."""
     days = days if days in (7, 30, 90) else 30
     series = accounts.diary_series(uid, days)
     en, g = accounts.energy_get(uid), accounts.goals_get(uid)
@@ -1049,7 +1065,7 @@ def diary_add(body: DiaryIn, x_device: str | None = Header(default=None)):
     except ValueError as e:
         raise HTTPException(400, str(e))
     usage.event("diary_add", uid)
-    return {"ok": True, "kcal": kcal, "title": title}
+    return {"ok": True, "kcal": kcal, "title": title, "diary": _diary_payload(uid, body.days)}
 
 
 @app.post("/api/diary/recipe")
@@ -1070,7 +1086,7 @@ def diary_recipe(body: DiaryRecipeIn, x_device: str | None = Header(default=None
 
 
 @app.post("/api/diary/{entry_id}/copy")
-def diary_copy(entry_id: int, x_device: str | None = Header(default=None)):
+def diary_copy(entry_id: int, days: int = 30, x_device: str | None = Header(default=None)):
     """Записать на сегодня то же, что вчера. Только свою запись."""
     uid = _need_diary(_dev(x_device))
     try:
@@ -1080,13 +1096,13 @@ def diary_copy(entry_id: int, x_device: str | None = Header(default=None)):
     if not res:
         raise HTTPException(404, "Запись не найдена")
     usage.event("diary_copy", uid)
-    return {"ok": True, "kcal": res["kcal"]}
+    return {"ok": True, "kcal": res["kcal"], "diary": _diary_payload(uid, days)}
 
 
 @app.delete("/api/diary/{entry_id}")
-def diary_del(entry_id: int, x_device: str | None = Header(default=None)):
+def diary_del(entry_id: int, days: int = 30, x_device: str | None = Header(default=None)):
     uid = _need_diary(_dev(x_device))
-    return {"ok": accounts.diary_delete(uid, entry_id)}
+    return {"ok": accounts.diary_delete(uid, entry_id), "diary": _diary_payload(uid, days)}
 
 
 class MacroRefIn(BaseModel):

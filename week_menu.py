@@ -68,15 +68,20 @@ def _write_all(data: dict) -> None:
 
 
 def _save(chat_id: int, state: dict) -> None:
-    with _lock:
-        all_data = _read_all()
-        all_data[str(chat_id)] = state
-        _write_all(all_data)
+    import accounts
+    accounts.menu_set("week", chat_id, state)
 
 
 def _load(chat_id: int) -> dict | None:
-    with _lock:
-        return _read_all().get(str(chat_id))
+    """Из общей базы. Старый план из файла (до переезда) переносится при первом обращении."""
+    import accounts
+    state = accounts.menu_get("week", chat_id)
+    if state is None:
+        with _lock:
+            state = _read_all().get(str(chat_id))
+        if state is not None:
+            accounts.menu_set("week", chat_id, state)
+    return state
 
 
 def has_plan(chat_id: int) -> bool:

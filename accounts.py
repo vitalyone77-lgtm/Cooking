@@ -35,6 +35,7 @@ CREATE INDEX IF NOT EXISTS friend_codes_uid ON friend_codes(uid);
 CREATE TABLE IF NOT EXISTS friend_rewards(friend TEXT PRIMARY KEY, inviter TEXT, base INTEGER, days INTEGER, paid INTEGER DEFAULT 0, ts REAL);
 CREATE INDEX IF NOT EXISTS friend_rewards_inviter ON friend_rewards(inviter, ts);
 CREATE TABLE IF NOT EXISTS sess(key TEXT PRIMARY KEY, data TEXT, ts REAL);
+CREATE TABLE IF NOT EXISTS menus(kind TEXT, chat_id TEXT, data TEXT, ts REAL, PRIMARY KEY(kind, chat_id));
 CREATE INDEX IF NOT EXISTS sess_ts ON sess(ts);
 CREATE TABLE IF NOT EXISTS favs(uid TEXT, id TEXT, title TEXT, text TEXT, cuisine TEXT, ts REAL, PRIMARY KEY(uid, id));
 CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY, value TEXT, ts REAL, who TEXT);
@@ -529,6 +530,19 @@ def sess_mark_forever(key: str) -> None:
     _q("UPDATE sess SET ts=? WHERE key=?", (4e12, key))
 
 
+# ---------- готовые меню (день и план): одна база для бота и сайта ----------
+
+def menu_get(kind: str, chat_id) -> dict | None:
+    row = _q("SELECT data FROM menus WHERE kind=? AND chat_id=?", (kind, str(chat_id)), one=True)
+    return json.loads(row[0]) if row else None
+
+
+def menu_set(kind: str, chat_id, data: dict) -> None:
+    """Каждое меню отдельной строкой: бот и сайт пишут одновременно, не затирая друг друга (раньше это был общий файл на процесс)."""
+    _q("INSERT INTO menus(kind, chat_id, data, ts) VALUES(?,?,?,?) ON CONFLICT(kind, chat_id) DO UPDATE SET data=excluded.data, ts=excluded.ts",
+       (kind, str(chat_id), json.dumps(data, ensure_ascii=False), time.time()))
+
+
 # ---------- избранное ----------
 
 FAV_LIMIT = 200    # на аккаунт: защита от раздувания базы
@@ -591,6 +605,8 @@ def _merge_accounts(c, src: str, dst: str) -> None:
     c.execute("UPDATE payments SET uid=? WHERE uid=?", (dst, src))
     c.execute("UPDATE pay_orders SET uid=? WHERE uid=?", (dst, src))       # оплата, начатая до объединения, должна прийти в общий профиль
     c.execute("UPDATE shop_lists SET uid=? WHERE uid=?", (dst, src))
+    c.execute("UPDATE OR IGNORE menus SET chat_id=? WHERE chat_id=?", (dst, src))   # меню ВК переходит, если у Telegram своего нет
+    c.execute("DELETE FROM menus WHERE chat_id=?", (src,))
     c.execute("UPDATE friend_codes SET uid=? WHERE uid=?", (dst, src))     # старая ссылка продолжает работать и начислять в общий аккаунт
     c.execute("UPDATE friend_rewards SET inviter=? WHERE inviter=?", (dst, src))
     c.execute("UPDATE OR IGNORE friend_rewards SET friend=? WHERE friend=?", (dst, src))

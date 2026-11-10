@@ -1727,6 +1727,14 @@ async def weekmenu_status(callback: CallbackQuery):
     await callback.answer()
 
 
+@dp.callback_query(F.data.startswith("cuisine:"))
+async def stale_cuisine(callback: CallbackQuery, state: FSMContext):
+    """Кнопка кухни в старом сообщении с меню (анкету уже сбросили, например открыв профиль): начинаем подбор рецепта заново."""
+    await state.clear()
+    await state.set_state(RecipeForm.cuisine)
+    await step_cuisine(callback, state)
+
+
 # ---------- Избранное ----------
 
 @dp.callback_query(F.data == "favorites:open")
@@ -1860,6 +1868,16 @@ dp.include_router(bot_diary.router)
 dp.include_router(bot_promo.router)
 dp.include_router(bot_book.router)
 dp.include_router(fallback_router)
+
+
+STALE_TEXT = "Эта кнопка устарела: шаг уже пройден или сброшен. Открываю меню."
+
+
+@fallback_router.callback_query()
+async def stale_button(callback: CallbackQuery, state: FSMContext):
+    """Кнопку не узнал ни один обработчик (старое сообщение анкеты и т. п.): говорим об этом, а не крутим загрузку молча."""
+    await callback.answer(STALE_TEXT, show_alert=True)
+    await show_main_menu(callback.message, state)
 
 
 @fallback_router.message(StateFilter(None), F.text)

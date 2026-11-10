@@ -60,15 +60,20 @@ def _write_all(data: dict) -> None:
 
 
 def _save_menu(chat_id: int, entry: dict) -> None:
-    with _lock:
-        all_data = _read_all()
-        all_data[str(chat_id)] = entry
-        _write_all(all_data)
+    import accounts
+    accounts.menu_set("day", chat_id, entry)
 
 
 def _load_menu(chat_id: int) -> dict | None:
-    with _lock:
-        return _read_all().get(str(chat_id))
+    """Из общей базы. Старое меню из файла (до переезда) переносится при первом обращении."""
+    import accounts
+    entry = accounts.menu_get("day", chat_id)
+    if entry is None:
+        with _lock:
+            entry = _read_all().get(str(chat_id))
+        if entry is not None:
+            accounts.menu_set("day", chat_id, entry)
+    return entry
 
 
 def has_menu(chat_id: int) -> bool:
