@@ -1002,6 +1002,14 @@ def diary_get(days: int = 30, x_device: str | None = Header(default=None)):
             "activities": [{"key": k, "title": v[1]} for k, v in accounts.ACTIVITY.items()]}
 
 
+@app.get("/api/foods/all")
+def foods_all():
+    """Весь справочник продуктов: телефон хранит его у себя и ищет без сети. Меняется только с новой версией сайта."""
+    return JSONResponse({"v": foods.CATALOG_VERSION, "stop": sorted(foods._STOP),
+                         "items": [{**_food_json(f), "t": f["tokens"]} for f in foods.FOODS]},
+                        headers={"Cache-Control": "public, max-age=3600"})
+
+
 @app.get("/api/foods")
 async def foods_find(q: str = "", ai: int = 0, x_device: str | None = Header(default=None)):
     """Поиск продукта: сначала справочник; если там пусто или попросили (ai=2), оценка ИИ. ai=0: только справочник."""

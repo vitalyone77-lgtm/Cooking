@@ -98,7 +98,7 @@ c = TestClient(web_api.app)
 r = c.get("/pitanie/menu-na-den")
 check("SEO-страница открывается", r.status_code == 200 and "<h1>Меню на день с калориями и КБЖУ</h1>" in r.text)
 check("у страницы canonical и og:image 1200x630", 'rel="canonical" href="https://menu.ymayaka.ru/pitanie/menu-na-den"' in r.text
-      and "og-image.png" in r.text, r.text[:400])
+      and "og-image-2.png" in r.text, r.text[:400])
 check("JSON-LD FAQ и хлебные крошки", '"FAQPage"' in r.text and '"BreadcrumbList"' in r.text)
 check("несуществующая статья — 404", c.get("/pitanie/net-takoy").status_code == 404)
 check("список статей", c.get("/pitanie").status_code == 200)

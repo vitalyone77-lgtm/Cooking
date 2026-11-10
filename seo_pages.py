@@ -286,7 +286,7 @@ def _layout(site: str, path: str, title: str, description: str, body: str, ld: l
         f'<meta property="og:title" content="{escape(title)}">'
         f'<meta property="og:description" content="{escape(description)}">'
         f'<meta property="og:url" content="{escape(url)}">'
-        f'<meta property="og:image" content="{site}/icons/og-image.png">'
+        f'<meta property="og:image" content="{site}/icons/og-image-2.png">'
         '<meta property="og:image:width" content="1200"><meta property="og:image:height" content="630">'
         '<meta name="twitter:card" content="summary_large_image">'
         '<link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png">'

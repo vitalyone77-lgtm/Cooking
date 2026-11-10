@@ -317,6 +317,7 @@ def _tokens(text: str) -> list[str]:
 for _f in FOODS:
     _f["tokens"] = _tokens(_f["name"] + " " + _f["alias"])
 _VOCAB = sorted({t for f in FOODS for t in f["tokens"] if len(t) >= 3})
+CATALOG_VERSION = str(abs(hash(tuple((f["id"], f["name"], f["label"], f["grams"], f["kcal100"], f["alias"]) for f in FOODS))) % 10**9)
 
 
 _STOP = {"из", "на", "без", "по", "со", "от", "для", "под", "над", "при", "или", "порция", "порции", "тарелка", "кусок", "кусочек", "стакан", "чашка"}

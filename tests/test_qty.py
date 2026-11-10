@@ -222,5 +222,15 @@ check("много нажатий подряд: записано один раз"
 check("ответ сайта содержит, что записано", cl.post("/api/diary", json={"food": "pomidor", "qty": "1"}, headers=hdr).json()["title"] == "Помидор (1 шт, 100 г)")
 check("сайт: кнопка сразу «Записываю…», второе нажатие игнорируется", "⏳ Записываю…" in idx and "data-busy" in idx)
 
+
+fa = cl.get("/api/foods/all")
+fj = fa.json()
+check("справочник целиком для телефона: все продукты, слова для поиска, единицы, версия", fa.status_code == 200 and len(fj["items"]) == len(foods.FOODS)
+      and all("t" in i and "units" in i for i in fj["items"]) and fj["v"] == foods.CATALOG_VERSION and "порция" in fj["stop"] and "max-age" in fa.headers.get("cache-control", ""))
+idx2 = open("web/index.html", encoding="utf-8").read()
+check("первый экран: заставка вместо текста, текст для поисковиков остался", 'id="splash"' in idx2 and 'id="seo"' in idx2 and "Связь медленная" in idx2 and 'className+=" js"' in idx2)
+check("запуск из сохранённого и обрыв долгих запросов", "mecache" in idx2 and "AbortController" in idx2 and "25000" in idx2)
+check("превью ссылки: новая картинка", "og-image-2.png" in idx2 and os.path.exists("web/icons/og-image-2.png") and "og-image.png" not in idx2)
+
 print("ИТОГО: упало", len(fails))
 sys.exit(1 if fails else 0)
