@@ -10,6 +10,7 @@
 
 Сайт и бот — разные процессы, поэтому счётчик в отдельном файле SQLite (режим WAL), который видят оба.
 """
+import contextvars
 import os
 import sqlite3
 import threading
@@ -241,8 +242,44 @@ def try_spend(uid, kind: str, src: str, ip: str | None = None) -> tuple[int | No
     return None, _refusal(uid, kind, lim[0], lim[1])
 
 
+# Попытки, списанные внутри тяжёлой кнопки (OneHeavyAtATime ставит список на время обработки). Пока кнопка работает,
+# они записаны в базу; если бот перезапустят посреди генерации (выкладка), при запуске их вернут и напишут человеку.
+INFLIGHT = contextvars.ContextVar("cooking_inflight", default=None)
+
+
 def bot_try_spend(chat_id: int, kind: str) -> tuple[int | None, str]:
-    return try_spend(chat_id, kind, "bot")
+    rid, why = try_spend(chat_id, kind, "bot")
+    box = INFLIGHT.get()
+    if rid and box is not None:
+        import accounts
+        box.append(rid)
+        accounts.sess_set(f"inflight:{chat_id}", {"ids": list(box), "ts": time.time()})
+    return rid, why
+
+
+def inflight_done(chat_id) -> None:
+    import accounts
+    accounts._q("DELETE FROM sess WHERE key=?", (f"inflight:{chat_id}",))
+
+
+async def recover_inflight(bot) -> int:
+    """При запуске бота: генерации, оборванные перезапуском, — попытку вернуть и сказать человеку."""
+    import accounts
+    n = 0
+    for key, d in accounts.sess_items("inflight:"):
+        chat_id = key.split(":", 1)[1]
+        for rid in d.get("ids") or []:
+            unlog(rid)
+        accounts._q("DELETE FROM sess WHERE key=?", (key,))
+        if time.time() - d.get("ts", 0) > 3600:
+            continue
+        n += 1
+        try:
+            await bot.send_message(int(chat_id), "⚠️ Пока я готовил ваш запрос, бот обновлялся и работа прервалась. "
+                                   "Попытка возвращена — нажмите ещё раз, пожалуйста.")
+        except Exception:  # noqa: BLE001 — человек заблокировал бота и т. п.
+            pass
+    return n
 
 
 def touch(chat_id) -> None:

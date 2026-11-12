@@ -90,9 +90,15 @@ class OneHeavyAtATime(BaseMiddleware):
                 pass
             return None
         self._busy.add(chat_id)
+        import usage
+        tok = usage.INFLIGHT.set([])
         try:
             return await handler(event, data)
         finally:
+            had = usage.INFLIGHT.get()
+            usage.INFLIGHT.reset(tok)
+            if had:
+                usage.inflight_done(chat_id)
             self._busy.discard(chat_id)
 
 

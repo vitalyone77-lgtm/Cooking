@@ -179,6 +179,48 @@ class Params(BaseModel):
 # ---------------- фоновые задачи (генерация долгая) ----------------
 
 JOBS: dict[str, dict] = {}
+_RUN_KEY = "running_jobs"      # незаконченные платные задачи: если процесс перезапустят посреди работы — попытку вернём
+_run_lock = __import__("threading").Lock()
+
+
+def _run_mark(job_id: str, dev_id: int, spend: dict | None, on: bool) -> None:
+    if not spend:
+        return
+    with _run_lock:
+        try:
+            cur = json.loads(web_db.kv_get(_RUN_KEY) or "{}")
+        except ValueError:
+            cur = {}
+        if on:
+            cur[job_id] = {"dev": dev_id, "spend": spend, "ts": time.time()}
+        else:
+            cur.pop(job_id, None)
+        web_db.kv_set(_RUN_KEY, json.dumps(cur))
+
+
+def refund_interrupted() -> int:
+    """При запуске сайта: задачи, которые оборвал перезапуск (выкладка обновления), — попытки обратно."""
+    with _run_lock:
+        try:
+            cur = json.loads(web_db.kv_get(_RUN_KEY) or "{}")
+        except ValueError:
+            cur = {}
+        web_db.kv_set(_RUN_KEY, "{}")
+    n = 0
+    for v in cur.values():
+        try:
+            _refund(v["dev"], v["spend"])
+            n += 1
+        except Exception:  # noqa: BLE001
+            logging.getLogger(__name__).exception("Не вернул попытку оборванной задачи")
+    if n:
+        logging.getLogger(__name__).warning("Вернул попыток за задачи, оборванные перезапуском: %s", n)
+    return n
+
+
+@app.on_event("startup")
+async def _on_start():
+    refund_interrupted()
 
 
 MSK = 3 * 3600   # Москва = UTC+3 без перехода на летнее время
@@ -231,6 +273,8 @@ def _start_job(dev_id: int, coro_fn, spend: dict | None = None) -> dict:
     job_id = uuid.uuid4().hex
     JOBS[job_id] = {"dev": dev_id, "status": "running", "ts": time.time()}
 
+    _run_mark(job_id, dev_id, spend, True)
+
     async def runner():
         try:
             JOBS[job_id]["result"] = await coro_fn()
@@ -240,6 +284,8 @@ def _start_job(dev_id: int, coro_fn, spend: dict | None = None) -> dict:
             JOBS[job_id]["error"] = _human_error(e)
             if spend:
                 _refund(dev_id, spend)
+        finally:
+            _run_mark(job_id, dev_id, spend, False)
 
     asyncio.create_task(runner())
     return {"job": job_id, "notice": (spend or {}).get("notice", "")}
@@ -250,7 +296,7 @@ def job(job_id: str, x_device: str | None = Header(default=None)):
     dev_id = _dev(x_device)
     j = JOBS.get(job_id)
     if not j or j["dev"] != dev_id:
-        raise HTTPException(404, "Запрос потерялся: сайт обновлялся. Попробуйте ещё раз.")
+        raise HTTPException(404, "Запрос потерялся: сайт обновлялся. Попытка возвращена — попробуйте ещё раз.")
     return {k: v for k, v in j.items() if k in ("status", "result", "error")}
 
 

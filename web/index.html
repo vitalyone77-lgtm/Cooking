@@ -109,7 +109,7 @@ textarea{width:100%;min-height:64px;padding:10px 14px;border:1.5px solid var(--l
 .item.done .bn{opacity:.5;text-decoration:line-through}
 .dy-hero{margin:0}.dy-hero b{font-size:34px;line-height:1.1}.dy-bar{height:10px;background:var(--soft);border-radius:99px;overflow:hidden;margin:8px 0 6px}.dy-bar i{display:block;height:100%;background:var(--primary);border-radius:99px}
 .dychart{width:100%;height:auto;display:block;margin-top:8px}.dy-legend{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:14px;margin:8px 0 0}.sw{display:inline-block;width:12px;height:12px;border-radius:3px;margin-right:6px;vertical-align:-1px}
-.dy-tip{min-height:22px;font-size:14px;color:var(--muted);margin:4px 0 0}.pcard details{margin-top:10px}.pcard summary{cursor:pointer;min-height:40px;line-height:40px;font-weight:600}
+.dy-tip{min-height:22px;font-size:14px;color:var(--muted);margin:4px 0 0}.pcard details{margin-top:10px}details.more{margin-top:16px;border:1px solid var(--line);border-radius:12px;padding:0 14px}details.more[open]{padding-bottom:12px}details.more summary{cursor:pointer;min-height:48px;padding:10px 0;font-weight:600;list-style-position:inside}details.more summary .sub{display:block;font-weight:400;font-size:14px;margin:2px 0 0}.pcard summary{cursor:pointer;min-height:40px;line-height:40px;font-weight:600}
 .dy-res .item{padding:10px 0}.dy-food{display:block;width:100%;text-align:left;background:none;border:0;padding:6px 0;color:var(--text);font:inherit;min-height:44px}.dy-food small{display:block;color:var(--muted);font-size:14px}
 .chips[data-name=cuisine],.chips[data-name=appliance]{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}.chips[data-name=cuisine] .chip,.chips[data-name=appliance] .chip{width:100%;padding:4px 6px;font-size:15px;line-height:1.2}.chips[data-name=cuisine] .chip:last-child:nth-child(odd){grid-column:1/-1}
 @media (min-width:520px){.chips[data-name=appliance]{grid-template-columns:repeat(4,minmax(0,1fr))}}
@@ -503,7 +503,7 @@ select{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--lin
   function chips(list,sel,name,multi){return '<div class="chips" data-name="'+name+'" data-multi="'+(multi?1:0)+'">'+list.map(function(x){var on=multi?sel.indexOf(x.key)>=0:sel===x.key;return '<button class="chip" data-key="'+esc(x.key)+'" aria-pressed="'+on+'">'+esc(x.label)+'</button>';}).join("")+'</div>';}
   function viewNew(){
     var m=META, times=["15 мин","30 мин","45 мин","60 мин","Не важно"].map(function(x){return {key:x,label:x};}), sv=[1,2,3,4,5,6].map(function(x){return {key:String(x),label:String(x)};});
-    var h=favStrip()+'<h1>Что приготовим?</h1><p class="sub">Ответьте на несколько вопросов — подберу рецепт, посчитаю калории и покажу, где купить продукты.</p><div id="install-top"></div>'+adSlot("top");
+    var h=favStrip()+'<h1>Что приготовим?</h1><p class="sub">Выберите тип питания и нажмите «Подобрать» — подберу рецепт, посчитаю калории и покажу, где купить продукты.</p><div id="install-top"></div>'+adSlot("top");
     h+='<div class="seg" data-name="mode">'+[["recipe","Рецепт"],["day","Меню на день"],["week","План на "+m.week_days+" дня"]].map(function(x){var kk={day:"daymenu",week:"week"}[x[0]];
       if(kk&&kindLocked(kk))return '<button class="chip locked" data-gate="'+kk+'">'+lockIc()+x[1]+'</button>';
       return '<button class="chip" data-key="'+x[0]+'" aria-pressed="'+(F.mode===x[0])+'">'+x[1]+'</button>';}).join("")+'</div>';
@@ -511,12 +511,21 @@ select{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--lin
     if(F.cuisine==="macro_goal") h+='<label class="f" for="macro">Цель по КБЖУ</label><input type="text" id="macro" maxlength="200" placeholder="500 ккал, белки 40 г" value="'+esc(F.macro||ME.goal_text||"")+'">';
     if(F.mode!=="recipe") h+='<label class="f">Приёмы пищи</label>'+chips(m.meals,F.meals,"meals",true);
     h+='<label class="f" for="pref">Что использовать или какое блюдо хочется</label><input type="text" id="pref" maxlength="300" placeholder="курица, рис или «хочу плов»" value="'+esc(F.pref||"")+'">'+(ME&&ME.photo_on?'<input type="file" id="photo-in" accept="image/*" hidden>':'');
+    // второстепенное — в раскрывающемся блоке: новичок сразу видит «Подобрать», в заголовке блока — что уже выбрано
+    var lab=function(list,k){var x=(list||[]).filter(function(y){return y.key===k;})[0];return x?x.label:k;};
+    var sumParts=[F.time==="Не важно"?"время любое":F.time,F.servings+" порц."];
+    if(F.portion&&F.portion!=="normal")sumParts.push(lab(m.portions,F.portion).toLowerCase());
+    sumParts.push(F.appliance.length?F.appliance.map(function(k){return lab(m.appliances,k);}).join(", "):"не выбрано, в чём готовить");
+    if((F.exc||"").trim())sumParts.push("без: "+F.exc.trim().slice(0,40));
+    var moreOpen=ls("moreopen")==="1"||!F.appliance.length;
+    h+='<details class="more"'+(moreOpen?" open":"")+'><summary>⚙️ Время, порции, техника, исключить<span class="sub">'+esc(sumParts.join(" · "))+'</span></summary>';
     h+='<label class="f" for="exc">Что исключить</label><input type="text" id="exc" maxlength="300" placeholder="орехи, грибы, лук" value="'+esc(F.exc||"")+'">';
     if(ME.never)h+='<p class="sub" style="margin:6px 0 0">Всегда исключаю по вашему профилю: '+esc(ME.never)+'</p>';
     h+='<label class="f">Время на готовку</label>'+chips(times,F.time,"time",false);
     h+='<label class="f">Порций</label>'+chips(sv,String(F.servings),"servings",false);
     h+='<label class="f">Размер порции</label>'+chips(m.portions,F.portion,"portion",false);
-    h+='<label class="f">В чём готовим</label>'+chips(m.appliances,F.appliance,"appliance",true);
+    h+='<label class="f">В чём готовим</label>'+chips(m.appliances,F.appliance,"appliance",true)+'</details>';
+    if(ME.never&&!moreOpen)h+='<p class="sub" style="margin:6px 0 0">Исключаю по профилю: '+esc(ME.never)+'</p>';
     var lr=null;try{lr=JSON.parse(ls("lastrecipe")||"null");}catch(e){}
     if(lr&&lr.title)h+='<button class="btn ghost" data-last-recipe="1">📖 Последний рецепт: '+esc(lr.title)+'</button>';
     var lk={recipe:"recipe",day:"daymenu",week:"week"}[F.mode], lf=(ME.left||{})[lk];
@@ -527,6 +536,8 @@ select{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--lin
     main.innerHTML=h;
     fillInstall();
   }
+  // открыт ли блок «Время, порции…» — помним, чтобы после выбора кнопки (форма рисуется заново) он не закрывался
+  document.addEventListener("toggle",function(e){if(e.target&&e.target.classList&&e.target.classList.contains("more"))ls("moreopen",e.target.open?"1":"");},true);
   function saveText(){var g=function(i){var e=document.getElementById(i);return e?e.value:"";};if(document.getElementById("pref")){F.pref=g("pref");F.exc=g("exc");F.macro=g("macro");}}
   function submitNew(){
     saveText();

@@ -1928,6 +1928,9 @@ async def main():
     n = bot_cook.resume_timers(bot)
     if n:
         logger.info("Возобновлено таймеров готовки: %d", n)
+    n = await usage.recover_inflight(bot)
+    if n:
+        logger.warning("Вернул попыток за генерации, оборванные перезапуском: %d", n)
 
     await bot.set_my_commands([
         BotCommand(command="menu", description="Показать меню"),

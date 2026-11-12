@@ -151,8 +151,56 @@ check("новое устройство сразу с профилем (тот ж
 idx = open("web/index.html", encoding="utf-8").read()
 check("сайт: устройство и справочник запрашиваются одновременно, без лишнего /api/me", "Promise.all([ensureDevice(),pMeta])" in idx and "ME_FRESH&&ME" in idx)
 
+check("первый экран: второстепенные настройки в раскрывающемся блоке, кнопка «Подобрать» после него",
+      '<details class="more"' in idx and idx.index('<details class="more"') < idx.index('id="go"') and 'ls("moreopen"' in idx)
 m = cl.get("/api/meta").json()
 check("справочник говорит, где есть реклама; без баннеров сайт её не запрашивает", m.get("ad_slots") == [] and "META.ad_slots.indexOf(slot)<0" in idx, str(m.get("ad_slots")))
+
+# перезапуск сайта посреди генерации (выкладка): попытка возвращается при следующем запуске
+import usage
+d2 = cl.post("/api/device").json()["device"]
+dv2 = web_api.web_db.device_id(d2)
+web_api._ip_var.set("10.9.9.9")
+sp = web_api._spend(dv2, "recipe")
+web_api._run_mark("jobX", dv2, sp, True)
+had = usage._count(f"SELECT COUNT(*) FROM gens WHERE id={sp['id']}")
+n = web_api.refund_interrupted()
+check("оборванная перезапуском генерация: попытка возвращена", had == 1 and n == 1 and usage._count(f"SELECT COUNT(*) FROM gens WHERE id={sp['id']}") == 0)
+check("повторный запуск ничего лишнего не возвращает", web_api.refund_interrupted() == 0)
+
+# бот: генерация, оборванная перезапуском — попытка возвращается, человеку пишут
+C2 = 796002
+chat2 = Chat(id=C2, type="private")
+
+
+async def inflight_case():
+    mw = tg_safety.OneHeavyAtATime()
+    ev = CallbackQuery(id="z1", from_user=User(id=C2, is_bot=False, first_name="T"), chat_instance="x",
+                       message=Message(message_id=1, date=dt.now(), chat=chat2, text="x"), data="confirm:go")
+    seen = {}
+
+    async def handler(e, d):
+        rid, _ = usage.bot_try_spend(C2, "recipe")
+        seen["rid"] = rid
+        seen["during"] = accounts.sess_get(f"inflight:{C2}")
+    await mw(handler, ev, {})
+    check("во время генерации отметка «в работе» есть, после — стёрта", seen["during"] and seen["during"]["ids"] == [seen["rid"]]
+          and accounts.sess_get(f"inflight:{C2}") is None, str(seen))
+    tok = usage.INFLIGHT.set([])                      # как будто бот упал посреди работы: отметка осталась
+    rid, _ = usage.bot_try_spend(C2, "recipe")
+    usage.INFLIGHT.reset(tok)
+    sent = []
+
+    class B:
+        async def send_message(self, chat_id, text):
+            sent.append((chat_id, text))
+    n = await usage.recover_inflight(B())
+    check("после перезапуска: попытка возвращена, человеку написали", n == 1 and usage._count(f"SELECT COUNT(*) FROM gens WHERE id={rid}") == 0
+          and sent and sent[0][0] == C2 and "возвращена" in sent[0][1], str(sent))
+    check("без отметки обычное списание ничего не записывает", usage.bot_try_spend(C2, "recipe") and accounts.sess_get(f"inflight:{C2}") is None)
+
+
+asyncio.run(inflight_case())
 
 print("ИТОГО: упало", len(fails))
 sys.exit(1 if fails else 0)
