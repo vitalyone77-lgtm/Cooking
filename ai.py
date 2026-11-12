@@ -118,8 +118,17 @@ async def call_llm_with_fallback(messages: list[dict], max_tokens: int = 3000) -
                              + ". Перепиши ответ полностью в том же формате без них (и без всего, что их содержит)."}]
         try:
             text = await _call_any(retry, max_tokens)
+            bad = profile_ctx.hits(text)   # перепроверяем ОТВЕТ ПОСЛЕ повтора, а не старый список
         except RuntimeError:
-            pass
+            pass   # провайдеры недоступны — bad остаётся прежним, предупредим о нём ниже
+        if bad:
+            # Решение от 2026-11-12: раньше это предупреждение добавлял только generate_recipe (один рецепт).
+            # Меню на день, план на 3 дня и замена недостающего продукта (day_menu.py/week_menu.py/missing.py)
+            # тоже зовут call_llm_with_fallback, но сами не перепроверяли результат — если повтор не помогал,
+            # аллерген/исключённый продукт молча уходил пользователю без единого предупреждения. Проверка и
+            # предупреждение теперь здесь, в общей точке входа — одно место на всех.
+            text = ("⚠️ Проверьте состав: возможно, здесь есть " + ", ".join(bad)
+                    + ", а вы просили это исключить.\n\n" + text)
     return text
 
 
@@ -144,11 +153,7 @@ async def generate_recipe(data: dict, search_query: str, search_results_text: st
         {"role": "user", "content": build_user_prompt(data, search_query, search_results_text)},
     ]
     try:
-        text = await call_llm_with_fallback(messages)
-        bad = profile_ctx.hits(text)
-        if bad:   # и после повторной попытки — предупреждаем, а не молчим
-            text = "⚠️ Проверьте состав: возможно, здесь есть " + ", ".join(bad) + ", а вы просили это исключить.\n\n" + text
-        return text
+        return await call_llm_with_fallback(messages)   # предупреждение про исключённые продукты — внутри неё
     except RuntimeError as e:
         logger.error(f"Все LLM-провайдеры не сработали: {e}")
         return (

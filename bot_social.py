@@ -230,13 +230,25 @@ def _partner_text(p: dict) -> str:
 
 @router.message(Command("partner"))
 async def cmd_partner(message: Message, command: CommandObject):
-    """/partner код — создать партнёра или посмотреть его ссылки и итоги."""
+    """/partner код — создать партнёра или посмотреть его ссылки и итоги.
+    /partner код tg_id — привязать партнёра к его Telegram id (один раз при подключении): без этого оплата
+    по своей же ссылке с левого аккаунта засчитывалась бы ему как привод (баг от 2026-11-11)."""
     if not _is_admin(message.chat.id):
         return
+    parts = (command.args or "").strip().split()
+    code = parts[0] if parts else ""
     try:
-        await message.answer(_partner_text(partners.ensure((command.args or "").strip())), parse_mode=None, disable_web_page_preview=True)
+        p = partners.ensure(code)
     except ValueError as e:
-        await message.answer(f"Формат: /partner код. {e}", parse_mode=None)
+        return await message.answer(f"Формат: /partner код [tg_id]. {e}", parse_mode=None)
+    note = ""
+    if len(parts) == 2:
+        if not parts[1].isdigit():
+            return await message.answer("tg_id должен быть числом.", parse_mode=None)
+        partners.set_owner(code, parts[1])
+        p = partners.get(code)
+        note = f"\n\n🔒 Привязан к tg_id {parts[1]} — оплата с этого id по его же ссылке не даст ему комиссию."
+    await message.answer(_partner_text(p) + note, parse_mode=None, disable_web_page_preview=True)
 
 
 @router.message(Command("partnerpaid"))

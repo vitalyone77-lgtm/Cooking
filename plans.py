@@ -17,22 +17,27 @@ import accounts
 import config
 
 # что можно менять из админки: имя -> (кто может: owner — только владелец, all — и партнёр, тип)
+# Решение владельца 2026-11-02 (02.11.2026 в CHANGELOG): партнёр ВЕЗДЕ только смотрит, менять может только
+# владелец — /admin/api/settings уже проверяет это для всех полей сразу (_need_admin(owner=True)). Метки
+# "all" ниже раньше были не поправлены и могли сбить с толку при будущей доработке отдельных ручек на
+# партнёра: без реального разделения прав это просто неверная документация, поэтому метки исправлены на
+# owner везде (2026-11-11).
 EDITABLE = {
     "PAYWALL_ENABLED": ("owner", bool),
     "DAILY_GEN_CAP": ("owner", int),
     "DAILY_GEN_CAP_ANON": ("owner", int),
     "WEB_IP_DAILY_GENS": ("owner", int),
     "PARTNER_SHARE_PCT": ("owner", int),
-    "LIMITS_FREE": ("all", str),
-    "LIMITS_PREMIUM": ("all", str),
-    "LIMITS_ANON": ("all", str),
-    "PREMIUM_FEATURES": ("all", list),
-    "TRIAL_DAYS": ("all", int),
-    "PREMIUM_PLANS": ("all", str),
+    "LIMITS_FREE": ("owner", str),
+    "LIMITS_PREMIUM": ("owner", str),
+    "LIMITS_ANON": ("owner", str),
+    "PREMIUM_FEATURES": ("owner", list),
+    "TRIAL_DAYS": ("owner", int),
+    "PREMIUM_PLANS": ("owner", str),
     "STARS_AUTO": ("owner", bool),
-    "PROMO_CODES": ("all", str),
-    "FEATURE_ROLLOUT": ("all", dict),
-    "TESTER_IDS": ("all", list),
+    "PROMO_CODES": ("owner", str),
+    "FEATURE_ROLLOUT": ("owner", dict),
+    "TESTER_IDS": ("owner", list),
 }
 SETTINGS_TTL = 15
 _cache: dict = {"ts": 0.0, "data": {}}
@@ -257,20 +262,31 @@ def pay_offers_for(uid) -> list[dict]:
     return out
 
 
-def promo_codes() -> dict[str, int]:
+def promo_codes() -> dict[str, dict]:
+    """{код: {"days": дней подписки, "max": лимит погашений, 0 = без лимита}}.
+    Формат значения: "ДНИ" (старый, без лимита) или "ДНИ:ЛИМИТ" (добавлено 2026-11-11 — промокод без лимита
+    и срока, разошедшийся публично, давал бесконечно бесплатных дней)."""
     out = {}
     for part in (cfg("PROMO_CODES") or "").split(","):
-        if "=" in part:
-            k, v = part.split("=", 1)
-            try:
-                out[k.strip().upper()] = max(0, int(v))
-            except ValueError:
-                continue
+        if "=" not in part:
+            continue
+        k, v = part.split("=", 1)
+        bits = v.split(":", 1)
+        try:
+            days = max(0, int(bits[0]))
+            max_uses = max(0, int(bits[1])) if len(bits) > 1 else 0
+        except ValueError:
+            continue
+        out[k.strip().upper()] = {"days": days, "max": max_uses}
     return out
 
 
 def promo_days(code: str) -> int:
-    return promo_codes().get(code.strip().upper(), 0)
+    return promo_codes().get(code.strip().upper(), {}).get("days", 0)
+
+
+def promo_max(code: str) -> int:
+    return promo_codes().get(code.strip().upper(), {}).get("max", 0)
 
 
 def maybe_start_trial(uid) -> float | None:

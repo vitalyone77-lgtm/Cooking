@@ -928,9 +928,16 @@ async def pre_checkout(query: PreCheckoutQuery):
     if not parsed:
         await query.answer(ok=False, error_message="Тариф устарел — откройте «Подписку» заново.")
         return
-    # счёт живёт долго: заплатить по цене намного ниже нынешней нельзя, небольшая разница от смены курса не мешает
-    if query.currency == "XTR" and parsed[0]["stars"] and query.total_amount < parsed[0]["stars"] * 0.85:
-        await query.answer(ok=False, error_message=f"Цена обновилась: {parsed[0]['stars']} звёзд. Откройте «Подписку» заново.")
+    # Счёт живёт долго: заплатить по цене намного ниже нынешней нельзя, небольшая разница от смены курса не
+    # мешает. Допуск 5% — как у автообновления цены звёзд по курсу ЦБ (stars_rate: обновляет раз в день,
+    # если курс разошёлся больше чем на 5%), а не 15% как было раньше: тот допуск не привязан ни к чему
+    # и позволял оплатить старый счёт почти на 15% дешевле текущей цены (баг от 2026-11-11).
+    # РУБЛИ ВООБЩЕ НЕ ПРОВЕРЯЛИСЬ раньше — старый счёт после повышения цены принимался по старой цене без
+    # всякого допуска.
+    want = parsed[0]["stars"] if query.currency == "XTR" else parsed[0]["rub"] * 100
+    if want and query.total_amount < want * 0.95:
+        label = f"{parsed[0]['stars']} звёзд" if query.currency == "XTR" else f"{parsed[0]['rub']} ₽"
+        await query.answer(ok=False, error_message=f"Цена обновилась: {label}. Откройте «Подписку» заново.")
         return
     await query.answer(ok=True)
 
@@ -984,12 +991,16 @@ async def promo_enter(message: Message, state: FSMContext):
     await state.clear()
     if not days:
         note = "😔 Такого промокода нет."
-    elif not accounts.use_promo(message.chat.id, code):
-        note = "Этот промокод уже использован"
     else:
-        until = accounts.grant_days(message.chat.id, days, "promo:" + code.upper())
-        usage.event("promo", message.chat.id)
-        note = f"🎉 Промокод принят! Полный доступ до {time.strftime('%d.%m.%Y', time.localtime(until))}."
+        result = accounts.use_promo_capped(message.chat.id, code, plans.promo_max(code))
+        if result == "used":
+            note = "Этот промокод уже использован"
+        elif result == "full":
+            note = "😔 У этого промокода закончился лимит использований."
+        else:
+            until = accounts.grant_days(message.chat.id, days, "promo:" + code.upper())
+            usage.event("promo", message.chat.id)
+            note = f"🎉 Промокод принят! Полный доступ до {time.strftime('%d.%m.%Y', time.localtime(until))}."
     await ui.show(message, note, _cancel_kb(), mode="tracked")
 
 
@@ -1000,8 +1011,13 @@ async def cmd_grant(message: Message, command: CommandObject):
         return
     try:
         uid, days = (command.args or "").split()
-        until = accounts.grant_days(int(uid), int(days), "admin")
+        uid, days = int(uid), int(days)
+        if not (1 <= days <= 365):
+            raise ValueError
+        until = accounts.grant_days(uid, days, "admin")
     except ValueError:
-        await message.answer("Формат: /grant 123456789 30", parse_mode=None)
+        # Диапазон 1..365 — как у /admin/api/grant на сайте (web_api.py): отрицательные или огромные
+        # значения раньше принимались без проверки (баг от 2026-11-11), хотя команда и так owner-only.
+        await message.answer("Формат: /grant 123456789 30 (дней от 1 до 365)", parse_mode=None)
         return
     await message.answer(f"Готово: {uid} до {time.strftime('%d.%m.%Y', time.localtime(until))}", parse_mode=None)

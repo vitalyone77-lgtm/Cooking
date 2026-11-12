@@ -34,20 +34,27 @@ def ensure(code: str) -> dict:
     return get(code)
 
 
+def set_owner(code: str, owner_tg: str | None) -> bool:
+    """Привязать партнёра к его Telegram id (решение владельца 2026-11-11): без этого оплата по своей же
+    ссылке с левого аккаунта тихо засчитывалась партнёру как привод и давала ему комиссию с себя же
+    (см. accounts.set_ref). Владелец вводит id один раз при подключении партнёра."""
+    return accounts._q("UPDATE partners SET owner_tg=? WHERE code=?", (owner_tg, code)) > 0
+
+
 def _row(r) -> dict | None:
-    return {"code": r[0], "token": r[1], "share": r[2], "tax": r[3], "clicks": r[4]} if r else None
+    return {"code": r[0], "token": r[1], "share": r[2], "tax": r[3], "clicks": r[4], "owner_tg": r[5]} if r else None
 
 
 def get(code: str) -> dict | None:
-    return _row(accounts._q("SELECT code, token, share, tax, clicks FROM partners WHERE code=?", (code,), one=True))
+    return _row(accounts._q("SELECT code, token, share, tax, clicks, owner_tg FROM partners WHERE code=?", (code,), one=True))
 
 
 def by_token(token: str) -> dict | None:
-    return _row(accounts._q("SELECT code, token, share, tax, clicks FROM partners WHERE token=?", (token,), one=True)) if token else None
+    return _row(accounts._q("SELECT code, token, share, tax, clicks, owner_tg FROM partners WHERE token=?", (token,), one=True)) if token else None
 
 
 def all_partners() -> list[dict]:
-    return [_row(r) for r in accounts._q("SELECT code, token, share, tax, clicks FROM partners", all_=True)]
+    return [_row(r) for r in accounts._q("SELECT code, token, share, tax, clicks, owner_tg FROM partners", all_=True)]
 
 
 def click(code: str) -> bool:

@@ -38,6 +38,7 @@ from prompts import (
     build_week_basket_user_prompt,
     DAY_MENU_SYSTEM_PROMPT,
     DAY_MENU_BLOCK_DELIMITER,
+    DAY_MENU_BLOCK_SPLIT_RE,
     build_day_menu_user_prompt,
     build_week_day_extra_instructions,
 )
@@ -169,7 +170,7 @@ async def _generate_day(chat_id: int, state: dict) -> dict:
 
     raw = await call_llm_with_fallback(messages, max_tokens=max_tokens)
 
-    blocks = [b.strip() for b in raw.split(DAY_MENU_BLOCK_DELIMITER)]
+    blocks = [b.strip() for b in DAY_MENU_BLOCK_SPLIT_RE.split(raw)]
     if len(blocks) != len(meal_keys) + 1:
         raise ValueError(
             f"ожидалось {len(meal_keys) + 1} блоков (блюда + расход), получено {len(blocks)}"

@@ -1693,9 +1693,14 @@ def admin_logout():
     return resp
 
 
-def _settings_view() -> dict:
-    """Текущие настройки тарифов в удобном для формы виде (что можно менять — и кем)."""
+def _settings_view(role: str = "owner") -> dict:
+    """Текущие настройки тарифов в удобном для формы виде (что можно менять — и кем).
+
+    Партнёр у этой ручки и так только смотрит (менять нельзя — _need_admin(owner=True) в
+    admin_settings), но до 2026-11-11 он всё равно ВИДЕЛ настоящие промокоды и id тестировщиков —
+    это секреты бизнеса, не только права на запись. Партнёру они не нужны и теперь скрыты."""
     plans.reload()
+    owner = role == "owner"
     return {
         "paywall": plans.paywall(),
         "stars_auto": stars_rate.auto_on(),
@@ -1707,10 +1712,10 @@ def _settings_view() -> dict:
         "rollout": plans.rollout(),
         "new_features": plans.NEW_FEATURES,
         "rollout_levels": plans.ROLLOUT_LEVELS,
-        "testers": sorted(plans.testers()),
+        "testers": sorted(plans.testers()) if owner else [],
         "trial_days": int(plans.cfg("TRIAL_DAYS") or 0),
         "offers": plans.offers(),
-        "promo": plans.promo_codes(),
+        "promo": plans.promo_codes() if owner else {},
         "daily_cap": int(plans.cfg("DAILY_GEN_CAP")),
         "anon_cap": int(plans.cfg("DAILY_GEN_CAP_ANON")),
         "ip_cap": int(plans.cfg("WEB_IP_DAILY_GENS")),
@@ -1734,8 +1739,8 @@ async def admin_stats(request: Request):
     out["money"] = accounts.money_stats()
     out["accounts"] = accounts.account_stats()
     out["refs"] = accounts.ref_stats()
-    out["promos"] = accounts.promo_stats()
-    out["settings"] = _settings_view()
+    out["promos"] = accounts.promo_stats() if role == "owner" else []
+    out["settings"] = _settings_view(role)
     out["bot"] = config.BOT_USERNAME
     import alerts
     out["deepseek_balance_usd"] = await alerts.deepseek_balance()
@@ -1795,10 +1800,11 @@ async def admin_settings(request: Request):
             new["PREMIUM_PLANS"] = stars_rate.on_admin_save(",".join(rows))
         if "promo" in body:
             rows = []
-            for code, days in (body["promo"] or {}).items():
+            for code, v in (body["promo"] or {}).items():
                 code = re.sub(r"[^A-Za-z0-9_-]", "", str(code)).upper()[:32]
+                days, max_uses = (v, 0) if isinstance(v, (int, float, str)) else (list(v) + [0, 0])[:2]
                 if code and 0 < int(days) <= 365:
-                    rows.append(f"{code}={int(days)}")
+                    rows.append(f"{code}={int(days)}:{max(0, min(int(max_uses), 100000))}")
             new["PROMO_CODES"] = ",".join(rows)
     except (TypeError, ValueError, AttributeError):
         raise HTTPException(400, "Проверьте значения — где-то не число")

@@ -63,7 +63,7 @@ CREATE TABLE IF NOT EXISTS alias(src TEXT PRIMARY KEY, dst TEXT, ts REAL);
 CREATE TABLE IF NOT EXISTS pay_orders(id TEXT PRIMARY KEY, uid TEXT, plan TEXT, days INTEGER, amount TEXT, test INTEGER, ts REAL, status TEXT, op TEXT);
 CREATE INDEX IF NOT EXISTS pay_orders_uid ON pay_orders(uid, ts);
 CREATE TABLE IF NOT EXISTS book_votes(book_id INTEGER, uid TEXT, vote INTEGER, ts REAL, PRIMARY KEY(book_id, uid));
-CREATE TABLE IF NOT EXISTS partners(code TEXT PRIMARY KEY, token TEXT UNIQUE, share REAL, tax REAL, clicks INTEGER, ts REAL);
+CREATE TABLE IF NOT EXISTS partners(code TEXT PRIMARY KEY, token TEXT UNIQUE, share REAL, tax REAL, clicks INTEGER, ts REAL, owner_tg TEXT);
 CREATE TABLE IF NOT EXISTS partner_settlements(id INTEGER PRIMARY KEY AUTOINCREMENT, code TEXT, gross REAL, amount REAL, stars INTEGER, ts REAL);
 CREATE TABLE IF NOT EXISTS macro_ref(uid TEXT PRIMARY KEY, p REAL, f REAL, c REAL);
 CREATE TABLE IF NOT EXISTS shop_lists(id TEXT PRIMARY KEY, uid TEXT, title TEXT, items TEXT, done TEXT, ts REAL);
@@ -98,6 +98,11 @@ def _conn():
             c.commit()
             c.execute("VACUUM")
             c.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        # owner_tg добавлен позже (2026-11-11) — у partners, созданных до этого, колонки могло не быть.
+        cols = {r[1] for r in c.execute("PRAGMA table_info(partners)").fetchall()}
+        if "owner_tg" not in cols:
+            c.execute("ALTER TABLE partners ADD COLUMN owner_tg TEXT")
+            c.commit()
         _ready = True
     _shared = c
     return c
@@ -386,11 +391,14 @@ def add_bonus_days(uid, days: int) -> float:
 
 
 def trial_used(uid) -> bool:
-    """Пробный период уже был, либо человек уже платил: тогда бесплатная неделя не положена."""
+    """Пробный период уже был, либо человек уже платил (в т.ч. с возвратом — он всё равно пользовался
+    подпиской): тогда бесплатная неделя не положена. Возврат исключён только из ВЫРУЧКИ (money_stats,
+    ref_stats и т.п.) — там это правильно, а здесь до 2026-11-11 тот же список исключений ошибочно
+    давал ему право на новый бесплатный пробный период."""
     row = _q("SELECT trial_used FROM subs WHERE uid=?", (str(uid),), one=True)
     if row and row[0]:
         return True
-    return bool(_q("SELECT 1 FROM payments WHERE uid=? AND currency NOT IN ('RUBTEST', 'RUBREFUND', 'XTRREFUND') LIMIT 1", (str(uid),), one=True))
+    return bool(_q("SELECT 1 FROM payments WHERE uid=? AND currency != 'RUBTEST' LIMIT 1", (str(uid),), one=True))
 
 
 def start_trial(uid, days: int) -> float | None:
@@ -402,7 +410,7 @@ def start_trial(uid, days: int) -> float | None:
         try:
             with c:
                 row = c.execute("SELECT until, trial_used FROM subs WHERE uid=?", (str(uid),)).fetchone()
-                paid = c.execute("SELECT 1 FROM payments WHERE uid=? AND currency NOT IN ('RUBTEST', 'RUBREFUND', 'XTRREFUND') LIMIT 1", (str(uid),)).fetchone()
+                paid = c.execute("SELECT 1 FROM payments WHERE uid=? AND currency != 'RUBTEST' LIMIT 1", (str(uid),)).fetchone()
                 if (row and row[1]) or paid:
                     return None
                 until = max(time.time(), (row[0] or 0) if row else 0) + days * 86400
@@ -484,13 +492,47 @@ def use_promo(uid, code: str) -> bool:
         return False
 
 
+def use_promo_capped(uid, code: str, max_uses: int) -> str:
+    """Проверка лимита погашений и вставка — в ОДНОЙ транзакции (решение от 2026-11-11, до этого у промокода
+    вообще не было лимита — разошедшийся код давал бесконечно бесплатных дней). Возвращает 'ok' | 'used'
+    (этот человек уже гасил этот код) | 'full' (лимит использований исчерпан).
+
+    Вставка — ПЕРВЫМ шагом (не проверка лимита): иначе человек, который гасил код, когда лимит ещё не
+    был исчерпан, при повторной попытке получал бы «лимит исчерпан» вместо честного «уже использован» —
+    PK-конфликт по (uid, code) всегда должен иметь приоритет над общим лимитом."""
+    code = code.upper()
+    with _lock:
+        c = _conn()
+        try:
+            with c:
+                try:
+                    c.execute("INSERT INTO promo_used(uid, code, ts) VALUES(?,?,?)", (str(uid), code, time.time()))
+                except sqlite3.IntegrityError:
+                    return "used"
+                if max_uses:
+                    n = c.execute("SELECT COUNT(*) FROM promo_used WHERE code=?", (code,)).fetchone()[0]
+                    if n > max_uses:
+                        c.execute("DELETE FROM promo_used WHERE uid=? AND code=?", (str(uid), code))
+                        return "full"
+                return "ok"
+        finally:
+            c.close()
+
+
 def set_ref(uid, ref: str) -> None:
     """Откуда пришёл человек (t.me/бот?start=ref_блогер). Запоминаем только первый источник и только у нового человека:
-    кто уже пользовался сервисом, не считается приведённым по ссылке, иначе партнёру засчитывались бы чужие оплаты."""
+    кто уже пользовался сервисом, не считается приведённым по ссылке, иначе партнёру засчитывались бы чужие оплаты.
+
+    Партнёр по СВОЕЙ ЖЕ ссылке не засчитывается (баг самонакрутки комиссии от 2026-11-11): owner_tg заполняет
+    владелец командой /partner код tg_id при подключении партнёра — без него проверка просто не сработает."""
     import usage
     ref = "".join(ch for ch in ref if ch.isalnum() or ch in "_-")[:32]
-    if ref and not usage.is_old_user(uid):
-        _q("INSERT OR IGNORE INTO refs(uid, ref, ts) VALUES(?,?,?)", (str(uid), ref, time.time()))
+    if not ref or usage.is_old_user(uid):
+        return
+    owner = _q("SELECT owner_tg FROM partners WHERE code=?", (ref,), one=True)
+    if owner and owner[0] and str(owner[0]) == str(uid):
+        return
+    _q("INSERT OR IGNORE INTO refs(uid, ref, ts) VALUES(?,?,?)", (str(uid), ref, time.time()))
 
 
 def ref_stats() -> list[dict]:
@@ -840,7 +882,11 @@ def weight_delete(uid, day: str) -> None:
 
 
 def delete_my_data(uid) -> dict:
-    """Стереть всё, что человек сам ввёл в профиле: список «не использовать», цели, вес, полку, дневник и согласие."""
+    """Стереть всё, что человек сам ввёл в профиле: список «не использовать», цели, вес, полку, дневник и согласие.
+
+    Проверено 2026-11-11 против текста подтверждения в боте (bot_profile.py:578): «Избранное и подписка
+    останутся» — узкий охват удаления (без избранного, расшаренных рецептов, входа на сайте) ЗАДУМАН, а не
+    забыт; расширять его нельзя без смены самого текста, который видит и на что соглашается человек."""
     uid = str(uid)
     out = {"weights": _q("DELETE FROM weights WHERE uid=?", (uid,)), "goals": _q("DELETE FROM goals WHERE uid=?", (uid,)),
            "shelf": _q("DELETE FROM shelf WHERE uid=?", (uid,)), "consent": _q("DELETE FROM consents WHERE uid=?", (uid,)),

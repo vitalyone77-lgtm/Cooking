@@ -19,7 +19,11 @@ import config
 
 DB_PATH = os.getenv("USAGE_DB", os.path.join(os.path.dirname(os.path.abspath(__file__)), "usage.db"))
 MSK = 3 * 3600
-_lock = threading.Lock()
+# RLock, не Lock (решение от 2026-11-11): try_spend теперь делает проверку лимита и запись попытки в ОДНОЙ
+# транзакции под этой блокировкой и внутри нее же вызывает event() — тот тоже берёт _lock. С обычным Lock
+# это был бы deadlock потока на самом себе; RLock разрешает повторный захват тем же потоком, а для разных
+# потоков/процессов ведёт себя как обычный Lock.
+_lock = threading.RLock()
 _ready = False
 
 CAP_TEXT = ("😔 Дневной запас подборов закончился. Приходите завтра. Сохранённые меню и избранное открываются как обычно.")
@@ -191,36 +195,50 @@ def try_spend(uid, kind: str, src: str, ip: str | None = None) -> tuple[int | No
     """
     Можно ли запустить подбор. -> (id записи, уведомление или "") если можно — id потом передаётся
     в unlog() при сбое; или (None, текст отказа).
+
+    Проверка счётчиков и запись попытки идут под одним захватом _lock: параллельный запрос (бот и сайт одним
+    аккаунтом, два быстрых нажатия) не проскочит по старым цифрам. Тариф, лимиты и пробный период (это база
+    аккаунтов и настройки) считаются ДО захвата: под _lock нельзя ждать блокировку аккаунтов, потому что вход на
+    сайт держит её и сам спрашивает usage (is_old_user) — встречное ожидание повесило бы процесс сайта.
     """
     import plans
     _purge_old_ips()
     uid = str(uid)
     premium = plans.plan_of(uid) == "premium"
     cap = int(plans.cfg("DAILY_GEN_CAP"))
-    if cap > 0 and total_today() >= (cap * 3 // 2 if premium else cap):
-        return None, CAP_TEXT
-    if plans.is_anon(uid):
-        anon_cap = int(plans.cfg("DAILY_GEN_CAP_ANON"))
-        if anon_cap > 0 and _count(
-                "SELECT COUNT(*) FROM gens WHERE uid LIKE 'w%' AND ts >= ?", (msk_midnight(),)) >= anon_cap:
-            return None, ANON_CAP_TEXT
-        ip_cap = int(plans.cfg("WEB_IP_DAILY_GENS"))
-        if ip and ip_cap > 0 and _count(
-                "SELECT COUNT(*) FROM gens WHERE ip=? AND ts >= ?", (ip, msk_midnight())) >= ip_cap:
-            return None, "С этого адреса сегодня уже было много подборов. Войдите в профиль или приходите завтра."
-    notice = ""
+    anon = plans.is_anon(uid)
+    anon_cap = int(plans.cfg("DAILY_GEN_CAP_ANON")) if anon else 0
+    ip_cap = int(plans.cfg("WEB_IP_DAILY_GENS")) if anon else 0
     lim = plans.limit(uid, kind)
-    if lim:
-        n, days = lim
-        if used(uid, kind, days) >= n:
-            until = plans.maybe_start_trial(uid)
-            lim2 = plans.limit(uid, kind) if until else None
-            if not lim2 or used(uid, kind, lim2[1]) >= lim2[0]:
-                event(f"limit_{kind}", uid)
-                return None, _refusal(uid, kind, n, days)
-            notice = TRIAL_TEXT.format(days=plans.cfg("TRIAL_DAYS"))
+
+    def checked(limit) -> tuple[int | None, str]:
+        """Под _lock: только счётчики этой базы. -> (id, "") записано; (None, текст) отказ; (None, "limit") упёрлись в лимит тарифа."""
+        if cap > 0 and total_today() >= (cap * 3 // 2 if premium else cap):
+            return None, CAP_TEXT
+        if anon_cap > 0 and _count("SELECT COUNT(*) FROM gens WHERE uid LIKE 'w%' AND ts >= ?", (msk_midnight(),)) >= anon_cap:
+            return None, ANON_CAP_TEXT
+        if anon and ip and ip_cap > 0 and _count("SELECT COUNT(*) FROM gens WHERE ip=? AND ts >= ?", (ip, msk_midnight())) >= ip_cap:
+            return None, "С этого адреса сегодня уже было много подборов. Войдите в профиль или приходите завтра."
+        if limit and used(uid, kind, limit[1]) >= limit[0]:
+            return None, "limit"
+        return log(src, uid, kind, ip), ""
+
+    with _lock:
+        rid, why = checked(lim)
+    if rid or why != "limit":
+        return rid, why
+    until = plans.maybe_start_trial(uid)                 # первый упор в лимит: пробный период (база аккаунтов, вне _lock)
+    lim2 = plans.limit(uid, kind) if until else None
+    if lim2:
+        with _lock:
+            rid, why = checked(lim2)
+        if rid:
             event("trial_start", uid)
-    return log(src, uid, kind, ip), notice
+            return rid, TRIAL_TEXT.format(days=plans.cfg("TRIAL_DAYS"))
+        if why != "limit":
+            return None, why
+    event(f"limit_{kind}", uid)
+    return None, _refusal(uid, kind, lim[0], lim[1])
 
 
 def bot_try_spend(chat_id: int, kind: str) -> tuple[int | None, str]:

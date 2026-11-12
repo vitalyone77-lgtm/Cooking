@@ -91,7 +91,7 @@ code{background:var(--soft);padding:2px 6px;border-radius:6px;font-size:13px}
     <div class="tbl"><table><thead><tr><th>Код</th><th>Дней</th><th>₽</th><th>⭐ звёзд</th><th></th></tr></thead><tbody id="s-offers"></tbody></table></div>
     <div class="row" style="margin-top:8px"><button id="add-offer">+ тариф</button><span class="note">Пробный период: <input type="number" id="s-trial" min="0" max="60"> дней (включается сам при первом упоре в лимит, 0 — без пробного)</span></div>
     <h2>Промокоды</h2>
-    <div class="tbl"><table><thead><tr><th>Код</th><th>Дней подписки</th><th></th></tr></thead><tbody id="s-promo"></tbody></table></div>
+    <div class="tbl"><table><thead><tr><th>Код</th><th>Дней подписки</th><th>Лимит погашений (0 = ∞)</th><th></th></tr></thead><tbody id="s-promo"></tbody></table></div>
     <div class="row" style="margin-top:8px"><button id="add-promo">+ промокод</button></div>
     <h2>Защита и расходы <span class="note">(меняет владелец)</span></h2>
     <div class="box">
@@ -237,12 +237,12 @@ document.addEventListener("click",function(e){
   else if(t.closest("[data-all-test]")){setAllRollout("testers");}
 });
 function offerRow(o){return '<tr data-offer><td><input data-o="key" value="'+esc(o.key)+'" style="width:100px"></td><td><input type="number" data-o="days" value="'+o.days+'"></td><td><input type="number" data-o="rub" value="'+o.rub+'"></td><td><input type="number" data-o="stars" value="'+o.stars+'"></td><td><button class="dng" data-rm>✕</button></td></tr>';}
-function promoRow(c,d){return '<tr data-promo><td><input data-p="code" value="'+esc(c)+'" style="width:160px"></td><td><input type="number" data-p="days" value="'+d+'"></td><td><button class="dng" data-rm>✕</button></td></tr>';}
+function promoRow(c,d){d=d||{};return '<tr data-promo><td><input data-p="code" value="'+esc(c)+'" style="width:160px"></td><td><input type="number" data-p="days" value="'+(d.days||0)+'"></td><td><input type="number" data-p="max" value="'+(d.max||0)+'" title="0 = без лимита" style="width:80px"></td><td><button class="dng" data-rm>✕</button></td></tr>';}
 function collect(){
   var limits={};Array.prototype.forEach.call(document.querySelectorAll("[data-lim]"),function(i){var p=i.getAttribute("data-lim").split(":");
     limits[p[0]]=limits[p[0]]||{};limits[p[0]][p[1]]=limits[p[0]][p[1]]||[0,1];limits[p[0]][p[1]][p[2]==="n"?0:1]=parseInt(i.value||"0",10);});
   var offers=Array.prototype.map.call(document.querySelectorAll("[data-offer]"),function(r){var o={};Array.prototype.forEach.call(r.querySelectorAll("[data-o]"),function(i){o[i.getAttribute("data-o")]=i.getAttribute("data-o")==="key"?i.value:parseInt(i.value||"0",10);});return o;});
-  var promo={};Array.prototype.forEach.call(document.querySelectorAll("[data-promo]"),function(r){var c=r.querySelector('[data-p="code"]').value.trim();if(c)promo[c]=parseInt(r.querySelector('[data-p="days"]').value||"0",10);});
+  var promo={};Array.prototype.forEach.call(document.querySelectorAll("[data-promo]"),function(r){var c=r.querySelector('[data-p="code"]').value.trim();if(c)promo[c]=[parseInt(r.querySelector('[data-p="days"]').value||"0",10),parseInt(r.querySelector('[data-p="max"]').value||"0",10)];});
   var rollout={};Array.prototype.forEach.call(document.querySelectorAll("[data-roll]"),function(s){rollout[s.getAttribute("data-roll")]=s.value;});
   var body={limits:limits,offers:offers,promo:promo,rollout:rollout,testers:$("s-testers").value,trial_days:parseInt($("s-trial").value||"0",10),
     features:Array.prototype.filter.call(document.querySelectorAll("[data-feat]"),function(i){return i.checked;}).map(function(i){return i.getAttribute("data-feat");})};

@@ -32,7 +32,7 @@ from cuisines import SNACK_RULE
 from search import search_recipes, format_results_for_prompt
 import book
 from ai import generate_recipe, call_llm_with_fallback
-from prompts import DAY_MENU_SYSTEM_PROMPT, DAY_MENU_BLOCK_DELIMITER, build_day_menu_user_prompt
+from prompts import DAY_MENU_SYSTEM_PROMPT, DAY_MENU_BLOCK_DELIMITER, DAY_MENU_BLOCK_SPLIT_RE, build_day_menu_user_prompt
 from shopping import (
     extract_shopping_terms, extract_dish_title, format_shopping_message, terms_from_recipe_text,
     amounts_from_recipe_text, merge_amounts,
@@ -183,7 +183,10 @@ async def prepare_meals_info(selected_meals: list[str], base_data: dict) -> list
     ]
 
 
-_MARKER_RE = re.compile(r"^\s*[*_#]*\s*ПРИЁМ[_ ]ПИЩИ\s*:\s*(.+?)\s*[*_]*\s*$", re.IGNORECASE | re.MULTILINE)
+# ПРИ[ЕЁ]М — не только "ПРИЁМ", но и "ПРИЕМ" (без буквы ё, частый вариант у модели): раньше при таком
+# написании маркер не находился вообще — служебная строка оставалась видна пользователю, порядок блюд
+# не переставлялся (2026-11-12).
+_MARKER_RE = re.compile(r"^\s*[*_#]*\s*ПРИ[ЕЁ]М[_ ]ПИЩИ\s*:\s*(.+?)\s*[*_]*\s*$", re.IGNORECASE | re.MULTILINE)
 
 
 def _norm_label(text: str) -> str:
@@ -252,7 +255,7 @@ async def _generate_combined(selected_meals: list[str], base_data: dict) -> list
 
     raw = await call_llm_with_fallback(messages, max_tokens=max_tokens)
 
-    blocks = [b.strip() for b in raw.split(DAY_MENU_BLOCK_DELIMITER)]
+    blocks = [b.strip() for b in DAY_MENU_BLOCK_SPLIT_RE.split(raw)]
     if len(blocks) != len(selected_meals):
         raise ValueError(
             f"ожидалось {len(selected_meals)} блоков, получено {len(blocks)} — "

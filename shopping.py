@@ -11,10 +11,13 @@ from stores.units import is_pieces
 # запятая-разделитель, но не десятичная («молоко 1,5%»)
 _COMMA_RE = re.compile(r",(?![0-9])")
 
-SEARCH_TERMS_RE = re.compile(r"ПРОДУКТЫ_СПИСОК:\s*(.+)", re.IGNORECASE)
+# [*_]* до и после ключевого слова — ИИ иногда оформляет служебную строку жирным ("**БАЗОВЫЕ_ПРОДУКТЫ:**
+# курица=500"), без этого вся строка не находилась вообще: остатки плана питания не списывались, а
+# "ПРОДУКТЫ_СПИСОК" с жирным не давал ссылок на магазины (баг от 2026-11-12).
+SEARCH_TERMS_RE = re.compile(r"[*_]*ПРОДУКТЫ_СПИСОК[*_]*:\s*[*_]*(.+)", re.IGNORECASE)
 DISH_TITLE_RE = re.compile(r"^\s*🍽\s*(.+)$", re.MULTILINE)
-BASE_PRODUCTS_RE = re.compile(r"БАЗОВЫЕ_ПРОДУКТЫ:\s*(.+)", re.IGNORECASE)
-USED_BASE_RE = re.compile(r"ИСПОЛЬЗОВАНО_БАЗОВЫЕ:\s*(.+)", re.IGNORECASE)
+BASE_PRODUCTS_RE = re.compile(r"[*_]*БАЗОВЫЕ_ПРОДУКТЫ[*_]*:\s*[*_]*(.+)", re.IGNORECASE)
+USED_BASE_RE = re.compile(r"[*_]*ИСПОЛЬЗОВАНО_БАЗОВЫЕ[*_]*:\s*[*_]*(.+)", re.IGNORECASE)
 
 
 def extract_dish_title(recipe_text: str) -> str:
@@ -61,7 +64,11 @@ def extract_shopping_terms(recipe_text: str) -> tuple[str, list[str]]:
     clean, terms = _extract_shopping_terms(recipe_text)
     clean, added = add_forgotten_ingredients(clean)
     for t in added:
-        if t.lower() not in {x.lower() for x in terms} and not any(t.split()[0].lower() in x.lower() for x in terms):
+        tl = t.lower()
+        # Раньше сравнивалось только ПЕРВОЕ слово ("масло" у "масло растительное" совпадало с "масло
+        # сливочное" и считалось тем же продуктом — второй не попадал в список). Теперь это
+        # полноценное вхождение подстроки в любую сторону, а не только по первому слову (2026-11-12).
+        if not any(tl == x.lower() or tl in x.lower() or x.lower() in tl for x in terms):
             terms.append(t)
     return clean, terms
 
@@ -87,18 +94,30 @@ def _extract_shopping_terms(recipe_text: str) -> tuple[str, list[str]]:
     return clean_text, terms
 
 
+_AMOUNT_RE = re.compile(r"(\d+(?:[.,]\d+)?)\s*(кг|г|л|мл|шт)?", re.IGNORECASE)
+
+
 def _parse_kv_amounts(raw: str) -> dict[str, int]:
-    """Разбирает 'продукт1=число, продукт2=число, ...' в {продукт: целое_число}."""
+    """Разбирает 'продукт1=число, продукт2=число, ...' в {продукт: целое_число в граммах/мл/штуках}.
+
+    Раньше (до 2026-11-12) из значения выбрасывались ВСЕ не-цифры, включая разделитель десятичных —
+    «1,5 кг» превращалось в 15 (а должно быть 1500 г): модель иногда пишет дробное число с единицей,
+    хотя её просят отдавать целые граммы/мл/штуки. Теперь десятичная часть и кг/л учитываются."""
     result: dict[str, int] = {}
     for part in _COMMA_RE.split(raw):
         part = part.strip()
         if not part or "=" not in part:
             continue
         name, _, value = part.partition("=")
-        name = name.strip(" .").lower()
-        digits = re.sub(r"[^\d]", "", value)
-        if name and digits:
-            result[name] = int(digits)
+        name = re.sub(r"[*_]", "", name).strip(" .").lower()   # markdown-обёртка маркера (2026-11-12)
+        m = _AMOUNT_RE.search(value)
+        if not (name and m):
+            continue
+        num = float(m.group(1).replace(",", "."))
+        if (m.group(2) or "").lower() in ("кг", "л"):
+            num *= 1000
+        if num > 0:
+            result[name] = round(num)
     return result
 
 
