@@ -250,7 +250,7 @@ def job(job_id: str, x_device: str | None = Header(default=None)):
     dev_id = _dev(x_device)
     j = JOBS.get(job_id)
     if not j or j["dev"] != dev_id:
-        raise HTTPException(404, "Задача не найдена")
+        raise HTTPException(404, "Запрос потерялся: сайт обновлялся. Попробуйте ещё раз.")
     return {k: v for k, v in j.items() if k in ("status", "result", "error")}
 
 
@@ -303,7 +303,12 @@ def new_device(request: Request):
     hist.append(time.time())
     _new_dev_log[ip] = hist
     _prune(_new_dev_log, 3600)
-    return {"device": web_db.create_device()}
+    token = web_db.create_device()
+    try:
+        prof = me(x_device=token)      # профиль нового гостя сразу: сайту не нужен ещё один запрос на медленной связи
+    except Exception:  # noqa: BLE001
+        prof = None
+    return {"device": token, "me": prof}
 
 
 _stat_log: dict[str, deque] = {}
@@ -344,7 +349,16 @@ def meta():
         "limits": {"recipe": config.WEB_LIMIT_RECIPE, "daymenu": config.WEB_LIMIT_DAYMENU, "week": config.WEB_LIMIT_WEEK},
         "paywall": plans.paywall(),
         "bot": config.BOT_USERNAME,
+        "ad_slots": _ad_slots(),     # где есть баннеры: без них сайт не делает лишний запрос на каждом экране
     }
+
+
+def _ad_slots() -> list[str]:
+    try:
+        with web_db.db() as c:
+            return [r[0] for r in c.execute("SELECT DISTINCT slot FROM ads WHERE active=1").fetchall()]
+    except Exception:  # noqa: BLE001
+        return []
 
 
 # ---------------- генерация ----------------

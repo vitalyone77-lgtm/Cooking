@@ -144,5 +144,15 @@ check("человеческий текст ошибки: свой", web_api._hum
 check("техническая ошибка ИИ не показывается", "deepseek" not in web_api._human_error(RuntimeError("deepseek: Client error '401 Unauthorized' for url 'https://api'")))
 check("ошибка сети не показывается", "ReadTimeout" not in web_api._human_error(TimeoutError("ReadTimeout")))
 
+# первый заход на сайт: профиль приходит вместе с устройством, справочник грузится параллельно
+j = cl.post("/api/device").json()
+me = cl.get("/api/me", headers={"X-Device": j["device"]}).json()
+check("новое устройство сразу с профилем (тот же, что /api/me)", isinstance(j.get("me"), dict) and set(j["me"]) == set(me), str(set(me) ^ set(j.get("me") or {}))[:200])
+idx = open("web/index.html", encoding="utf-8").read()
+check("сайт: устройство и справочник запрашиваются одновременно, без лишнего /api/me", "Promise.all([ensureDevice(),pMeta])" in idx and "ME_FRESH&&ME" in idx)
+
+m = cl.get("/api/meta").json()
+check("справочник говорит, где есть реклама; без баннеров сайт её не запрашивает", m.get("ad_slots") == [] and "META.ad_slots.indexOf(slot)<0" in idx, str(m.get("ad_slots")))
+
 print("ИТОГО: упало", len(fails))
 sys.exit(1 if fails else 0)

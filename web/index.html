@@ -206,10 +206,11 @@ select{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--lin
   }
 
   // ---- устройство (без регистрации): код хранится в браузере ----
+  var ME_FRESH=false;   // профиль пришёл вместе с новым устройством — отдельный запрос /api/me не нужен
   function ensureDevice(force){
     dev=force?"":(ls("dev")||"");
     if(dev) return Promise.resolve();
-    return fetch("/api/device",{method:"POST"}).then(function(r){if(!r.ok)throw new Error("Не удалось подключиться");return r.json();}).then(function(j){dev=j.device;ls("dev",dev);});
+    return fetch("/api/device",{method:"POST"}).then(function(r){if(!r.ok)throw new Error("Не удалось подключиться");return r.json();}).then(function(j){dev=j.device;ls("dev",dev);if(j.me){ME=j.me;ME_FRESH=true;try{ls("mecache",JSON.stringify(j.me));}catch(e){}}});
   }
   // Без интернета: последние загруженные меню на день, план и избранное хранятся в браузере и открываются как есть.
   var OFFLINE=false, OC=/^\/api\/(overview|day|week|favorites)$/;
@@ -233,19 +234,42 @@ select{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--lin
       return r.json();
     });
   }
-  function runJob(start,label){
-    main.innerHTML='<div class="card progress"><div class="spin"></div><div>'+esc(label)+'</div><div class="sub">Обычно 20–60 секунд. Не закрывайте страницу.</div></div>';
+  // Запущенная генерация запоминается в браузере: перезагрузили страницу или вернулись в свёрнутый браузер — результат
+  // не теряется (попытка уже списана). Сорвавшийся на мобильной связи опрос просто повторяется, а не показывает ошибку.
+  var JOB_MAX=360000;
+  function pendSet(id,mode){try{ls("pendjob",JSON.stringify({job:id,mode:mode,ts:Date.now()}));}catch(e){}}
+  function pendClear(){try{ls("pendjob","");}catch(e){}}
+  function runJob(start,label,mode){
+    main.innerHTML='<div class="card progress"><div class="spin"></div><div>'+esc(label)+'</div><div class="sub">Обычно 20–60 секунд. Если связь пропадёт или страница закроется — результат не потеряется, откройте сайт снова.</div></div>';
     return start.then(function(j){
       if(j.notice)toast(j.notice);
-      function poll(n){return sleep(2000).then(function(){return call("GET","/api/job/"+j.job);}).then(function(s){
-        if(s.status==="done")return s.result; if(s.status==="error")throw new Error(s.error||"Не получилось"); if(n>150)throw new Error("Слишком долго, попробуйте ещё раз"); return poll(n+1);});}
-      return poll(0);
+      if(mode)pendSet(j.job,mode);
+      var t0=Date.now();
+      function poll(){return sleep(2000).then(function(){return call("GET","/api/job/"+j.job).catch(function(e){
+          if((e instanceof TypeError||e.status>=500)&&Date.now()-t0<JOB_MAX)return {status:"wait"};    // связь моргнула или сервер перезапускается — спросим ещё раз
+          pendClear();throw e;});}).then(function(s){
+        if(s.status==="done"){pendClear();return s.result;}
+        if(s.status==="error"){pendClear();throw new Error(s.error||"Не получилось");}
+        if(Date.now()-t0>JOB_MAX){pendClear();throw new Error("Слишком долго, попробуйте ещё раз");}
+        return poll();});}
+      return poll();
     });
+  }
+  function finishJob(mode,res){
+    loadMe();      // обновить счётчик «осталось сегодня»
+    if(mode==="recipe")showRecipe(res); else if(mode==="cook")show("menus"); else {ls("sub",mode);show("menus");}
+  }
+  function resumePending(){
+    var p=null;try{p=JSON.parse(ls("pendjob")||"null");}catch(e){}
+    if(!p||!p.job)return;
+    if(Date.now()-p.ts>JOB_MAX){pendClear();return;}
+    runJob(Promise.resolve({job:p.job}),"Досчитываю то, что вы запускали…",p.mode).then(function(res){finishJob(p.mode,res);}).catch(function(e){fail(e,"new");});
   }
 
   // ---- реклама (баннеры задаются в /admin) ----
   function adSlot(slot){
     var id="ad-"+slot+"-"+Math.random().toString(36).slice(2,7);
+    if(META&&META.ad_slots&&META.ad_slots.indexOf(slot)<0)return '<div id="'+id+'"></div>';   // баннеров нет — не спрашиваем
     setTimeout(function(){
       fetch("/api/ad?slot="+slot,{headers:{"X-Device":dev}}).then(function(r){return r.json();}).then(function(j){
         var el=document.getElementById(id); if(!el||!j.ad) return;
@@ -512,12 +536,8 @@ select{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--lin
     if(F.mode!=="recipe"&&!body.meals.length){alert("Выберите хотя бы один приём пищи");return;}
     var path={recipe:"/api/recipe",day:"/api/daymenu",week:"/api/week"}[F.mode];
     var label={recipe:"Ищу рецепты и подбираю лучший…",day:"Собираю меню на день…",week:"Считаю корзину и план…"}[F.mode];
-    runJob(call("POST",path,body),label).then(function(res){
-      loadMe();      // обновить счётчик «осталось сегодня»
-      if(F.mode==="recipe"){
-        showRecipe(res);
-      } else { ls("sub",F.mode); show("menus"); }
-    }).catch(function(e){fail(e,"new");});
+    var mode=F.mode;
+    runJob(call("POST",path,body),label,mode).then(function(res){finishJob(mode,res);}).catch(function(e){fail(e,"new");});
   }
   var LAST_RECIPE="";
   function showRecipe(res){
@@ -1235,19 +1255,21 @@ select{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--lin
     if(b=t.closest("[data-shelf-photo]")){var spi=document.getElementById("shelf-photo-in");if(spi)spi.click();return;}
     if(b=t.closest("[data-combo-go]")){comboGo(b);return;}
     if(b=t.closest("[data-del]")){if(confirm("Удалить из избранного?"))call("DELETE","/api/favorites/"+b.getAttribute("data-del")).then(function(){cacheFavs();show("favs");}).catch(fail);return;}
-    if(b=t.closest("[data-cook]")){runJob(call("POST","/api/week/cook"),"Готовлю меню на день…").then(function(){show("menus");}).catch(function(e){fail(e,"menus");});return;}
+    if(b=t.closest("[data-cook]")){runJob(call("POST","/api/week/cook"),"Готовлю меню на день…","cook").then(function(){pendClear();show("menus");}).catch(function(e){fail(e,"menus");});return;}
   });
 
   // повторный заход: сразу рисуем из сохранённого, свежие данные подтягиваем в фоне (на медленной связи это десятки секунд)
   var cMeta=null,cMe=null;try{cMeta=JSON.parse(ls("metacache")||"null");cMe=JSON.parse(ls("mecache")||"null");}catch(e){}
   if(cMeta&&ls("dev")&&!/[?&](login|ref|test|vk|pay|rc)=/.test(location.search)){
-    dev=ls("dev");META=cMeta;if(cMe)ME=cMe;show("new");
+    dev=ls("dev");META=cMeta;if(cMe)ME=cMe;show("new");resumePending();
     fetch("/api/meta").then(function(r){return r.ok?r.json():null;}).then(function(m){if(m){META=m;ls("metacache",JSON.stringify(m));}}).catch(function(){});
     loadMe();call("POST","/api/visit").catch(function(){});
     return;
   }
   // без интернета берём справочник из кэша — тогда хотя бы «Избранное» откроется
-  ensureDevice().then(function(){return fetch("/api/meta").then(function(r){if(!r.ok)throw new Error("meta "+r.status);return r.json();});})
+  // первый заход: устройство и справочник — одновременно (на мобильной связи каждый запрос по нескольку секунд)
+  var pMeta=fetch("/api/meta").then(function(r){if(!r.ok)throw new Error("meta "+r.status);return r.json();});
+  Promise.all([ensureDevice(),pMeta]).then(function(a){return a[1];})
     .then(function(m){ls("metacache",JSON.stringify(m));return m;})
     .catch(function(e){var c=ls("metacache");if(c){try{return JSON.parse(c);}catch(x){}}throw e;})
     .then(function(m){
@@ -1268,6 +1290,7 @@ select{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--lin
           .then(loadMe).then(function(){show("favs");});}
       var vkq=null;try{vkq=new URLSearchParams(location.search).get("vk");}catch(e){}
       if(vkq){try{history.replaceState(null,"",location.pathname);}catch(e){}return loadMe().then(function(){toast("✅ Вход выполнен через ВКонтакте");show("profile");});}
+      if(ME_FRESH&&ME){show("new");return;}
       return loadMe().then(function(){show("new");});
     }).catch(function(e){main.innerHTML='<div class="card err">'+esc(errText(e))+'</div>';});
 })();

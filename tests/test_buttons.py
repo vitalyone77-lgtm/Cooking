@@ -133,7 +133,7 @@ async def main():
     st = botmod.dp.fsm.get_context(b, C, C)
     await st.clear()
 
-    seen, unhandled, crashed, pressed, stale_form = set(), [], [], 0, []
+    seen, unhandled, crashed, pressed, stale_form, silent = set(), [], [], 0, [], []
     queue = [(mid, r["callback_data"]) for mid, m in list(msgs.items()) for row in ((m.get("markup") or {}).get("inline_keyboard") or []) for r in row if r.get("callback_data")]
     while queue and pressed < 600:
         mid, data = queue.pop(0)
@@ -145,6 +145,8 @@ async def main():
         try:
             res = await press(mid, data)
             pressed += 1
+            if not any(n == "AnswerCallbackQuery" and d.get("callback_query_id") == str(seq[0]) for n, d in s.calls[start:]):
+                silent.append(data)       # Telegram не получил ответ — на кнопке крутятся «часики»
             stale = any(n == "AnswerCallbackQuery" and d.get("text") == botmod.STALE_TEXT for n, d in s.calls[start:])
             if res is UNHANDLED:
                 unhandled.append(data)
@@ -169,6 +171,7 @@ async def main():
     check("обход дошёл до большинства экранов", pressed > 60, str(pressed))
     check("нет кнопок без обработчика", not unhandled, "; ".join(unhandled[:20]))
     check("ни одна кнопка не падает", not crashed, " | ".join(crashed[:10]))
+    check("на каждое нажатие Telegram получает ответ (нет «вечных часиков»)", not silent, "; ".join(silent[:30]))
     for must in ("dy:open", "pf:set", "pf:sub", "pf:fr", "ps:o", "sl:o:r", "bk:h", "favorites:open", "cb:o", "pf:shelf", "pf:shph", "lb:x"):
         check(f"кнопка «{must}» нажималась", any(k == must or k.startswith(must) for k in seen), must)
     periods = [k for k in seen if k.startswith("pf:pd") or k.startswith("dy:ch") or "pf:per" in k]
