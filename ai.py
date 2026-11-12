@@ -17,6 +17,15 @@ from prompts import SYSTEM_PROMPT, build_user_prompt
 
 logger = logging.getLogger(__name__)
 
+
+class _Truncated(RuntimeError):
+    """Провайдер ответил, но обрезал текст лимитом токенов. Несёт сам текст, чтобы _call_any
+    мог вернуть его как крайний случай, если ВСЕ провайдеры обрежут (лучше неполный ответ,
+    чем полный отказ пользователю)."""
+    def __init__(self, provider: str, content: str):
+        super().__init__(f"Провайдер {provider} вернул обрезанный ответ")
+        self.content = content
+
 # Порядок провайдеров для автоматического фолбэка. LLM_PROVIDER из .env всегда идёт первым,
 # остальные — как резерв (используются только те, у кого задан API-ключ).
 LLM_FALLBACK_ORDER = ["deepseek", "groq", "openrouter"]
@@ -94,6 +103,13 @@ async def _call_provider(provider: str, messages: list[dict], max_tokens: int) -
                 f"finish_reason={choice.get('finish_reason')!r}, сырой ответ: {data}"
             )
             raise RuntimeError(f"Провайдер {provider} вернул пустой ответ")
+        if choice.get("finish_reason") == "length":
+            # Ответ обрезан лимитом токенов — для меню/списка покупок маркеры (БАЗОВЫЕ_ПРОДУКТЫ,
+            # ИСПОЛЬЗОВАНО_БАЗОВЫЕ и т.п.) обычно идут в конце текста и могут быть потеряны целиком.
+            # Раньше это тихо считалось успехом. Пробуем следующего провайдера — если и там обрежет,
+            # вызывающий код хотя бы получит (неполный) текст от последнего провайдера, а не тишину.
+            logger.warning(f"Провайдер {provider} ({cfg['model']}) обрезал ответ (finish_reason=length)")
+            raise _Truncated(provider, content)
         return content
 
 
@@ -139,6 +155,17 @@ async def _call_any(messages: list[dict], max_tokens: int) -> str:
     for provider in providers:
         try:
             return await _call_provider(provider, messages, max_tokens)
+        except _Truncated as e:
+            # Обрезал лимит длины: у резервных моделей лимит тот же и русский текст в них «длиннее», поэтому
+            # не идём к ним, а один раз повторяем у того же провайдера с запасом в полтора раза. Не помогло —
+            # отдаём его же (неполный) ответ: это лучше, чем отказ или ещё минута ожидания.
+            logger.warning(f"Провайдер {provider}: {e}, повторяю с большим лимитом")
+            try:
+                return await _call_provider(provider, messages, int(max_tokens * 1.5))
+            except _Truncated as e2:
+                return e2.content
+            except Exception:
+                return e.content
         except Exception as e:
             logger.warning(f"Провайдер {provider} не сработал: {e}")
             errors.append(f"{provider}: {e}")

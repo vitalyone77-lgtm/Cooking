@@ -93,11 +93,26 @@ async def rebuild_day(chat_id: int, missing: list[str]) -> str:
             and _mentions(entry["meals"][k].get("text", ""), missing)]
     if not keys:
         keys = [k for k in entry["order"] if entry["meals"].get(k, {}).get("ok")]
-    results = await asyncio.gather(*[adapt_recipe(entry["meals"][k]["text"], missing, entry["base_data"].get("excluded", "")) for k in keys])
-    for k, (text, terms) in zip(keys, results):
+    results = await asyncio.gather(
+        *[adapt_recipe(entry["meals"][k]["text"], missing, entry["base_data"].get("excluded", "")) for k in keys],
+        return_exceptions=True,
+    )
+    # return_exceptions=True: если ИИ не смог переделать ОДНО блюдо, остальные всё равно
+    # получают замену — раньше одна ошибка валила asyncio.gather целиком и пользователь не
+    # получал вообще ничего, хотя большинство блюд обычно переделываются успешно.
+    ok_terms = []
+    for k, res in zip(keys, results):
+        if isinstance(res, BaseException):
+            logger.warning("Не удалось переделать блюдо %r без %r: %s", k, missing, res)
+            continue
+        text, terms = res
         entry["meals"][k] = {"title": day_menu.extract_dish_title(text) or entry["meals"][k]["title"], "text": text, "ok": True}
+        ok_terms.append(terms)
+    if keys and not ok_terms:
+        # ни одно блюдо не переделалось — пусть вызывающий код скажет об ошибке, а не «заменил»
+        raise next(r for r in results if isinstance(r, BaseException))
     old = [t for t in (entry.get("shopping_terms") or []) if not _mentions(t, missing)]
-    entry["shopping_terms"] = day_menu._merge_shopping_terms([old] + [t for _, t in results])
+    entry["shopping_terms"] = day_menu._merge_shopping_terms([old] + ok_terms)
     day_menu._save_menu(chat_id, entry)
     return "adapt"
 

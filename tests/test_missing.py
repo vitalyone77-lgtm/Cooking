@@ -8,6 +8,12 @@ from datetime import datetime
 PROJ = "/tmp/ct"
 os.chdir(PROJ)
 sys.path.insert(0, PROJ)
+# своя база: иначе лимит замен копится между прогонами за день и тест падает «лимит исчерпан»
+for f in ("usage_ms.db", "accounts_ms.db", "accounts_ms.db-wal", "accounts_ms.db-shm"):
+    if os.path.exists(f):
+        os.remove(f)
+os.environ["USAGE_DB"] = PROJ + "/usage_ms.db"
+os.environ["ACCOUNTS_DB"] = PROJ + "/accounts_ms.db"
 
 from aiogram.client.bot import Bot
 from aiogram.client.session.base import BaseSession

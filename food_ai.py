@@ -88,7 +88,6 @@ async def estimate(uid, query: str) -> tuple[dict | None, str]:
     used = (accounts.sess_get(_used_key(uid)) or {}).get("n", 0)
     if used >= limit:
         return None, f"На сегодня вопросы к ИИ закончились ({limit} в день). Запишите блюдо сразу с калориями: «домашняя пицца 450»."
-    accounts.sess_set(_used_key(uid), {"n": used + 1})
     try:
         raw = await ai.call_llm_with_fallback([{"role": "system", "content": SYSTEM}, {"role": "user", "content": query}], max_tokens=200)
     except RuntimeError:
@@ -97,6 +96,9 @@ async def estimate(uid, query: str) -> tuple[dict | None, str]:
     d = parse(raw, query)
     if not d:
         return None, "ИИ не смог оценить такое блюдо. Попробуйте написать проще или запишите сразу с калориями: «домашняя пицца 450»."
+    # Лимит тратим только на УСПЕШНУЙ ответ — раньше счётчик увеличивался до вызова ИИ и не
+    # возвращался при сбое/непонятном ответе, человек терял попытку за ничего.
+    accounts.sess_set(_used_key(uid), {"n": used + 1})
     accounts._q("INSERT OR IGNORE INTO ai_foods(key, name, grams, kcal100, p100, f100, c100, label, ts) VALUES(?,?,?,?,?,?,?,?,?)",
                 (key, d["name"], d["grams"], d["kcal100"], d["p100"], d["f100"], d["c100"], d["label"], time.time()))
     return cached(query), ""

@@ -131,12 +131,34 @@ async def start_week_plan(chat_id: int, meal_keys: list[str], days_total: int, b
     return display_text, shopping_message
 
 
+def _key_stem(w: str) -> str:
+    w = w.lower().replace("ё", "е")
+    if len(w) >= 4 and w[-1] in "аеиоуыэюяйь":
+        w = w[:-1]
+    return w
+
+
+def _word_match(a: str, b: str) -> bool:
+    """Совпадение по ОБЩЕМУ НАЧАЛУ слова (после стемминга), а не по вхождению где угодно: «лук»/«луковица» —
+    да, «мин»/«витамин» — нет (несовпадающее начало)."""
+    sa, sb = _key_stem(a), _key_stem(b)
+    short, long_ = (sa, sb) if len(sa) <= len(sb) else (sb, sa)
+    return len(short) >= 3 and long_.startswith(short)
+
+
 def _match_inventory_key(inventory: dict, name: str) -> str | None:
-    name_l = name.strip().lower()
+    """Ищет продукт из остатков плана по названию из ИСПОЛЬЗОВАНО_БАЗОВЫЕ. Сравнение — по ЦЕЛЫМ словам
+    (с запасом на окончания), а не по вхождению подстроки ГДЕ УГОДНО в объединённой строке: до 2026-11-12
+    короткий ключ типа «мин» мог случайно совпасть с любым словом, где эти буквы идут подряд. Известное
+    ограничение: однокоренные, но РАЗНЫЕ продукты («рис» и «рисовая мука») всё ещё могут путаться — это
+    осталось как было, точное решение нужно на стороне модели (разные базовые названия для них)."""
+    name_l = name.strip().lower().replace("ё", "е")
     if name_l in inventory:
         return name_l
+    name_words = name_l.split()
     for key in inventory:
-        if key in name_l or name_l in key:
+        key_words = [w for w in key.replace("ё", "е").split() if len(w) >= 3] or [key]
+        if all(any(_word_match(kw, nw) for nw in name_words) for kw in key_words):
             return key
     return None
 
