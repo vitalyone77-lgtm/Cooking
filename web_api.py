@@ -13,6 +13,7 @@ import base64
 import contextvars
 import functools
 import httpx
+import logging
 from collections import deque
 from html import escape
 import hashlib
@@ -210,6 +211,17 @@ def _refund(dev_id: int, spend: dict):
     usage.unlog(spend["id"])
 
 
+def _human_error(e: Exception) -> str:
+    """Свои понятные ошибки показываем как есть, технические (сеть, ответ провайдера ИИ) — общей фразой."""
+    msg = str(e).strip()
+    tech = (not isinstance(e, (RuntimeError, ValueError)) or not msg or re.search(r"https?:|провайдер|[a-z]{4,}error|\d{3} ", msg, re.I)
+            or not re.match(r"[А-ЯЁа-яё«]", msg))
+    if tech:
+        logging.getLogger(__name__).warning("Задача сайта: %r", e)
+        return "Не получилось: ИИ сейчас не ответил. Попробуйте ещё раз через минуту — попытка не списана."
+    return msg[:300]
+
+
 def _start_job(dev_id: int, coro_fn, spend: dict | None = None) -> dict:
     # чистим старые задачи
     for k in [k for k, v in JOBS.items() if time.time() - v["ts"] > 3600]:
@@ -225,7 +237,7 @@ def _start_job(dev_id: int, coro_fn, spend: dict | None = None) -> dict:
             JOBS[job_id]["status"] = "done"
         except Exception as e:  # noqa: BLE001
             JOBS[job_id]["status"] = "error"
-            JOBS[job_id]["error"] = str(e)[:300]
+            JOBS[job_id]["error"] = _human_error(e)
             if spend:
                 _refund(dev_id, spend)
 
@@ -484,6 +496,8 @@ async def api_week_cook(x_device: str | None = Header(default=None)):
 
     async def work():
         slot = await week_menu.ensure_slot(cid, index)
+        if not slot.get("just_generated"):
+            _refund(dev_id, sp)     # день уже был готов (собран в боте или вторым нажатием) — попытку не берём
         if slot.get("just_generated"):
             day = slot["day_number"]
             web_db.kv_set(f"weekshop:{cid}:{day}",

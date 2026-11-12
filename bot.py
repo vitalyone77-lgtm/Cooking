@@ -1679,17 +1679,34 @@ async def weekmenu_cook_next(callback: CallbackQuery):
 @dp.callback_query(F.data.startswith("weekmenu:slot:"))
 async def weekmenu_slot(callback: CallbackQuery):
     index = int(callback.data.split(":", 2)[2])
+    slow = week_menu.needs_generation(callback.message.chat.id, index)
+    if slow:
+        # день ещё не готов — сразу отвечаем на нажатие и показываем, что идёт работа (иначе минута тишины)
+        await callback.answer()
+        await callback.message.edit_text("🔎 Готовлю блюда на этот день — это займёт около минуты…")
     try:
         slot = await week_menu.ensure_slot(callback.message.chat.id, index)
-    except Exception as e:
-        await callback.answer(f"Не получилось открыть: {e}", show_alert=True)
+    except (RuntimeError, ValueError) as e:
+        if slow:
+            await callback.message.edit_text(f"😔 Не получилось открыть: {e}")
+        else:
+            await callback.answer(f"Не получилось открыть: {e}", show_alert=True)
+        return
+    except Exception:  # noqa: BLE001 — сбой сети/ИИ: техническую ошибку человеку не показываем
+        logger.exception("Ошибка при открытии дня плана")
+        msg = "😔 Не получилось приготовить день. Попробуйте ещё раз."
+        if slow:
+            await callback.message.edit_text(msg)
+        else:
+            await callback.answer(msg, show_alert=True)
         return
     if slot.get("just_generated"):
         usage.log("bot", callback.message.chat.id, "weekday")
     text, markup = week_menu.build_slot_view(callback.message.chat.id, slot)
     await callback.message.edit_text(text, reply_markup=markup)
     await _maybe_send_day_shopping(callback, slot)
-    await callback.answer()
+    if not slow:
+        await callback.answer()
 
 
 @dp.callback_query(F.data.startswith("weekmenu:done:"))
@@ -1698,6 +1715,8 @@ async def weekmenu_done(callback: CallbackQuery):
     index = int(callback.data.split(":", 2)[2])
     week_menu.mark_done(chat_id, index)
     await callback.answer()
+    if week_menu.needs_generation(chat_id, index + 1):
+        await callback.message.edit_text("✅ Отметил. 🔎 Готовлю блюда на следующий день — это займёт около минуты…")
 
     try:
         slot = await week_menu.ensure_slot(chat_id, index + 1)

@@ -107,5 +107,113 @@ except RuntimeError:
     ok = True
 check("ни одно не переделалось — ошибка, а не «заменил»", ok and not saved)
 
+# ---- план на несколько дней: генерация дня не затирает изменения и не идёт дважды ----
+import accounts
+
+W = 990001
+gen_calls = []
+prompts_seen = []
+
+
+async def no_search(meal_keys, base):
+    return [{"meal_key": k, "label": k, "search": ""} for k in meal_keys]
+
+
+week_menu.day_menu.prepare_meals_info = no_search
+week_menu.build_day_menu_user_prompt = lambda info, base: "меню"
+
+
+async def fake_llm(messages, max_tokens=0):
+    gen_calls.append(1)
+    prompts_seen.append(messages[-1]["content"])
+    if fake_llm.during:
+        fake_llm.during()
+    await asyncio.sleep(0.3)
+    return ("🍽 Омлет\n\n*Продукты:*\n- Яйца — 2 шт\n\n*Инструкция:*\n1. Жарьте.\n" + week_menu.DAY_MENU_BLOCK_DELIMITER
+            + "\nИСПОЛЬЗОВАНО_БАЗОВЫЕ: яйца=4")
+
+
+fake_llm.during = None
+week_menu.call_llm_with_fallback = fake_llm
+
+
+def new_plan():
+    week_menu._save(W, {"base_data": {}, "meal_keys": ["breakfast"], "days_total": 3, "inventory": {"яйца": 10, "молоко": 500},
+                        "inventory_initial": {"яйца": 10, "молоко": 500}, "basket_text": "корзина", "history_titles": [],
+                        "days": {}, "current_day": 1, "progress_index": 0})
+
+
+new_plan()
+week_menu._save(W, {**week_menu._load(W), "days": {"1": {"order": ["breakfast"], "meals": {"breakfast": {"title": "Каша", "text": "Каша"}}}},
+                    "current_day": 2, "progress_index": 0})
+
+
+def during():
+    week_menu.mark_done(W, 0)                       # человек отметил «приготовлено» на другом устройстве
+    st = week_menu._load(W)
+    st["inventory"].pop("молоко")                    # и сказал «нет молока»
+    week_menu._save(W, st)
+
+
+fake_llm.during = during
+asyncio.run(week_menu.ensure_slot(W, 1))
+st = week_menu._load(W)
+check("пока готовился день: отметка «приготовлено» не потерялась", st["progress_index"] == 1, str(st["progress_index"]))
+check("пока готовился день: убранный продукт не вернулся", "молоко" not in st["inventory"], str(st["inventory"]))
+check("расход дня вычтен из свежих остатков", st["inventory"]["яйца"] == 6 and "2" in st["days"] and st["current_day"] == 3, str(st))
+
+fake_llm.during = None
+gen_calls.clear()
+
+
+async def twice():
+    return await asyncio.gather(week_menu.ensure_slot(W, 2), week_menu.ensure_slot(W, 2))
+
+
+r = asyncio.run(twice())
+check("день открыли дважды одновременно — ИИ спрошен один раз", len(gen_calls) == 1 and r[0]["meal"] == r[1]["meal"], str(len(gen_calls)))
+
+new_plan()
+fake_llm.during = lambda: week_menu._save(W, {**week_menu._load(W), "basket_text": "другая корзина"})
+try:
+    asyncio.run(week_menu.ensure_slot(W, 0))
+    ok = False
+except RuntimeError:
+    ok = True
+check("план пересобрали во время генерации — старый день в новый план не записан", ok and not week_menu._load(W)["days"])
+
+fake_llm.during = None
+week_menu._save(W, {"base_data": {}, "meal_keys": ["breakfast"], "days_total": 3, "inventory": {"яйца": 0},
+                    "inventory_initial": {"яйца": 10}, "basket_text": "к", "history_titles": ["Омлет"],
+                    "days": {"1": {"order": ["breakfast"], "meals": {"breakfast": {"title": "Омлет", "text": "x"}}}},
+                    "current_day": 2, "progress_index": 1})
+prompts_seen.clear()
+asyncio.run(week_menu.ensure_slot(W, 1))
+check("корзина израсходована: ИИ не говорят «это первый день»", prompts_seen and "первый день" not in prompts_seen[-1]
+      and "израсходованы" in prompts_seen[-1])
+accounts.sess_set(f"wkgen:{W}", {"day": 0, "ts": 0})
+
+# ---- разбор служебных строк плана (12.11 сломался: два правила с одним именем, план не создавался) ----
+import shopping
+
+check("корзина плана: числа без единиц, жирный маркер, кг", shopping.extract_base_products("Корзина\n**БАЗОВЫЕ_ПРОДУКТЫ:** курица=500, рис=1,5 кг, яйца=10 шт")[1]
+      == {"курица": 500, "рис": 1500, "яйца": 10}, str(shopping.extract_base_products("БАЗОВЫЕ_ПРОДУКТЫ: курица=500")))
+check("расход дня: «яйца=4»", shopping.extract_used_base_products("ИСПОЛЬЗОВАНО_БАЗОВЫЕ: яйца=4, молоко=200") == {"яйца": 4, "молоко": 200})
+check("«соль» не считается уже указанной из-за «фасоль»", not shopping._same_item("соль", "фасоль") and shopping._same_item("масло", "масло сливочное"))
+
+
+async def basket_llm(messages, max_tokens=0):
+    return "🛒 Корзина на 3 дня\n- Курица 1,5 кг\n\nБАЗОВЫЕ_ПРОДУКТЫ: курица=1500, рис=600"
+
+
+week_menu.call_llm_with_fallback = basket_llm
+try:
+    asyncio.run(week_menu.start_week_plan(W + 1, ["lunch"], 3, {}))
+    st = week_menu._load(W + 1)
+    ok = st["inventory"] == {"курица": 1500, "рис": 600} and "БАЗОВЫЕ" not in st["basket_text"]
+except Exception as e:  # noqa: BLE001
+    ok, st = False, e
+check("план на несколько дней создаётся из ответа ИИ целиком", ok, str(st)[:200])
+
 print("ИТОГО: упало", len(fails))
 sys.exit(1 if fails else 0)

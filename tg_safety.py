@@ -69,7 +69,9 @@ from aiogram.types import CallbackQuery
 # Кнопки, за которыми долгая и платная работа (поиск, ИИ, ВкусВилл, PDF). Пока одна такая работа
 # в чате идёт, повторное нажатие (двойной тап, нетерпеливое «ещё раз») не запускает вторую копию.
 HEAVY_PREFIXES = ("confirm:go", "miss:go:", "shop:cart:", "weekmenu:cook_next", "weekmenu:slot:", "pdf:", "sl:rp",
-                  "pf:buy:")
+                  "pf:buy:", "weekmenu:done:", "dy:ask", "soc:next", "soc:img", "soc:go", "sf:go:")
+# «приготовлено» может собирать следующий день плана, «спросить ИИ» ждёт ответ ИИ: в общей очереди чата
+# они держали бы все остальные кнопки до минуты (tests/test_buttons.py проверяет, что такого больше нет)
 
 
 class OneHeavyAtATime(BaseMiddleware):

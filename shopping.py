@@ -60,6 +60,12 @@ def _terms_from_products_section(text: str) -> list[str]:
     return terms[:30]
 
 
+def _same_item(a: str, b: str) -> bool:
+    """«масло» и «масло сливочное» — один продукт, «соль» и «фасоль» — нет (целые слова, не часть слова)."""
+    w = r"(?<![а-яёa-z])%s(?![а-яёa-z])"
+    return a == b or bool(re.search(w % re.escape(a), b)) or bool(re.search(w % re.escape(b), a))
+
+
 def extract_shopping_terms(recipe_text: str) -> tuple[str, list[str]]:
     clean, terms = _extract_shopping_terms(recipe_text)
     clean, added = add_forgotten_ingredients(clean)
@@ -68,7 +74,7 @@ def extract_shopping_terms(recipe_text: str) -> tuple[str, list[str]]:
         # Раньше сравнивалось только ПЕРВОЕ слово ("масло" у "масло растительное" совпадало с "масло
         # сливочное" и считалось тем же продуктом — второй не попадал в список). Теперь это
         # полноценное вхождение подстроки в любую сторону, а не только по первому слову (2026-11-12).
-        if not any(tl == x.lower() or tl in x.lower() or x.lower() in tl for x in terms):
+        if not any(_same_item(tl, x.lower()) for x in terms):
             terms.append(t)
     return clean, terms
 
@@ -94,7 +100,7 @@ def _extract_shopping_terms(recipe_text: str) -> tuple[str, list[str]]:
     return clean_text, terms
 
 
-_AMOUNT_RE = re.compile(r"(\d+(?:[.,]\d+)?)\s*(кг|г|л|мл|шт)?", re.IGNORECASE)
+_KV_AMOUNT_RE = re.compile(r"(\d+(?:[.,]\d+)?)\s*(кг|г|л|мл|шт)?", re.IGNORECASE)
 
 
 def _parse_kv_amounts(raw: str) -> dict[str, int]:
@@ -110,7 +116,7 @@ def _parse_kv_amounts(raw: str) -> dict[str, int]:
             continue
         name, _, value = part.partition("=")
         name = re.sub(r"[*_]", "", name).strip(" .").lower()   # markdown-обёртка маркера (2026-11-12)
-        m = _AMOUNT_RE.search(value)
+        m = _KV_AMOUNT_RE.search(value)
         if not (name and m):
             continue
         num = float(m.group(1).replace(",", "."))

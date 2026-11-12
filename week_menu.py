@@ -20,9 +20,11 @@
 указателем на следующий неприготовленный — кнопка в постоянном нижнем меню открывает именно
 его, а не сводку.
 """
+import asyncio
 import json
 import logging
 import threading
+import time
 from pathlib import Path
 
 from jsonio import write_json_atomic
@@ -48,6 +50,8 @@ logger = logging.getLogger(__name__)
 
 WEEK_MENU_FILE = Path(__file__).parent / "week_menu.json"
 _lock = threading.Lock()
+_gen_locks: dict[str, asyncio.Lock] = {}
+GEN_LEASE = 180     # секунд: день генерируется в другом процессе (бот или сайт) — ждём его, а не делаем второй раз
 
 # Сколько истории блюд показывать модели, чтобы не повторялась (и не раздувать промпт)
 HISTORY_LIMIT = 6
@@ -175,10 +179,15 @@ async def _generate_day(chat_id: int, state: dict) -> dict:
     # модель сама правильно поделит остаток на оставшиеся дни — именно это в тесте привело
     # к тому, что курицу съедали за 2 дня из 3, ничего не оставляя на третий.
     days_remaining = state["days_total"] - day_number + 1
+    inventory_before = dict(state["inventory"])
     inventory_text = ", ".join(
         f"{name} — всего осталось {amount} г/шт, лимит на сегодня ~{max(1, amount // days_remaining)} г/шт"
         for name, amount in state["inventory"].items() if amount > 0
     )
+    if not inventory_text and day_number > 1:
+        # корзина израсходована: иначе в промпт уходило «это первый день, используй корзину»
+        inventory_text = ("продукты из корзины плана уже израсходованы — готовь из того, что обычно есть дома "
+                          "(крупы, яйца, овощи), недостающее перечисли в продуктах; ИСПОЛЬЗОВАНО_БАЗОВЫЕ оставь пустым")
     history_text = "; ".join(state["history_titles"][-HISTORY_LIMIT:])
 
     user_prompt = build_day_menu_user_prompt(meals_info, base_data) + build_week_day_extra_instructions(
@@ -225,8 +234,64 @@ async def _generate_day(chat_id: int, state: dict) -> dict:
     state["history_titles"].extend(r["title"] for r in meal_results)
     state["current_day"] = day_number + 1
 
-    _save(chat_id, state)
-    return state
+    # Генерация идёт около минуты. За это время план могли изменить (отметка «приготовлено», цены корзины,
+    # «нет продукта», новый план) — сохраняем только своё поверх свежей версии, а не всю старую копию целиком.
+    fresh = _load(chat_id)
+    if not fresh or fresh.get("basket_text") != state.get("basket_text") or fresh.get("days_total") != state.get("days_total"):
+        raise RuntimeError("План изменился, пока готовился день — откройте его заново")
+    if str(day_number) in fresh.get("days", {}):
+        raise _AlreadyDone(fresh)       # этот день уже собрал другой процесс
+    for k in list(fresh.get("inventory", {})):
+        if k in inventory_before and k in state["inventory"]:
+            spent = inventory_before[k] - state["inventory"][k]
+            fresh["inventory"][k] = max(0, fresh["inventory"][k] - spent)
+    fresh.setdefault("days", {})[str(day_number)] = state["days"][str(day_number)]
+    fresh["history_titles"] = (fresh.get("history_titles") or []) + [r["title"] for r in meal_results]
+    fresh["current_day"] = day_number + 1
+    _save(chat_id, fresh)
+    return fresh
+
+
+class _AlreadyDone(Exception):
+    def __init__(self, state):
+        self.state = state
+
+
+async def _generate_once(chat_id: int, day_number: int) -> dict:
+    """Один день генерируется один раз, даже если его открыли одновременно в боте и на сайте или нажали дважды."""
+    import accounts
+    lock = _gen_locks.setdefault(str(chat_id), asyncio.Lock())
+    async with lock:
+        state = _load(chat_id)
+        if not state:
+            raise RuntimeError("План питания не найден")
+        if str(day_number) in state["days"]:
+            return state, False
+        key = f"wkgen:{chat_id}"
+        lease = accounts.sess_get(key) or {}
+        if lease.get("day") == day_number and time.time() - lease.get("ts", 0) < GEN_LEASE:
+            while time.time() - lease["ts"] < GEN_LEASE:
+                await asyncio.sleep(2)
+                state = _load(chat_id)
+                if state and str(day_number) in state["days"]:
+                    return state, False
+                if (accounts.sess_get(key) or {}).get("day") != day_number:
+                    break       # тот процесс не справился — пробуем сами
+        state = _load(chat_id)
+        if not state:
+            raise RuntimeError("План питания не найден")
+        if str(day_number) in state["days"]:
+            return state, False
+        if day_number != state["current_day"]:
+            raise RuntimeError("нельзя открыть день вне очереди — сначала приготовьте предыдущие")
+        accounts.sess_set(key, {"day": day_number, "ts": time.time()})
+        try:
+            try:
+                return await _generate_day(chat_id, state), True
+            except _AlreadyDone as e:
+                return e.state, False
+        finally:
+            accounts.sess_set(key, {"day": 0, "ts": 0})
 
 
 def _merge_terms(term_lists) -> list[str]:
@@ -262,8 +327,8 @@ async def ensure_slot(chat_id: int, index: int) -> dict:
     if str(day_number) not in state["days"]:
         if day_number != state["current_day"]:
             raise RuntimeError("нельзя открыть день вне очереди — сначала приготовьте предыдущие")
-        state = await _generate_day(chat_id, state)
-        just_generated = True
+        # just_generated — только если день собрал именно этот вызов: иначе бот и сайт посчитали бы его дважды
+        state, just_generated = await _generate_once(chat_id, day_number)
 
     day_entry = state["days"][str(day_number)]
     return {
@@ -278,6 +343,15 @@ async def ensure_slot(chat_id: int, index: int) -> dict:
         "meal": day_entry["meals"][meal_key],
         "is_next_uncooked": index == state["progress_index"],
     }
+
+
+def needs_generation(chat_id: int, index: int) -> bool:
+    """Откроется ли этот слот сразу или его день ещё надо готовить (тогда показываем «готовлю»)."""
+    state = _load(chat_id)
+    if not state:
+        return False
+    slots = _flat_slots(state)
+    return 0 <= index < len(slots) and str(slots[index][0]) not in state["days"]
 
 
 def mark_done(chat_id: int, index: int) -> None:

@@ -11,6 +11,8 @@ for f in ("usage_ab.db", "accounts_ab.db", "accounts_ab.db-wal", "accounts_ab.db
 os.environ["USAGE_DB"] = PROJ + "/usage_ab.db"
 os.environ["ACCOUNTS_DB"] = PROJ + "/accounts_ab.db"
 os.environ["WEB_DATA_DIR"] = "web_data_ab"
+import shutil
+shutil.rmtree(PROJ + "/web_data_ab", ignore_errors=True)   # иначе визиты копятся между прогонами
 
 from fastapi.testclient import TestClient
 import web_api
