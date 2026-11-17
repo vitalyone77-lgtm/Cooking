@@ -2,7 +2,7 @@
    открывался без интернета (оболочка + сохранённое избранное из localStorage).
    Динамику (/api, /admin, /go, /uploads) НЕ кэшируем никогда. Страницу берём из сети, из кэша — только
    когда сети нет, поэтому после обновления сайта пользователь не застревает на старой версии. */
-const CACHE = "kitchen-shell-v32";
+const CACHE = "kitchen-shell-v33";
 const SHELL = ["/", "/manifest.webmanifest", "/icons/icon-192.png", "/icons/og-image-2.png"];
 
 self.addEventListener("install", (e) => {
@@ -25,6 +25,9 @@ self.addEventListener("fetch", (e) => {
   if (/^\/(api|admin|go|uploads)(\/|$)/.test(url.pathname)) return;
 
   if (req.mode === "navigate") {
+    // офлайн-копия — только главная страница приложения: раньше любая открытая страница (кабинет партнёра со ссылкой-ключом,
+    // оплата, чужой список) записывалась вместо неё и показывалась без интернета (аудит 15.11.2026)
+    if (url.pathname !== "/") return;
     e.respondWith(
       fetch(req)
         .then((res) => {

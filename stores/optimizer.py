@@ -29,8 +29,14 @@ def choose_packs(need_name: str, need_g: float, offers: list[Offer]) -> list[Car
     if reasonable:
         usable = reasonable
 
-    target = max(1, math.ceil(need_g / STEP_G))
-    sizes = [max(1, math.ceil(o.pack_g / STEP_G)) for o in usable]
+    # Шаг не крупнее самой мелкой упаковки, и упаковка засчитывается не больше своего веса (вниз): иначе 6 яиц
+    # считались за 10 и на 20 яиц брались 2 упаковки по 6 (аудит 15.11.2026). Купленного всегда не меньше нужного.
+    g = 0
+    for o in usable:
+        g = math.gcd(g, max(1, int(round(o.pack_g))))
+    step = max(1, min(STEP_G, g))          # общий делитель фасовок: 6 и 10 яиц → шаг 2, расчёт точный
+    target = max(1, math.ceil(need_g / step))
+    sizes = [max(1, int(o.pack_g // step)) for o in usable]
 
     # dp[j] = (мин. стоимость, суммарные граммы) чтобы покрыть >= j шагов
     INF = (float("inf"), float("inf"))
@@ -58,6 +64,7 @@ def choose_packs(need_name: str, need_g: float, offers: list[Offer]) -> list[Car
 
     lines = []
     for idx, count in counts.items():
-        lines.append(CartLine(need_name=need_name, need_g=need_g, offer=usable[idx],
-                              count=min(count, MAX_PACKS_PER_LINE)))
+        if count > MAX_PACKS_PER_LINE:
+            return []            # столько упаковок в одну строку корзины не положить — честнее не собирать, чем недоложить молча
+        lines.append(CartLine(need_name=need_name, need_g=need_g, offer=usable[idx], count=count))
     return lines

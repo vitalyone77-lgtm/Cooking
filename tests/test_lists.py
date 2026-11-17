@@ -2,6 +2,7 @@
 import asyncio
 import json
 import os
+import re
 import sys
 import time
 
@@ -304,7 +305,14 @@ other = TestClient(web_api.app, base_url="https://testserver", follow_redirects=
 r = other.get(f"/api/vk/callback?code=c2&state={st3}&device_id=d2")
 check("другое окно или чужая ссылка: нужно подтверждение, вход ещё не выполнен", "Подтвердите вход" in r.text and not accounts.tg_of_device(web_db.device_id(d3)), r.text[:200])
 check("статус чужому устройству не виден", other.get("/api/vk/status?state=" + st3, headers=H2).json()["linked"] is False)
-r = other.post("/api/vk/confirm", data={"state": st3})
+attacker = TestClient(web_api.app, base_url="https://testserver", follow_redirects=False)
+r = attacker.post("/api/vk/confirm", data={"state": st3})       # знает state (сам начинал вход), но страницы жертвы не видел
+check("чужой, знающий state, подтвердить вход не может", "не выполнен" in r.text and not accounts.tg_of_device(web_db.device_id(d3)), r.text[:200])
+r = attacker.post("/api/vk/confirm", data={"state": st3, "ct": "угадал"})
+check("подобранный токен без cookie не работает", not accounts.tg_of_device(web_db.device_id(d3)))
+pg = other.get(f"/api/vk/callback?code=c2&state={st3}&device_id=d2")
+ct = re.search(r"name=ct value='([^']+)'", pg.text).group(1)
+r = other.post("/api/vk/confirm", data={"state": st3, "ct": ct})
 check("после подтверждения вход выполнен, вкладка узнаёт", "Вход выполнен" in r.text and accounts.tg_of_device(web_db.device_id(d3)) and cl.get("/api/vk/status?state=" + st3, headers=H3).json()["linked"] is True, r.text[:200])
 check("отказ ВК: понятная страница", "не выполнен" in sc.get("/api/vk/callback?error=access_denied&state=x").text)
 
@@ -341,7 +349,14 @@ check("вошёл через ВК: ссылка привязки Telegram соз
 vs2 = html[html.index("function viewSettings("):html.index("// код входа создаём заранее")]
 check("в настройках есть кнопка «Привязать Telegram»", "Привязать Telegram" in vs2 and 'm.via==="vk"?linkCode()' in vs2)
 check("только ВК: ещё не объединён", me2["both_linked"] is False)
-accounts.claim_login_code(accounts.new_login_code(7002), web_db.device_id(d2))
+try:      # «ссылка входа» из бота на устройство, где уже вход через ВК, — отказ: ссылку мог прислать чужой (аудит 15.11.2026)
+    accounts.claim_login_code(accounts.new_login_code(7002), web_db.device_id(d2))
+    ok = False
+except accounts.OtherAccount:
+    ok = True
+check("ссылка входа не объединяет ВК с чужим Telegram", ok and accounts.tg_of_device(web_db.device_id(d2)) != 7002)
+# настоящий путь «Привязать Telegram»: код с сайта, подтверждение владельцем в своём боте
+accounts.use_link_code(accounts.new_link_code(web_db.device_id(d2)), 7002)
 me3 = sc.get("/api/me", headers=H2).json()
 check("привязал Telegram: профиль общий, сайт это знает", me3["via"] == "tg" and me3["both_linked"] is True, str(me3)[:200])
 d5 = sc.post("/api/device").json()["device"]
@@ -387,9 +402,10 @@ _c.execute("create table t(x)")
 _c.execute("insert into t values(42)")
 _c.commit()
 _c.close()
-_bk.SOURCES = [_src]
-_f = _bk.run(_d / "out", _dt.date(2026, 11, 20))
+_bk.sources = lambda: ([_src, _d / "нет.db"], [_d / "нет.json"], [])
+_f, _errs = _bk.run(_d / "out", _dt.date(2026, 11, 20))
 check("копия: файл создан и читается", _sq.connect(_f / "a.db").execute("select x from t").fetchone()[0] == 42)
+check("копия: сбой одной базы не отменяет остальные и попадает в список ошибок", len(_errs) == 1 and "нет.db" in _errs[0], str(_errs))
 (_d / "out" / "2026-11-01").mkdir()
 (_d / "out" / "2026-11-10").mkdir()
 (_d / "out" / "notes").mkdir()

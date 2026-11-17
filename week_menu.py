@@ -23,6 +23,7 @@
 import asyncio
 import json
 import logging
+import re
 import threading
 import time
 from pathlib import Path
@@ -135,16 +136,31 @@ async def start_week_plan(chat_id: int, meal_keys: list[str], days_total: int, b
     return display_text, shopping_message
 
 
+# прилагательное от продукта, которое и есть этот продукт: «куриное филе» — это курица (аудит 15.11.2026)
+_SAME = {"курин": "куриц", "говяж": "говяд", "свин": "свинин", "индюш": "индейк"}
+_ADJ_END = ("ая", "ое", "ый", "ий", "ые", "ой", "ую", "ого", "ей")
+
+
 def _key_stem(w: str) -> str:
     w = w.lower().replace("ё", "е")
+    for a, b in _SAME.items():
+        if w.startswith(a):
+            return b
     if len(w) >= 4 and w[-1] in "аеиоуыэюяйь":
         w = w[:-1]
     return w
 
 
+def _is_adj(w: str) -> bool:
+    w = w.lower()
+    return len(w) > 4 and w.endswith(_ADJ_END) and not any(w.startswith(a) for a in _SAME)
+
+
 def _word_match(a: str, b: str) -> bool:
     """Совпадение по ОБЩЕМУ НАЧАЛУ слова (после стемминга), а не по вхождению где угодно: «лук»/«луковица» —
-    да, «мин»/«витамин» — нет (несовпадающее начало)."""
+    да, «мин»/«витамин» — нет. Прилагательное не равно продукту: «рисовая» (лапша) — не «рис»."""
+    if _is_adj(a) != _is_adj(b):
+        return False
     sa, sb = _key_stem(a), _key_stem(b)
     short, long_ = (sa, sb) if len(sa) <= len(sb) else (sb, sa)
     return len(short) >= 3 and long_.startswith(short)
@@ -201,13 +217,16 @@ async def _generate_day(chat_id: int, state: dict) -> dict:
 
     raw = await call_llm_with_fallback(messages, max_tokens=max_tokens)
 
-    blocks = [b.strip() for b in DAY_MENU_BLOCK_SPLIT_RE.split(raw)]
-    if len(blocks) != len(meal_keys) + 1:
-        raise ValueError(
-            f"ожидалось {len(meal_keys) + 1} блоков (блюда + расход), получено {len(blocks)}"
-        )
-
-    meal_blocks, usage_block = blocks[:-1], blocks[-1]
+    # Модель иногда ставит лишний разделитель или пишет строку расхода без него — ответ уже оплачен, не роняем его
+    # (аудит 15.11.2026): пустые блоки отбрасываем, строку ИСПОЛЬЗОВАНО_БАЗОВЫЕ ищем по всему тексту.
+    blocks = [b.strip() for b in DAY_MENU_BLOCK_SPLIT_RE.split(raw) if b.strip()]
+    m_used = re.search(r"[*_]*ИСПОЛЬЗОВАНО_БАЗОВЫЕ[*_]*:.*", raw, re.IGNORECASE)
+    usage_block = m_used.group(0) if m_used else ""
+    blocks = [re.sub(r"[*_]*ИСПОЛЬЗОВАНО_БАЗОВЫЕ[*_]*:.*", "", b, flags=re.IGNORECASE).strip() for b in blocks]
+    blocks = [b for b in blocks if b and re.search(r"[а-яё]{3}", b, re.IGNORECASE)]
+    if len(blocks) < len(meal_keys):
+        raise ValueError(f"ожидалось {len(meal_keys)} блюд, получено {len(blocks)}")
+    meal_blocks = blocks[:len(meal_keys)]
     meal_results = day_menu.parse_meal_blocks(meal_blocks, meal_keys)
     used = extract_used_base_products(usage_block)
 

@@ -188,12 +188,21 @@ check("сообщение владельцу о годовой оплате", pa
 
 # ---------- тестовый режим ----------
 config.PAYANYWAY_TEST = "1"
+try:
+    payanyway.create_order(TG + 49, "month")
+    ok = False
+except ValueError:
+    ok = True
+check("в тестовом режиме заказ только для тестировщиков: тестовая карта не даёт подписку любому", ok)
+_t2 = plans.is_tester
+plans.is_tester = lambda u: str(u) in (str(TG + 50), str(TG + 51))
 ot = payanyway.create_order(TG + 50, "month")
 check("в тестовом режиме заказ помечен тестовым", ot["test"] == 1)
 r = pay(sig_params(ot["id"], op="7001", test="1"))
 check("тестовое уведомление принято и записано отдельной валютой RUBTEST", ok_xml(r.text) and accounts._q("SELECT currency FROM payments WHERE charge_id='pwtest:7001'", one=True)[0] == "RUBTEST")
 check("боевое уведомление за тестовый заказ — FAIL", pay(sig_params(payanyway.create_order(TG + 51, "month")["id"], test="0", op="7002")).text == "FAIL")
 config.PAYANYWAY_TEST = "0"
+plans.is_tester = _t2
 
 # ---------- бот ----------
 text, markup = bot_profile._sub_view(TG)

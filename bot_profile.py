@@ -3,6 +3,7 @@
 подписка и оплата (Telegram Stars сразу; рубли — когда будет токен платёжного сервиса), промокоды,
 ссылки блогеров (/start ref_…), админская выдача подписки (/grant).
 """
+import asyncio
 import logging
 import re
 import time
@@ -87,7 +88,8 @@ def _profile_view(uid: int) -> tuple[str, InlineKeyboardMarkup]:
     if shelf_on:
         shelf = accounts.shelf_list(uid)
         lines.append(f"🏠 На полке: {len(shelf)} " + _plural(len(shelf), "продукт", "продукта", "продуктов"))
-    lines.append(f"🔔 Напоминания: {'включены' if reminders_enabled(uid) else 'выключены'}")
+    import digest
+    lines.append(f"🔔 Напоминания: {'включены' if reminders_enabled(uid) else 'выключены'} · 📊 итог недели: {'включён' if digest.enabled(uid) else 'выключен'}")
     if consent:
         lines.append("")
         lines.append(f"🚫 Исключённые продукты: {g['never'] or 'нет'}" + ("" if mem else "  🔒 тариф «Повар»"))
@@ -108,8 +110,10 @@ def _profile_view(uid: int) -> tuple[str, InlineKeyboardMarkup]:
             rows.append([("🎁 Попробовать бесплатно", "pf:trial")])
         rows.append([("💎 Подписка", "pf:sub"), ("🎟 Промокод", "pf:promo")])
     devs = accounts.devices_of(uid)
-    rows.append([("🔕 Напоминания" if reminders_enabled(uid) else "🔔 Напоминания", "pf:rem")]
-                + ([(f"🔓 Выйти на сайте ({devs})", "pf:unall")] if devs else []))
+    rows.append([("🔕 Напоминания" if reminders_enabled(uid) else "🔔 Напоминания", "pf:rem"),
+                 ("🔕 Итог недели" if digest.enabled(uid) else "📊 Итог недели", "pf:dg")])
+    if devs:
+        rows.append([(f"🔓 Выйти на сайте ({devs})", "pf:unall")])
     rows.append(([("🧩 Функции", "pf:fts")] if consent else []) + [("🌐 Без VPN", "pf:site")] + ([("🗑 Удалить", "pf:del")] if consent else []))
     rows.append([("🔬 Проверить состав", "lb:o"), ("❓ Справка", "help:open")] + ([("⬅️ Профиль", "pf:main")] if diary_on else []))
     b = InlineKeyboardBuilder()
@@ -213,7 +217,7 @@ async def show_profile(event, state: FSMContext | None = None, edit: bool = Fals
         await state.clear()
     mode = mode or ("edit" if edit else "fresh")
     if _diary_enabled(uid) and not settings:
-        text, markup, png = _profile_main(uid, days)
+        text, markup, png = await asyncio.to_thread(_profile_main, uid, days)     # график рисуется не в основном потоке
         await ui.show(event, text, markup, png, mode=mode)
     else:
         text, markup = _profile_view(uid)
@@ -394,9 +398,10 @@ async def feedback_text(message: Message, state: FSMContext):
     data = await state.get_data()
     kind = data.get("fb_kind", "idea")
     uid = message.chat.id
+    text = ("💳 ОПЛАТА: " + message.text) if data.get("fb_pay") else message.text
     await ui.drop(message)
     try:
-        fid = accounts.feedback_add(uid, kind, message.text, "", "bot")
+        fid = accounts.feedback_add(uid, kind, text, "", "bot")
     except ValueError as e:
         await ui.show(message, f"😔 {e}", _cancel_kb_help(), mode="tracked")
         if "много" in str(e):
@@ -405,7 +410,7 @@ async def feedback_text(message: Message, state: FSMContext):
     await state.clear()
     usage.event("feedback", uid)
     username = message.from_user.username if message.from_user else ""
-    await feedback.notify_bot(message.bot, feedback.admin_text(fid, kind, "bot", uid, message.text, "", username or ""))
+    await feedback.notify_bot(message.bot, feedback.admin_text(fid, kind, "bot", uid, text, "", username or ""))
     await ui.show(message, "✅ Спасибо! Сообщение отправлено разработчику.", _help_back_kb(), mode="tracked")
 
 
@@ -971,9 +976,14 @@ async def payment_done(message: Message):
 
 
 @router.message(Command("paysupport"))
-async def cmd_paysupport(message: Message):
-    """Обязательная для оплаты звёздами команда поддержки по платежам."""
-    await message.answer("💬 Вопросы по оплате и возврату: напишите сюда, в этот чат, что случилось и когда вы платили. Мы ответим и при необходимости вернём деньги. Статус подписки — /profile.", parse_mode=None)
+async def cmd_paysupport(message: Message, state: FSMContext):
+    """Обязательная для оплаты звёздами команда поддержки по платежам. Следующее сообщение уходит владельцу с пометкой «оплата»
+    (раньше просили «написать в этот чат», но такое сообщение никому не пересылалось — аудит 15.11.2026)."""
+    await state.set_state(FeedbackForm.text)
+    await state.update_data(fb_kind="q", fb_pay=True)
+    await message.answer("💬 Вопрос по оплате или возврату: напишите одним сообщением, что случилось и когда вы платили "
+                         "(сумма и способ — картой или звёздами). Сообщение сразу уйдёт владельцу, ответ придёт сюда. Статус подписки — /profile.",
+                         reply_markup=_cancel_kb_help(), parse_mode=None)
 
 
 @router.callback_query(F.data == "pf:promo")

@@ -152,3 +152,39 @@ load();setInterval(load,6000);document.addEventListener("visibilitychange",load)
 def page(lid: str, rec: dict) -> str:
     site = (config.WEB_APP_URL or "https://menu.ymayaka.ru").rstrip("/") + "/"
     return _PAGE % {"title": escape(rec["title"]), "site": escape(site, quote=True), "id": json.dumps(lid)}
+
+
+# ---------- «корзина рецептов»: общий список покупок собирается по ходу, одна на бота и сайт ----------
+
+def _combo_key(uid) -> str:
+    return f"combo:{uid}"
+
+
+def combo_get(uid) -> dict:
+    """{"ids": [...], "page": n}; рецепты, которых уже нет в избранном, выпадают сами."""
+    s = accounts.sess_get(_combo_key(uid)) or {"ids": [], "page": 0}
+    have = {f["id"] for f in favorites.get_favorites(uid)}
+    s["ids"] = [i for i in s.get("ids", []) if i in have]
+    s.setdefault("page", 0)
+    return s
+
+
+def combo_save(uid, s: dict) -> None:
+    s["ids"] = list(dict.fromkeys(s.get("ids", [])))[:MAX_RECIPES]
+    accounts.sess_set(_combo_key(uid), s)
+
+
+def combo_add(uid, title: str, text: str, cuisine: str = "") -> tuple[str, int]:
+    """Рецепт — в «Любимые» (если ещё нет) и в общий список. Возвращает (id в избранном, сколько рецептов в списке)."""
+    s = combo_get(uid)
+    if len(s["ids"]) >= MAX_RECIPES:
+        raise ValueError(f"В общем списке уже {MAX_RECIPES} рецептов — соберите список или уберите лишние")
+    fid = favorites.add_favorite(uid, title, text, cuisine or "")
+    if fid not in s["ids"]:
+        s["ids"].append(fid)
+    combo_save(uid, s)
+    return fid, len(s["ids"])
+
+
+def combo_clear(uid) -> None:
+    accounts.sess_set(_combo_key(uid), {"ids": [], "page": 0})

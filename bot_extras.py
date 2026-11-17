@@ -154,8 +154,43 @@ def _combo_key(uid) -> str:
     return f"combo:{uid}"
 
 
+def add_combo(markup: InlineKeyboardMarkup) -> InlineKeyboardMarkup:
+    """«🛒 В общий список» под рецептом: рецепт копится в общем списке покупок (одном на бота и сайт)."""
+    markup.inline_keyboard.append([InlineKeyboardButton(text="🛒 В общий список покупок", callback_data="cb:add")])
+    return markup
+
+
+@router.callback_query(F.data == "cb:add")
+async def combo_add(callback: CallbackQuery):
+    from last_recipe import get_last_recipe
+    from shopping import extract_dish_title
+    msg = callback.message
+    uid = msg.chat.id
+    text = msg.text or msg.caption or ""
+    title = extract_dish_title(text) or "Рецепт"
+    last = get_last_recipe(uid) or {}
+    cuisine = ""
+    if last.get("text") and extract_dish_title(last["text"]) == title:
+        text, cuisine = last["text"], last.get("cuisine") or ""     # с разметкой, как при обычном сохранении
+    try:
+        _, n = shoplists.combo_add(uid, title, text, cuisine)
+    except ValueError as e:
+        await callback.answer(str(e), show_alert=True)
+        return
+    usage.event("combo_add", uid)
+    await callback.answer(f"🛒 «{title[:40]}» в общем списке. Рецептов в списке: {n}")
+    mk = msg.reply_markup
+    if mk:
+        rows = [[InlineKeyboardButton(text=f"✅ В списке ({n}) — собрать", callback_data="cb:o") if b.callback_data == "cb:add" else b
+                 for b in row] for row in mk.inline_keyboard]
+        try:
+            await msg.edit_reply_markup(reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
+        except TelegramBadRequest:
+            pass
+
+
 def _combo_view(uid) -> tuple[str, InlineKeyboardMarkup]:
-    s = accounts.sess_get(_combo_key(uid)) or {"ids": [], "page": 0}
+    s = shoplists.combo_get(uid)
     favs = list(reversed(favorites.get_favorites(uid)))
     pages = max(1, -(-len(favs) // COMBO_PAGE))
     page = max(0, min(s.get("page", 0), pages - 1))
@@ -168,9 +203,14 @@ def _combo_view(uid) -> tuple[str, InlineKeyboardMarkup]:
         rows.append(nav)
     n = len(s["ids"])
     if n:
-        rows.append([InlineKeyboardButton(text=f"🛒 Собрать список ({n})", callback_data="cb:go")])
+        rows.append([InlineKeyboardButton(text=f"🛒 Собрать список ({n})", callback_data="cb:go"),
+                     InlineKeyboardButton(text="🧹 Очистить", callback_data="cb:clr")])
     rows.append([InlineKeyboardButton(text="⬅️ К избранному", callback_data="bk:fav:0")])
-    return "🛒 Общий список покупок\n\nОтметьте рецепты, которые будете готовить. Одинаковые продукты сложатся.", InlineKeyboardMarkup(inline_keyboard=rows)
+    if not favs:
+        return ("🛒 Общий список покупок\n\nПока пусто. Под любым рецептом (из книги, подбора или избранного) нажмите "
+                "«🛒 В общий список покупок» — рецепты накопятся здесь, а одинаковые продукты сложатся."), InlineKeyboardMarkup(inline_keyboard=rows)
+    return ("🛒 Общий список покупок\n\nОтметьте рецепты, которые будете готовить (или нажимайте «🛒 В общий список» под рецептами). "
+            "Одинаковые продукты сложатся."), InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 async def _combo_redraw(callback: CallbackQuery) -> None:
@@ -184,8 +224,18 @@ async def _combo_redraw(callback: CallbackQuery) -> None:
 
 @router.callback_query(F.data == "cb:o")
 async def combo_open(callback: CallbackQuery):
-    accounts.sess_set(_combo_key(callback.message.chat.id), {"ids": [], "page": 0})
-    await callback.answer()
+    await callback.answer()        # отмеченное раньше (в боте или на сайте) сохраняется
+    if not (callback.message.text or "").lstrip().startswith("🍽"):
+        await _combo_redraw(callback)
+    else:                          # нажали под рецептом — рецепт не затираем, список присылаем отдельно
+        text, markup = _combo_view(callback.message.chat.id)
+        await callback.message.answer(text, reply_markup=markup, parse_mode=None)
+
+
+@router.callback_query(F.data == "cb:clr")
+async def combo_clear(callback: CallbackQuery):
+    shoplists.combo_clear(callback.message.chat.id)
+    await callback.answer("Список очищен")
     await _combo_redraw(callback)
 
 
@@ -193,9 +243,9 @@ async def combo_open(callback: CallbackQuery):
 async def combo_toggle(callback: CallbackQuery):
     uid = callback.message.chat.id
     fid = callback.data.split(":", 2)[2]
-    s = accounts.sess_get(_combo_key(uid)) or {"ids": [], "page": 0}
+    s = shoplists.combo_get(uid)
     s["ids"] = [x for x in s["ids"] if x != fid] if fid in s["ids"] else (s["ids"] + [fid])[:shoplists.MAX_RECIPES]
-    accounts.sess_set(_combo_key(uid), s)
+    shoplists.combo_save(uid, s)
     await callback.answer()
     await _combo_redraw(callback)
 
@@ -203,10 +253,10 @@ async def combo_toggle(callback: CallbackQuery):
 @router.callback_query(F.data.startswith("cb:p:"))
 async def combo_page(callback: CallbackQuery):
     uid = callback.message.chat.id
-    s = accounts.sess_get(_combo_key(uid)) or {"ids": [], "page": 0}
+    s = shoplists.combo_get(uid)
     p = callback.data.split(":")[2]
     s["page"] = int(p) if p.isdigit() else 0
-    accounts.sess_set(_combo_key(uid), s)
+    shoplists.combo_save(uid, s)
     await callback.answer()
     await _combo_redraw(callback)
 
@@ -214,12 +264,13 @@ async def combo_page(callback: CallbackQuery):
 @router.callback_query(F.data == "cb:go")
 async def combo_go(callback: CallbackQuery):
     uid = callback.message.chat.id
-    s = accounts.sess_get(_combo_key(uid)) or {"ids": []}
+    s = shoplists.combo_get(uid)
     try:
         res = shoplists.from_favorites(uid, s["ids"])
     except ValueError as e:
         await callback.answer(str(e), show_alert=True)
         return
+    shoplists.combo_clear(uid)          # список собран — следующий начнём с чистого
     usage.event("list_combo", uid)
     await callback.answer()
     link = res["url"]
@@ -313,8 +364,7 @@ async def label_photo(message: Message, state: FSMContext):
             logger.exception("состав")
         await status.edit_text("😔 Не получилось прочитать состав, попробуйте ещё раз.", parse_mode=None)
         return
-    if not res["products"]:
-        usage.unlog(spent)
+    if not res["products"]:      # запрос к модели уже сделан: попытка засчитана
         await status.edit_text("🤔 Не вижу состав на фото: снимите ближе, чтобы текст был резким.", parse_mode=None)
         return
     usage.event("label_check", uid)

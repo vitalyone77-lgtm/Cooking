@@ -110,11 +110,12 @@ def _parse_kv_amounts(raw: str) -> dict[str, int]:
     «1,5 кг» превращалось в 15 (а должно быть 1500 г): модель иногда пишет дробное число с единицей,
     хотя её просят отдавать целые граммы/мл/штуки. Теперь десятичная часть и кг/л учитываются."""
     result: dict[str, int] = {}
-    for part in _COMMA_RE.split(raw):
+    raw = re.sub(r"(?<=\d)[ \u00a0\u202f](?=\d{3}(?!\d))", "", raw or "")       # «1 200» — это 1200
+    for part in re.split(r",(?![0-9])|;", raw):                                  # «;» тоже разделитель (терялись продукты)
         part = part.strip()
-        if not part or "=" not in part:
+        if not part or not re.search(r"[=:]", part):
             continue
-        name, _, value = part.partition("=")
+        name, _, value = part.partition("=") if "=" in part else part.partition(":")
         name = re.sub(r"[*_]", "", name).strip(" .").lower()   # markdown-обёртка маркера (2026-11-12)
         m = _KV_AMOUNT_RE.search(value)
         if not (name and m):
@@ -202,13 +203,21 @@ def amounts_from_recipe_text(text: str) -> dict[str, int]:
         if not name or _COMMA_RE.search(name) or name in ("вода", "кипяток", "лёд", "лед", "вода питьевая"):
             continue  # воду из крана не покупаем
         grams = pieces = 0.0
-        for m in _AMOUNT_RE.finditer(item.partition(" — ")[2]):
+        # количество — из основной части, а не из пояснения в скобках: «яйца — 2 шт (≈110 г)» это 2 шт (аудит 15.11.2026)
+        qty = re.sub(r"(?<=\d)[ \u00a0\u202f](?=\d{3}(?!\d))", "", item.partition(" — ")[2])
+        main = re.sub(r"\([^)]*\)", "", qty)
+        for m in _AMOUNT_RE.finditer(main if _AMOUNT_RE.search(main) else qty):
             value, unit = float(m.group(1).replace(",", ".")), m.group(2).lower()
             if unit == "шт":
                 pieces = pieces or value
             elif not grams:
                 grams = value * (1000 if unit in ("кг", "л") else 1)
-        amount = grams or (pieces if is_pieces(name, pieces) else 0)
+        if not grams:                                  # «лук — 1 шт (≈100 г)»: лук не штучный, граммы берём из пояснения
+            for m in _AMOUNT_RE.finditer(qty):
+                if m.group(2).lower() != "шт":
+                    grams = float(m.group(1).replace(",", ".")) * (1000 if m.group(2).lower() in ("кг", "л") else 1)
+                    break
+        amount = pieces if (pieces and is_pieces(name, pieces)) else (grams or (pieces if is_pieces(name, pieces) else 0))
         if amount > 0:
             result[name] = result.get(name, 0) + int(round(amount))
     return result
@@ -281,13 +290,14 @@ def _find_amount(term: str, amounts: dict[str, int]) -> tuple[str, int] | None:
     if t in amounts:
         return t, amounts[t]
     stems = [w[:4] for w in re.findall(r"[а-яёa-z]{4,}", t)]
+    at_start = lambda st, s: re.search(r"(?<![а-яёa-z])" + re.escape(st), s)     # с начала слова: «соль» не находит «фасоль»
     for key, val in amounts.items():
         k = key.lower()
-        if stems and all(st in k for st in stems):
+        if stems and all(at_start(st, k) for st in stems):
             return key, val
     for key, val in amounts.items():
         k_stems = [w[:4] for w in re.findall(r"[а-яёa-z]{4,}", key.lower())]
-        if k_stems and all(st in t for st in k_stems):
+        if k_stems and all(at_start(st, t) for st in k_stems):
             return key, val
     return None
 
@@ -341,8 +351,14 @@ def add_forgotten_ingredients(recipe_text: str) -> tuple[str, list[str]]:
     products = recipe_text[header.end():instr.start()].lower()
     steps = recipe_text[instr.end():].lower()
     steps = re.split(r"\n\s*(?:💡|совет)", steps, maxsplit=1)[0]           # совет — не шаги
+    # «лук не используем», «без чеснока» — это не продукт рецепта (аудит 15.11.2026: так лук возвращался в покупки)
+    steps = " ".join(p for p in re.split(r"[.;!\n]|,(?![0-9])", steps)
+                     if not re.search(r"(?<![а-яё])(?:без|исключ\w*|не\s+(?:использ|добавл|клад|нуж|бер))", p))
+    import profile_ctx
     add_lines, add_terms = [], []
     for steps_re, listed_re, line, term in _FORGOTTEN:
+        if profile_ctx.hits(term):                     # исключён человеком — не дописываем и не ищем в магазинах
+            continue
         if re.search(steps_re, steps) and not re.search(listed_re, products):
             add_lines.append("- " + line)
             add_terms.append(term)

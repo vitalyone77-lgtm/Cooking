@@ -3,6 +3,7 @@
 основной ингредиент, калории, время; хештеги и поиск по слову; своё избранное. Все переходы правят один экран (ui.py).
 Новый рецепт под себя делается кнопкой «Создать»: сначала бот ищет в книге, а если подходящего нет, составляет новый.
 """
+import asyncio
 import logging
 
 from aiogram import F, Router
@@ -17,7 +18,7 @@ import favorites
 import ui
 import usage
 from last_recipe import set_last_recipe
-from states import BookForm
+from states import BookForm, TailorForm
 
 logger = logging.getLogger(__name__)
 router = Router(name="book")
@@ -316,13 +317,17 @@ async def view_recipe(callback: CallbackQuery):
     set_last_recipe(uid, r["title"], r["text"], r["cuisine"])
     usage.event("book_view", uid)
     try:
-        await callback.message.answer_photo(BufferedInputFile(cards.make_card(r["title"], r["text"]), "recipe.png"))
+        await callback.message.answer_photo(BufferedInputFile(await asyncio.to_thread(cards.make_card, r["title"], r["text"]), "recipe.png"))
     except Exception:  # noqa: BLE001 — картинка не обязательна
         logger.exception("Карточка рецепта не отправилась")
     markup = recipe_kb(r["text"], uid) if recipe_kb else None
     if markup:
         markup.inline_keyboard.append(_vote_row(r["id"], book.votes([r["id"]], uid)[r["id"]]))
-        markup.inline_keyboard.append([InlineKeyboardButton(text="📖 К книге", callback_data="bk:l:0")])
+        import plans
+        import tailor
+        markup.inline_keyboard.append([InlineKeyboardButton(text=("🎯 Под меня" if plans.has_feature(uid, tailor.FEATURE) else "💎 Под меня"),
+                                                            callback_data=f"tl:o:{r['id']}"),
+                                       InlineKeyboardButton(text="📖 К книге", callback_data="bk:l:0")])
     await callback.message.answer(r["text"] + "\n\n" + " ".join(r["tags"]), reply_markup=markup)
 
 
@@ -356,3 +361,96 @@ async def show_favorites(event, page: int = 0, mode: str = "auto") -> None:
     else:
         text = "⭐ В избранном пока пусто. Сохраните рецепт кнопкой «⭐ В избранное» под ним."
     await ui.show(event, text, b.as_markup(), mode=mode)
+
+
+# ---------- «🎯 Под меня»: рецепт из книги под исключения, цель и пожелания (подписка) ----------
+
+def _tailor_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="✅ Подстроить", callback_data="tl:go"),
+                                                  InlineKeyboardButton(text="✖️ Отмена", callback_data="tl:x")]])
+
+
+@router.callback_query(F.data.startswith("tl:o:"))
+async def tailor_open(callback: CallbackQuery, state: FSMContext):
+    import plans
+    import tailor
+    from bot_profile import upsell_kb
+    uid = callback.message.chat.id
+    r = book.get(callback.data.split(":")[2])
+    if not r:
+        await callback.answer("Рецепт не найден", show_alert=True)
+        return
+    if not plans.has_feature(uid, tailor.FEATURE):
+        usage.event("gate_tailor", uid)
+        await callback.answer()
+        await callback.message.answer(
+            "💎 «Под меня» — в подписке «Повар».\n\nБот переделает любой рецепт из книги под вас: уберёт то, что вы не едите, "
+            "подгонит порцию под вашу цель по калориям и учтёт пожелания словами («без лука», «на 4 порции», «в мультиварке»).",
+            reply_markup=upsell_kb(uid), parse_mode=None)
+        return
+    await callback.answer()
+    await state.set_state(TailorForm.wishes)
+    await state.update_data(tl_id=r["id"])
+    known = tailor.summary(uid)
+    await callback.message.answer(
+        f"🎯 Подстрою «{r['title']}» под вас.\n\n" + (f"Учту из профиля: {known}.\n\n" if known else "")
+        + "Напишите, что ещё изменить (например «без лука, поменьше калорий, на 4 порции»)"
+        + (" или нажмите «Подстроить»." if known else "."),
+        reply_markup=_tailor_kb(), parse_mode=None)
+
+
+@router.callback_query(F.data == "tl:x")
+async def tailor_cancel(callback: CallbackQuery, state: FSMContext):
+    await state.clear()
+    await callback.answer("Отменено")
+    try:
+        await callback.message.delete()
+    except Exception:  # noqa: BLE001
+        pass
+
+
+@router.callback_query(F.data == "tl:go")
+async def tailor_go(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()
+    await _tailor_run(callback.message, state, "")
+
+
+@router.message(TailorForm.wishes, F.text)
+async def tailor_wishes(message: Message, state: FSMContext):
+    await _tailor_run(message, state, message.text)
+
+
+async def _tailor_run(message: Message, state: FSMContext, wishes: str):
+    import tailor
+    from bot_profile import upsell_kb
+    uid = message.chat.id
+    bid = (await state.get_data()).get("tl_id")
+    r = book.get(bid) if bid else None
+    await state.clear()
+    if not r:
+        await message.answer("Рецепт не найден — откройте его в книге ещё раз.", parse_mode=None)
+        return
+    if not tailor.summary(uid) and not (wishes or "").strip():
+        await state.set_state(TailorForm.wishes)
+        await state.update_data(tl_id=bid)
+        await message.answer("В профиле пока нет исключений и цели. Напишите, что изменить: например «без лука, поменьше калорий».", parse_mode=None)
+        return
+    spent, why = usage.bot_try_spend(uid, "missing")
+    if not spent:
+        await message.answer(why, parse_mode=None, reply_markup=upsell_kb(uid))
+        return
+    status = await message.answer("🎯 Подстраиваю рецепт под вас…", parse_mode=None)
+    try:
+        text, _terms = await tailor.tailor_recipe(uid, r["text"], wishes)
+    except Exception as e:  # noqa: BLE001
+        usage.unlog(spent)
+        logger.warning("«Под меня» не получилось: %s", e)
+        await status.edit_text("😔 Не получилось подстроить рецепт. Попробуйте ещё раз — попытка не списана.", parse_mode=None)
+        return
+    usage.event("tailor", uid)
+    set_last_recipe(uid, r["title"], text, r["cuisine"])
+    try:
+        await status.delete()
+    except Exception:  # noqa: BLE001
+        pass
+    await message.answer(text, reply_markup=recipe_kb(text, uid) if recipe_kb else None)

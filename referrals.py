@@ -65,9 +65,16 @@ def _used(uid: str) -> bool:
     return any(usage._count("SELECT COUNT(*) FROM gens WHERE uid=?", (i,)) for i in ids)
 
 
-def _paid(uid: str) -> bool:
-    """Настоящая оплата: не тест, не возврат, не служебный платёж на 10 ₽."""
-    return bool(accounts._q("SELECT 1 FROM payments WHERE uid=? AND currency IN ('RUB', 'XTR') AND plan<>'check' LIMIT 1", (uid,), one=True))
+def _old(uid: str, since: float) -> bool:
+    """Человек пользовался сервисом ДО перехода по ссылке — он не «приведён» (у аккаунтов ВК нет даты первого визита в боте)."""
+    return bool(usage._count("SELECT COUNT(*) FROM gens WHERE uid=? AND ts<?", (uid, since - 3600))
+                or accounts._q("SELECT 1 FROM payments WHERE uid=? AND ts<? LIMIT 1", (uid, since), one=True))
+
+
+def _paid(uid: str, since: float = 0) -> bool:
+    """Настоящая оплата после перехода по ссылке: не тест, не возврат, не служебный платёж на 10 ₽."""
+    return bool(accounts._q("SELECT 1 FROM payments WHERE uid=? AND currency IN ('RUB', 'XTR') AND plan<>'check' AND ts>=? LIMIT 1",
+                            (uid, since), one=True))
 
 
 def _until_text(uid) -> str:
@@ -80,12 +87,17 @@ def process() -> list[tuple[str, str]]:
         return []
     out: list[tuple[str, str]] = []
     now = time.time()
-    rows = accounts._q("SELECT r.uid, c.uid, w.base, w.days, w.paid FROM refs r JOIN friend_codes c ON c.code=r.ref LEFT JOIN friend_rewards w ON w.friend=r.uid "
+    rows = accounts._q("SELECT r.uid, c.uid, w.base, w.days, w.paid, r.ts FROM refs r JOIN friend_codes c ON c.code=r.ref LEFT JOIN friend_rewards w ON w.friend=r.uid "
                        "WHERE r.uid NOT LIKE 'w%' AND r.uid<>c.uid", all_=True)
-    for friend, inviter, base, days, was_paid in rows:
-        paid = _paid(friend)
+    for friend, inviter, base, days, was_paid, ref_ts in rows:
+        if base == -1:                          # давний пользователь по чужой ссылке: ничего не начисляем
+            continue
+        paid = _paid(friend, ref_ts or 0)
         if days is None:
             if not paid and not _used(friend):
+                continue
+            if _old(friend, ref_ts or 0):          # давний пользователь открыл чужую ссылку — не новый друг
+                accounts._q("INSERT OR IGNORE INTO friend_rewards(friend, inviter, base, days, paid, ts) VALUES(?,?,-1,0,0,?)", (friend, inviter, now))
                 continue
             taken = accounts._q("SELECT COUNT(*) FROM friend_rewards WHERE inviter=? AND base>0 AND ts>?", (inviter, now - WINDOW), one=True)[0]
             base = WEEK if taken < MAX_WEEKS else 0

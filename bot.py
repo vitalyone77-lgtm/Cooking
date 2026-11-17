@@ -57,6 +57,7 @@ import bot_social
 import bot_diary
 import bot_promo
 import bot_book
+import digest
 import cards
 import book
 import ui
@@ -65,6 +66,7 @@ import bot_extras
 import accounts
 
 logging.basicConfig(level=logging.INFO)
+logging.getLogger("httpx").setLevel(logging.WARNING)      # адреса запросов (в т.ч. с токеном бота) не пишем в журнал (аудит 15.11.2026)
 logger = logging.getLogger(__name__)
 
 APPLIANCE_LABELS = {
@@ -76,7 +78,8 @@ APPLIANCE_LABELS = {
 
 bot = Bot(token=config.BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.MARKDOWN))
 bot.session.middleware(SafeSendMiddleware())   # битая разметка ИИ, длинные тексты, «not modified»
-dp = Dispatcher(storage=MemoryStorage())
+from fsm_store import SqliteStorage
+dp = Dispatcher(storage=SqliteStorage())     # анкеты переживают перезапуск (раньше MemoryStorage: выкладка обрывала всем начатое)
 _flood = FloodGuard()
 dp.message.outer_middleware(_flood)          # десятки нажатий в секунду от одного человека — игнорируем
 dp.callback_query.outer_middleware(_flood)
@@ -744,7 +747,7 @@ async def step_confirm_go(callback: CallbackQuery, state: FSMContext):
 
     await status_msg.delete()
     try:        # фирменная карточка рецепта (рисуется сразу, ИИ не нужен)
-        await callback.message.answer_photo(BufferedInputFile(cards.make_card(dish_title, recipe_text), "recipe.png"))
+        await callback.message.answer_photo(BufferedInputFile(await asyncio.to_thread(cards.make_card, dish_title, recipe_text), "recipe.png"))
     except Exception:  # noqa: BLE001 — картинка не обязательна
         logger.exception("Карточка рецепта не отправилась")
     # Рецепт и кнопки («Найти продукты в магазине», «В избранное», «Ещё рецепт») — одним сообщением
@@ -765,6 +768,23 @@ async def _seen_message(handler, event, data):
 
 
 dp.message.outer_middleware(bot_vision.voice_middleware)    # после учёта: голосовое → текст до фильтров
+
+
+@dp.message.outer_middleware()
+async def _command_leaves_form(handler, event, data):
+    """Команда (/profile, /menu…) посреди анкеты — это команда, а не ответ на шаг: выходим из анкеты до фильтров
+    (аудит 15.11.2026: «/profile» на шаге «что исключить» записывался как исключённый продукт)."""
+    text = getattr(event, "text", None) or ""
+    if text.startswith("/") and data.get("raw_state") is not None and data.get("state") is not None:
+        await data["state"].clear()
+        data["raw_state"] = None
+    elif data.get("raw_state") is not None and len(text) > FORM_TEXT_MAX:
+        # ответ на шаг анкеты уходит в запрос к ИИ: длинная простыня — лишние деньги и простор для подсказок-ловушек (аудит 15.11.2026)
+        event = event.model_copy(update={"text": text[:FORM_TEXT_MAX]})
+    return await handler(event, data)
+
+
+FORM_TEXT_MAX = 500
 
 
 @dp.callback_query.outer_middleware()
@@ -854,6 +874,7 @@ def recipe_kb(recipe_text: str, chat_id: int | None = None):
                     btn.text = "💎 PDF"
     bot_extras.add_portions(markup, recipe_text)
     bot_extras.add_share(markup)
+    bot_extras.add_combo(markup)
     if chat_id is not None and plans.diary_on(chat_id):          # «Съел порцию»: только у тех, кто включил дневник
         markup.inline_keyboard.append([InlineKeyboardButton(text="🍽 Записать в дневник", callback_data="dy:eat")])
     return markup
@@ -1680,6 +1701,10 @@ async def weekmenu_cook_next(callback: CallbackQuery):
 async def weekmenu_slot(callback: CallbackQuery):
     index = int(callback.data.split(":", 2)[2])
     slow = week_menu.needs_generation(callback.message.chat.id, index)
+    if slow and usage.cap_reached():          # день ещё не собран, а дневной запас генераций исчерпан (аудит 15.11.2026)
+        await callback.answer()
+        await callback.message.answer(usage.CAP_TEXT, parse_mode=None)
+        return
     if slow:
         # день ещё не готов — сразу отвечаем на нажатие и показываем, что идёт работа (иначе минута тишины)
         await callback.answer()
@@ -1715,6 +1740,9 @@ async def weekmenu_done(callback: CallbackQuery):
     index = int(callback.data.split(":", 2)[2])
     week_menu.mark_done(chat_id, index)
     await callback.answer()
+    if week_menu.needs_generation(chat_id, index + 1) and usage.cap_reached():
+        await callback.message.answer("✅ Отметил. " + usage.CAP_TEXT, parse_mode=None)
+        return
     if week_menu.needs_generation(chat_id, index + 1):
         await callback.message.edit_text("✅ Отметил. 🔎 Готовлю блюда на следующий день — это займёт около минуты…")
 
@@ -1731,6 +1759,8 @@ async def weekmenu_done(callback: CallbackQuery):
         await callback.message.edit_text("😔 Не получилось составить следующий день. Попробуйте ещё раз.")
         return
 
+    if slot.get("just_generated"):
+        usage.log("bot", chat_id, "weekday")          # в расходах и в дневном потолке, как при «Готовить следующий день»
     text, markup = week_menu.build_slot_view(chat_id, slot)
     await callback.message.edit_text(text, reply_markup=markup)
     await _maybe_send_day_shopping(callback, slot)
@@ -1782,6 +1812,7 @@ async def favorites_search_start(callback: CallbackQuery, state: FSMContext):
 async def favorites_search_run(message: Message, state: FSMContext):
     results = search_favorites(message.chat.id, message.text.strip())
     if results:
+        await state.clear()          # нашли — поиск закончен; иначе любой следующий текст считался бы поиском
         await message.answer(
             f"🔎 Найдено рецептов: {len(results)}", reply_markup=kb.favorites_list_kb(results)
         )
@@ -1887,6 +1918,7 @@ dp.include_router(bot_social.router)
 dp.include_router(bot_diary.router)
 dp.include_router(bot_promo.router)
 dp.include_router(bot_book.router)
+dp.include_router(digest.router)
 dp.include_router(fallback_router)
 
 
@@ -1915,14 +1947,34 @@ async def fallback_text(message: Message, state: FSMContext):
     await show_main_menu(message, state)
 
 
+@fallback_router.message(RecipeForm.cuisine, F.text, ~F.text.startswith("/"))
+async def text_at_cuisine(message: Message, state: FSMContext):
+    """После меню бот ждёт выбор типа питания, а человек пишет «хочу плов» — раньше было молчание (аудит 15.11.2026).
+    Сразу к подбору с этим пожеланием (так же, как голосом)."""
+    start = bot_vision.hooks.get("start_recipe")
+    if start:
+        await start(message, state, message.text[:300])
+        return
+    await message.answer("Выберите тип питания кнопкой выше. Что хочется — «плов», «из курицы и риса» — напишете на следующем шаге.", parse_mode=None)
+
+
+@fallback_router.message(F.text, ~F.text.startswith("/"))
+async def text_unexpected(message: Message, state: FSMContext):
+    """Любой другой шаг, где ждём кнопку, а пришёл текст: подсказываем, а не молчим. Голосовое — сразу к подбору, как раньше."""
+    start = bot_vision.hooks.get("start_recipe")
+    if message.voice and start:
+        await start(message, state, message.text[:300])
+        return
+    await message.answer("Сейчас жду нажатия кнопки в сообщении выше. Начать заново — /menu", parse_mode=None)
+
+
 # ---------- Запуск ----------
 
 async def main():
     if not config.BOT_TOKEN:
         raise RuntimeError("Не задан BOT_TOKEN в .env")
 
-    if config.REMINDER_ENABLED:
-        setup_scheduler(bot, dp)
+    setup_scheduler(bot, dp)       # всегда: оповещения, партнёры, друзья, курс звёзд, итог недели; флаг выключает только напоминания
     accounts.sess_prune()
     purge_old_inputs()
     n = bot_cook.resume_timers(bot)

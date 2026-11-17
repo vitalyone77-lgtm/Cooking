@@ -113,6 +113,7 @@ async def send_daily_reminders(bot: Bot, dp: Dispatcher):
                 usage.mark_reminded(chat_id, len(config.REMINDER_GAPS))   # заблокировал бота — больше не пытаемся
                 logger.info("Напоминание %s: пользователь заблокировал бота", chat_id)
             except Exception as e:  # noqa: BLE001 — один пользователь не должен ломать рассылку остальным
+                usage.mark_reminded(chat_id, n)      # одна попытка на этап: иначе сбой доставки оплачивал бы генерацию каждый день (аудит 15.11.2026)
                 logger.warning("Не удалось отправить напоминание %s: %r", chat_id, e)
 
     await asyncio.gather(*(guarded(int(cid), data, n) for cid, (data, n) in due.items()))
@@ -121,13 +122,14 @@ async def send_daily_reminders(bot: Bot, dp: Dispatcher):
 
 def setup_scheduler(bot: Bot, dp: Dispatcher) -> AsyncIOScheduler:
     scheduler = AsyncIOScheduler(timezone=config.REMINDER_TIMEZONE)
-    scheduler.add_job(
-        send_daily_reminders,
-        trigger=CronTrigger(hour=config.REMINDER_HOUR, minute=config.REMINDER_MINUTE),
-        args=[bot, dp],
-        id="daily_reminder",
-        replace_existing=True,
-    )
+    if config.REMINDER_ENABLED:           # флаг отключает только напоминания, остальное расписание работает всегда (аудит 15.11.2026)
+        scheduler.add_job(
+            send_daily_reminders,
+            trigger=CronTrigger(hour=config.REMINDER_HOUR, minute=config.REMINDER_MINUTE),
+            args=[bot, dp],
+            id="daily_reminder",
+            replace_existing=True,
+        )
     # тревоги админу: 80% дневного потолка, мало денег на DeepSeek
     import alerts
     scheduler.add_job(alerts.check, trigger=CronTrigger(minute=7), args=[bot], id="admin_alerts", replace_existing=True)
@@ -148,6 +150,8 @@ def setup_scheduler(bot: Bot, dp: Dispatcher) -> AsyncIOScheduler:
     import bot_promo
     scheduler.add_job(bot_promo.weekly_job, trigger=CronTrigger(day_of_week="mon", hour=10, minute=0),
                       args=[bot], id="promo_weekly", replace_existing=True)
+    import digest
+    scheduler.add_job(digest.job, trigger=CronTrigger(day_of_week="sun", hour=18, minute=0), args=[bot], id="weekly_digest", replace_existing=True)
     scheduler.start()
     logger.info(
         f"Напоминания пропавшим (паузы {config.REMINDER_GAPS} дн.): проверка в {config.REMINDER_HOUR:02d}:{config.REMINDER_MINUTE:02d} "

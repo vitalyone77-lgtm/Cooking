@@ -221,6 +221,10 @@ def find(uid, data: dict) -> dict | None:
         want = _wanted(data.get("preferred") or "")
         profile_ctx.set_user(uid)
         profile_ctx.set_avoid(data.get("excluded"))
+        if profile_ctx.current.get():
+            # Есть исключения (аллергия, «не ем»): готовый рецепт из книги не берём — его не составляли под этот запрет,
+            # а проверка по словам не ловит всё. Рецепт составит ИИ с явным запретом и проверкой ответа (аудит 15.11.2026).
+            return None
         goal = (data.get("macro_goal") or "").strip()
         ok = []
         for r in rows:

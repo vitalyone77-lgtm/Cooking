@@ -28,6 +28,7 @@ CREATE TABLE IF NOT EXISTS link_codes(code TEXT PRIMARY KEY, dev_id INTEGER, cre
 CREATE TABLE IF NOT EXISTS subs(uid TEXT PRIMARY KEY, until REAL, source TEXT, trial_used INTEGER DEFAULT 0);
 CREATE TABLE IF NOT EXISTS payments(charge_id TEXT PRIMARY KEY, uid TEXT, amount INTEGER, currency TEXT,
   days INTEGER, plan TEXT, ts REAL);
+CREATE INDEX IF NOT EXISTS payments_uid ON payments(uid, ts);
 CREATE TABLE IF NOT EXISTS promo_used(uid TEXT, code TEXT, ts REAL, PRIMARY KEY(uid, code));
 CREATE TABLE IF NOT EXISTS refs(uid TEXT PRIMARY KEY, ref TEXT, ts REAL);
 CREATE TABLE IF NOT EXISTS friend_codes(code TEXT PRIMARY KEY, uid TEXT, ts REAL);
@@ -255,20 +256,33 @@ def new_login_code(tg_id: int) -> str:
     return code
 
 
+class OtherAccount(Exception):
+    """На этом устройстве уже выполнен вход в другой аккаунт."""
+
+
 def claim_login_code(code: str, dev_id: int) -> int | None:
-    """Сайт открыт по ссылке из бота: привязать это устройство. Одноразово (код помечается dev_id). -> tg_id."""
+    """Сайт открыт по ссылке из бота: привязать это устройство. Одноразово (код помечается dev_id). -> tg_id.
+
+    Ссылку мог прислать кто угодно, поэтому (аудит 15.11.2026): устройство, где уже вход в ДРУГОЙ аккаунт, не перепривязываем
+    (OtherAccount) и ничего не объединяем — иначе чужая ссылка забирала ВК-аккаунт с подпиской и дневником."""
     if not code or len(code) > 64:
         return None
     with _lock:
         c = _conn()
         try:
             with c:
-                cur = c.execute("UPDATE link_codes SET dev_id=? WHERE code=? AND dev_id=-1 AND created >= ?",
-                                (dev_id, code, time.time() - LINK_CODE_TTL))
+                row = c.execute("SELECT tg_id FROM link_codes WHERE code=? AND dev_id=-1 AND created >= ?",
+                                (code, time.time() - LINK_CODE_TTL)).fetchone()
+                if not row:
+                    return None
+                tg_id = row[0]
+                old = c.execute("SELECT tg_id FROM links WHERE dev_id=?", (dev_id,)).fetchone()
+                if old and old[0] and int(old[0]) != int(tg_id):
+                    raise OtherAccount()
+                cur = c.execute("UPDATE link_codes SET dev_id=? WHERE code=? AND dev_id=-1", (dev_id, code))
                 if cur.rowcount != 1:
                     return None
-                tg_id = c.execute("SELECT tg_id FROM link_codes WHERE code=?", (code,)).fetchone()[0]
-                _link(c, dev_id, tg_id)
+                _link(c, dev_id, tg_id, merge=False)
                 return tg_id
         finally:
             c.close()
@@ -343,6 +357,13 @@ def web_uid(dev_id: int) -> str:
     return str(tg) if tg else f"w{dev_id}"
 
 
+def _immediate(c) -> None:
+    """Занять базу на запись ДО чтения: бот и сайт — разные процессы, и «прочитал срок — записал новый» без этого
+    теряло дни, когда оба писали одновременно (аудит 15.11.2026: 694 дня вместо 800)."""
+    if not c.in_transaction:
+        c.execute("BEGIN IMMEDIATE")
+
+
 # ---------- подписка ----------
 
 def premium_until(uid) -> float:
@@ -360,6 +381,7 @@ def grant_days(uid, days: int, source: str) -> float:
         c = _conn()
         try:
             with c:
+                _immediate(c)
                 row = c.execute("SELECT until, source FROM subs WHERE uid=?", (str(uid),)).fetchone()
                 start = max(time.time(), (row[0] or 0) if row else 0)
                 until = start + days * 86400
@@ -378,6 +400,7 @@ def add_bonus_days(uid, days: int) -> float:
         c = _conn()
         try:
             with c:
+                _immediate(c)
                 row = c.execute("SELECT until, source FROM subs WHERE uid=?", (str(uid),)).fetchone()
                 now, cur = time.time(), (row[0] or 0) if row else 0
                 if days < 0 and not row:
@@ -409,6 +432,7 @@ def start_trial(uid, days: int) -> float | None:
         c = _conn()
         try:
             with c:
+                _immediate(c)
                 row = c.execute("SELECT until, trial_used FROM subs WHERE uid=?", (str(uid),)).fetchone()
                 paid = c.execute("SELECT 1 FROM payments WHERE uid=? AND currency != 'RUBTEST' LIMIT 1", (str(uid),)).fetchone()
                 if (row and row[1]) or paid:
@@ -438,6 +462,7 @@ def apply_payment(charge_id: str, uid, amount: int, currency: str, days: int, pl
         c = _conn()
         try:
             with c:
+                _immediate(c)
                 try:
                     c.execute("INSERT INTO payments(charge_id, uid, amount, currency, days, plan, ts) VALUES(?,?,?,?,?,?,?)",
                               (charge_id, str(uid), amount, currency, days, plan, time.time()))
@@ -469,6 +494,7 @@ def refund_payment(op: str) -> dict | None:
         c = _conn()
         try:
             with c:
+                _immediate(c)
                 r = c.execute("SELECT charge_id, uid, amount, days, currency FROM payments WHERE (charge_id=? OR charge_id=?) AND currency IN ('RUB', 'XTR')",
                               (f"pw:{op}", str(op))).fetchone()
                 if not r:
@@ -505,6 +531,7 @@ def use_promo_capped(uid, code: str, max_uses: int) -> str:
         c = _conn()
         try:
             with c:
+                _immediate(c)
                 try:
                     c.execute("INSERT INTO promo_used(uid, code, ts) VALUES(?,?,?)", (str(uid), code, time.time()))
                 except sqlite3.IntegrityError:
@@ -539,7 +566,7 @@ def ref_stats() -> list[dict]:
     """Для админки: сколько людей пришло по каждой ссылке и сколько из них оплатили."""
     label = "CASE WHEN r.ref LIKE 'fr!_%' ESCAPE '!' THEN 'друзья' ELSE r.ref END"          # личные ссылки пользователей одной строкой
     rows = _q(f"SELECT {label}, COUNT(DISTINCT r.uid), COUNT(DISTINCT p.uid), COALESCE(SUM(CASE WHEN p.currency = 'RUB' THEN {RUB_SQL} ELSE 0 END), 0) FROM refs r "
-              f"LEFT JOIN payments p ON p.uid = r.uid AND p.currency NOT IN ('RUBTEST', 'RUBREFUND', 'XTRREFUND') GROUP BY {label} ORDER BY 2 DESC", all_=True)
+              f"LEFT JOIN payments p ON p.uid = r.uid AND p.ts >= r.ts AND p.currency NOT IN ('RUBTEST', 'RUBREFUND', 'XTRREFUND') GROUP BY {label} ORDER BY 2 DESC", all_=True)
     return [{"ref": r[0], "users": r[1], "paid_users": r[2], "amount": r[3]} for r in rows]
 
 
@@ -659,22 +686,30 @@ def _merge_accounts(c, src: str, dst: str) -> None:
     if s:
         d = c.execute("SELECT until, trial_used FROM subs WHERE uid=?", (dst,)).fetchone()
         if d:
-            src_longer = (s[0] or 0) > (d[0] or 0)       # источник от более длинной подписки: оплаченная не должна стать «пробной»
+            now = time.time()
+            rs, rd = max(0.0, (s[0] or 0) - now), max(0.0, (d[0] or 0) - now)
+            if s[1] == "payment" and rs and rd:
+                # оплаченный остаток присоединяемого аккаунта прибавляется, а не теряется (аудит 15.11.2026: месяц + месяц = 30 дней);
+                # бесплатные дни (проба, промокод) не складываем, чтобы их нельзя было удвоить двумя аккаунтами
+                until, src_wins = now + rd + rs, True
+            else:
+                until, src_wins = max(s[0] or 0, d[0] or 0), (s[0] or 0) > (d[0] or 0)   # источник от более длинной: оплаченная не станет «пробной»
             c.execute("UPDATE subs SET until=?, trial_used=?, source=CASE WHEN ? THEN ? ELSE source END WHERE uid=?",
-                      (max(s[0] or 0, d[0] or 0), max(s[2] or 0, d[1] or 0), int(src_longer), s[1], dst))
+                      (until, max(s[2] or 0, d[1] or 0), int(src_wins), s[1], dst))
         else:
             c.execute("INSERT INTO subs(uid, until, source, trial_used) VALUES(?,?,?,?)", (dst, s[0], s[1], s[2]))
         c.execute("DELETE FROM subs WHERE uid=?", (src,))
     c.execute("INSERT INTO alias(src, dst, ts) VALUES(?,?,?) ON CONFLICT(src) DO UPDATE SET dst=excluded.dst, ts=excluded.ts", (src, dst, time.time()))
 
 
-def _link(c, dev_id: int, tg_id: int) -> None:
-    """Привязать устройство сайта к аккаунту Telegram. Если оно уже было привязано к аккаунту ВК, ВК вливается в Telegram."""
+def _link(c, dev_id: int, tg_id: int, merge: bool = True) -> None:
+    """Привязать устройство сайта к аккаунту Telegram. Если оно уже было привязано к аккаунту ВК, ВК вливается в Telegram
+    (только при merge: вход, подтверждённый владельцем Telegram в боте)."""
     old = c.execute("SELECT tg_id FROM links WHERE dev_id=?", (dev_id,)).fetchone()
     c.execute("INSERT INTO links(dev_id, tg_id, ts) VALUES(?,?,?) ON CONFLICT(dev_id) DO UPDATE SET tg_id=excluded.tg_id, ts=excluded.ts",
               (dev_id, tg_id, time.time()))
     _merge_device(c, dev_id, tg_id)
-    if old and old[0] and old[0] >= VK_OFFSET and tg_id < VK_OFFSET:
+    if merge and old and old[0] and old[0] >= VK_OFFSET and tg_id < VK_OFFSET:
         _merge_accounts(c, str(old[0]), str(tg_id))
 
 
@@ -895,6 +930,11 @@ def delete_my_data(uid) -> dict:
            "macro_ref": _q("DELETE FROM macro_ref WHERE uid=?", (uid,)), "book_votes": _q("DELETE FROM book_votes WHERE uid=?", (uid,))}
     from stores import prefs
     prefs.forget(uid)
+    # исключения и цель из анкет (напоминания и «как в прошлый раз») — текст удаления обещает и их (аудит 15.11.2026)
+    import storage
+    if uid.lstrip("-").isdigit() and storage.get_last_request(int(uid)) is not None:
+        storage._update(int(uid), excluded="", macro_goal="", preferred="", inputs=None)
+        out["anketa"] = 1
     return out
 
 

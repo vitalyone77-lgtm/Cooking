@@ -185,7 +185,9 @@ check("промокод: дни по коду, регистр не важен", 
 check("промокод: один раз на аккаунт", accounts.use_promo(U2, "blogger") and not accounts.use_promo(U2, "BLOGGER"))
 accounts.set_ref(U2, "blog_anna")
 accounts.set_ref(U2, "other")
-check("ref: запоминается первый источник, видна оплата", accounts.ref_stats()[0] == {"ref": "blog_anna", "users": 1, "paid_users": 1, "amount": 0}, str(accounts.ref_stats()))
+check("ref: запоминается первый источник; оплата ДО перехода по ссылке не засчитывается", accounts.ref_stats()[0] == {"ref": "blog_anna", "users": 1, "paid_users": 0, "amount": 0}, str(accounts.ref_stats()))
+accounts.record_payment("ch_after_ref", U2, 150, "XTR", 30, "month")
+check("ref: оплата после перехода засчитывается", accounts.ref_stats()[0]["paid_users"] == 1, str(accounts.ref_stats()))
 
 # потолки и накрутка
 config.PAYWALL_ENABLED = False
@@ -389,7 +391,7 @@ async def main():
     check("оплата: +30 дней, повторная доставка не продлевает", abs(u1 - max(before, time.time()) - 30 * 86400) < 5
           and accounts.premium_until(CHAT) == u1)
     await botmod.dp.feed_update(b, msg_upd("/paysupport"))
-    check("/paysupport отвечает", "Вопросы по оплате" in last(s, "SendMessage")["text"])
+    check("/paysupport отвечает и ждёт вопрос", "Вопрос по оплате" in last(s, "SendMessage")["text"])
 
     # быстрые нажатия: Telegram просит подождать — без «что-то пошло не так», отметка сохранена
     from aiogram.exceptions import TelegramRetryAfter
@@ -444,7 +446,8 @@ async def main():
     accounts.use_link_code(accounts.new_link_code(4321), CHAT)
     await botmod.dp.feed_update(b, msg_upd("👤 Профиль"))
     rowsp = [[x["text"] for x in r] for r in last(s, "SendMessage")["reply_markup"]["inline_keyboard"]]
-    check("напоминания и «Выйти на сайте» — в одной строке", any(len(r) == 2 and "Напоминания" in r[0] and "Выйти на сайте" in r[1] for r in rowsp), str(rowsp))
+    check("напоминания и итог недели в одной строке, «Выйти на сайте» есть", any(len(r) == 2 and "Напоминания" in r[0] and "Итог недели" in r[1] for r in rowsp)
+          and any("Выйти на сайте" in x for r in rowsp for x in r), str(rowsp))
     await botmod.dp.feed_update(b, msg_upd("📋 Показать меню"))
     check("старая кнопка «Показать меню» обновляет клавиатуру", any(n == "SendMessage" and p.get("reply_markup", {}).get("keyboard") for n, p in s.calls[-4:]))
 

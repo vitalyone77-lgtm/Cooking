@@ -257,7 +257,18 @@ select{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--lin
   }
   function finishJob(mode,res){
     loadMe();      // обновить счётчик «осталось сегодня»
-    if(mode==="recipe")showRecipe(res); else if(mode==="cook")show("menus"); else {ls("sub",mode);show("menus");}
+    if(mode==="recipe"){showRecipe(res);firstRecipeCard(res);} else if(mode==="cook")show("menus"); else {ls("sub",mode);show("menus");}
+  }
+  // первый подобранный рецепт: один раз подсказываем сохранить его и войти через Telegram (иначе всё живёт только в этом браузере)
+  function firstRecipeCard(res){
+    if(ls("firstrec"))return; ls("firstrec","1");
+    var card=main.querySelector(".card"); if(!card||!res||!res.title)return;
+    var id="f"+Math.random().toString(36).slice(2,8); window.__r[id]={title:res.title,text:res.text};
+    var d=document.createElement("div"); d.className="card pcard first-rec";
+    d.innerHTML='<h2>🎉 Первый рецепт готов</h2><p class="sub" style="margin:0 0 10px">Сохраните его, чтобы не потерять: «Любимые» открываются и без интернета.</p>'+
+      '<button class="btn" data-save="'+id+'">⭐ Сохранить в Любимые</button>'+
+      (ME&&ME.linked?'':'<p class="sub" style="margin:12px 0 8px">Войдите через Telegram — избранное, лимиты и подписка станут общими с ботом, ничего не пропадёт при смене телефона, а бот подскажет, что приготовить.</p><button class="btn ghost" data-tab-go="profile">Войти через Telegram</button>');
+    card.parentNode.insertBefore(d,card.nextSibling);
   }
   function resumePending(){
     var p=null;try{p=JSON.parse(ls("pendjob")||"null");}catch(e){}
@@ -372,6 +383,7 @@ select{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--lin
     var id="r"+Math.random().toString(36).slice(2,8); window.__r[id]={title:title,text:text};
     return (ME&&ME.diary_on&&!noSave?'<button class="btn ghost" data-dy-eat="'+id+'">🍽 Записать в дневник</button>':'')+'<div class="row">'+(isLocked("pdf")?'<button class="btn locked" data-gate="pdf">'+lockIc()+'Скачать PDF</button>':'<button class="btn" data-pdf="'+id+'">📄 Скачать PDF</button>')+(noSave?'':'<button class="btn ghost" data-save="'+id+'">⭐ Сохранить</button>')+'</div>'+
       '<button class="btn ghost" data-share-r="'+id+'">📤 Поделиться рецептом</button>'+
+      '<button class="btn ghost" data-combo-add="'+id+'">🛒 В общий список покупок</button>'+
       ('wakeLock' in navigator?'<label class="toggle"><input type="checkbox" class="k-wake"> Не гасить экран, пока готовлю</label>':'');
   }
 
@@ -424,9 +436,10 @@ select{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--lin
   // рецепт по фото: продукты с фото попадают в поле «Что использовать», их можно поправить перед подбором
   document.addEventListener("change",function(ev){
     var inp=ev.target;if(!inp||inp.id!=="photo-in"||!inp.files||!inp.files[0])return;
-    var fd=new FormData(),btn=document.querySelector("[data-photo-pick]");fd.append("image",inp.files[0]);
+    var btn=document.querySelector("[data-photo-pick]"),file0=inp.files[0];
     saveText();if(btn){btn.disabled=true;btn.textContent="📷 Смотрю, что на фото…";}
-    fetch("/api/photo",{method:"POST",headers:{"X-Device":dev},body:fd}).then(function(r){return r.json().catch(function(){return {};}).then(function(j){if(!r.ok)throw new Error(typeof j.detail==="string"?j.detail:"Не получилось разобрать фото");return j;});})
+    // фото с телефона 4–8 МБ, сервер принимает до 3 МБ: сжимаем как для состава (аудит 15.11.2026)
+    lbShrink(file0).then(function(bl){var fd=new FormData();fd.append("image",bl,"photo.jpg");return fetch("/api/photo",{method:"POST",headers:{"X-Device":dev},body:fd});}).then(function(r){return r.json().catch(function(){return {};}).then(function(j){if(!r.ok)throw new Error(typeof j.detail==="string"?j.detail:"Не получилось разобрать фото");return j;});})
       .then(function(j){F.pref=j.items.join(", ");viewNew();toast("Проверьте список продуктов и нажмите «Подобрать»");})
       .catch(function(e){alert(e.message);viewNew();});
   });
@@ -568,7 +581,21 @@ select{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--lin
   }
   function shopBtn(){return '<div class="shopbox"><button class="btn ghost" data-shop-load="1">🛒 Продукты и магазины</button></div>';}
   function favBody(f,text){return scaleBar(text)+recipeHTML(text)+actions(f.title,text,true)+shopBtn()+'<button class="btn ghost" data-del="'+esc(f.id)+'">🗑 Удалить</button>';}
-  function bookBody(r,text){return '<img class="rcard" src="'+esc(r.card)+'" alt="" loading="lazy"><div class="sub">'+esc((r.tags||[]).join(" "))+'</div>'+scaleBar(text)+recipeHTML(text)+'<div class="rate" data-rate="'+r.id+'">'+rateBtns(r.rating)+'</div>'+actions(r.title,text)+shopBtn();}
+  function bookBody(r,text){return '<img class="rcard" src="'+esc(r.card)+'" alt="" loading="lazy"><div class="sub">'+esc((r.tags||[]).join(" "))+'</div>'+scaleBar(text)+recipeHTML(text)+'<div class="rate" data-rate="'+r.id+'">'+rateBtns(r.rating)+'</div>'+tailorBox(r.id)+actions(r.title,text)+shopBtn();}
+  // «🎯 Под меня»: рецепт из книги под исключения, цель и пожелания (подписка)
+  function tailorBox(id){return '<div class="tailor" data-tl-box="'+id+'">'+(isLocked("tailor")?'<button class="btn ghost locked" data-gate="tailor">'+lockIc()+'🎯 Под меня</button>':'<button class="btn ghost" data-tl-open="'+id+'">🎯 Под меня: подстроить под мои исключения и цель</button>')+'</div>';}
+  function tailorOpen(b){
+    var id=b.getAttribute("data-tl-open"),box=b.closest("[data-tl-box]");b.disabled=true;
+    call("GET","/api/tailor/info").then(function(i){
+      box.innerHTML='<div class="card pcard" style="margin:10px 0"><h2>🎯 Под меня</h2>'+(i.known?'<p class="sub" style="margin:0 0 8px">Учту из профиля: '+esc(i.known)+'</p>':'')+
+        '<label class="f" for="tl-w">Что ещё изменить'+(i.known?' (можно пусто)':'')+'</label><input type="text" id="tl-w" maxlength="300" placeholder="без лука, поменьше калорий, на 4 порции">'+
+        '<button class="btn" data-tl-go="'+id+'">✅ Подстроить</button></div>';
+    }).catch(function(e){b.disabled=false;alert(e.message);});
+  }
+  function tailorGo(b){
+    var w=(document.getElementById("tl-w")||{}).value||"";
+    runJob(call("POST","/api/tailor",{book_id:+b.getAttribute("data-tl-go"),wishes:w}),"Подстраиваю рецепт под вас…","recipe").then(function(res){finishJob("recipe",res);}).catch(function(e){fail(e,"book");});
+  }
   // список продуктов для текста, который сейчас на экране (с учётом выбранного числа порций)
   function shopLoad(b){
     var box=b.closest("[data-sc]"),st=box&&window.__r[box.getAttribute("data-sc")],sb=b.closest(".shopbox");if(!st||!sb)return;
@@ -602,9 +629,9 @@ select{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--lin
   // полка по фото: продукты с фото отмечаем галочками, на полку добавляем обычным запросом
   document.addEventListener("change",function(ev){
     var inp=ev.target;if(!inp||inp.id!=="shelf-photo-in"||!inp.files||!inp.files[0])return;
-    var box=document.getElementById("shelf-photo-res"),fd=new FormData();fd.append("image",inp.files[0]);inp.value="";
+    var box=document.getElementById("shelf-photo-res"),file0=inp.files[0];inp.value="";
     box.innerHTML='<p class="sub">📷 Смотрю, что на фото…</p>';
-    fetch("/api/shelf/photo",{method:"POST",headers:{"X-Device":dev},body:fd}).then(function(r){return r.json().catch(function(){return {};}).then(function(j){if(!r.ok)throw new Error(typeof j.detail==="string"?j.detail:"Не получилось разобрать фото");return j;});})
+    lbShrink(file0).then(function(bl){var fd=new FormData();fd.append("image",bl,"shelf.jpg");return fetch("/api/shelf/photo",{method:"POST",headers:{"X-Device":dev},body:fd});}).then(function(r){return r.json().catch(function(){return {};}).then(function(j){if(!r.ok)throw new Error(typeof j.detail==="string"?j.detail:"Не получилось разобрать фото");return j;});})
       .then(function(j){box.innerHTML='<p class="sub" style="margin:10px 0 4px">Снимите галочки с лишнего:</p>'+j.items.map(function(x){return '<label class="step"><input type="checkbox" checked data-sp-item="'+esc(x)+'"><span>'+esc(x)+'</span></label>';}).join("")+'<button class="btn" data-shelf-photo-add="1">🏠 Добавить на полку</button>';})
       .catch(function(e){box.innerHTML="";alert(e.message);});
   });
@@ -616,18 +643,28 @@ select{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--lin
   }
   // общий список покупок из нескольких рецептов избранного
   function viewCombo(){
-    return call("GET","/api/favorites").then(function(d){
+    // отмеченное раньше (кнопкой «В общий список» на сайте или в боте) приходит уже с галочками
+    return Promise.all([call("GET","/api/favorites"),call("GET","/api/combo").catch(function(){return {ids:[]};})]).then(function(a){
+      var d=a[0],on=a[1].ids||[];
+      if(!d.items.length)return '<button class="chip mini" data-tab-go="favs">← Любимые</button><h1 style="margin-top:10px">🛒 Общий список покупок</h1><p class="sub">Пока пусто. Под любым рецептом нажмите «🛒 В общий список покупок» — рецепты накопятся здесь, одинаковые продукты сложатся.</p>';
       return '<button class="chip mini" data-tab-go="favs">← Любимые</button><h1 style="margin-top:10px">🛒 Общий список покупок</h1><p class="sub">Отметьте рецепты, которые будете готовить. Одинаковые продукты сложатся.</p><div class="card pcard">'+
-        d.items.slice().reverse().map(function(f){return '<label class="step"><input type="checkbox" data-combo-id="'+esc(f.id)+'"><span>'+esc(f.title)+'</span></label>';}).join("")+
+        d.items.slice().reverse().map(function(f){return '<label class="step"><input type="checkbox" data-combo-id="'+esc(f.id)+'"'+(on.indexOf(f.id)>=0?" checked":"")+'><span>'+esc(f.title)+'</span></label>';}).join("")+
         '<button class="btn" data-combo-go="1">Собрать список</button></div><div id="combo-res"></div>';
     });
+  }
+  function comboAdd(b){
+    var r=window.__r[b.getAttribute("data-combo-add")];if(!r)return;b.disabled=true;
+    call("POST","/api/combo",{title:r.title,text:r.text}).then(function(j){
+      cacheFavs();b.disabled=false;b.removeAttribute("data-combo-add");b.setAttribute("data-tab-go","combo");
+      b.textContent="✅ В списке ("+j.n+") — собрать";toast("🛒 Добавлено в общий список");
+    }).catch(function(e){b.disabled=false;alert(e.message);});
   }
   function comboGo(b){
     var ids=[];Array.prototype.forEach.call(document.querySelectorAll("[data-combo-id]"),function(c){if(c.checked)ids.push(c.getAttribute("data-combo-id"));});
     if(!ids.length){alert("Отметьте хотя бы один рецепт");return;}
     b.disabled=true;
     call("POST","/api/favorites/list",{ids:ids}).then(function(r){
-      b.disabled=false;
+      b.disabled=false;call("POST","/api/combo",{ids:[]}).catch(function(){});   // список собран — следующий с чистого
       var box=document.getElementById("combo-res");
       box.innerHTML='<div class="card pcard"><h2>'+esc(r.title)+'</h2>'+r.items.map(function(i){return '<div class="cline"><span>'+esc(i.name)+'</span><span class="sub">'+esc(i.amount||"")+'</span></div>';}).join("")+(r.home.length?'<div class="home">🏠 Есть дома: '+esc(r.home.join(", "))+'</div>':'')+'<a class="btn" style="display:block;text-align:center;margin-top:12px" href="'+esc(r.url)+'" target="_blank" rel="noopener">☑️ Открыть с галочками и поделиться</a></div>';
       box.scrollIntoView({behavior:"smooth",block:"start"});
@@ -693,7 +730,7 @@ select{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--lin
       if(!items.length) return '<h1>❤️ Любимые рецепты</h1>'+favNote()+'<div class="card empty">Пока пусто. Нажмите «⭐ Сохранить» под понравившимся рецептом.</div>';
       var h='<h1>❤️ Любимые рецепты</h1>'+favNote();
       h+=bulkButton("📄 Всё избранное — одним PDF",items.map(function(f){return {title:f.title,text:f.text};}),"Избранные рецепты")+'<div style="height:12px"></div>';
-      if(items.length>=2)h+='<button class="btn ghost" data-tab-go="combo" style="margin-bottom:12px">🛒 Общий список покупок</button>';
+      if(items.length)h+='<button class="btn ghost" data-tab-go="combo" style="margin-bottom:12px">🛒 Общий список покупок</button>';
       items.forEach(function(f){var sid="s"+Math.random().toString(36).slice(2,8);window.__r[sid]={base:f.text,fav:f};h+=accordion(esc(f.title),"","",'<div data-sc="'+sid+'">'+favBody(f,f.text)+'</div>',false);});
       return h;});
   }
@@ -1265,6 +1302,9 @@ select{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--lin
     if(b=t.closest("[data-shelf-photo-add]")){shelfPhotoAdd(b);return;}
     if(b=t.closest("[data-shelf-photo]")){var spi=document.getElementById("shelf-photo-in");if(spi)spi.click();return;}
     if(b=t.closest("[data-combo-go]")){comboGo(b);return;}
+    if(b=t.closest("[data-combo-add]")){comboAdd(b);return;}
+    if(b=t.closest("[data-tl-open]")){tailorOpen(b);return;}
+    if(b=t.closest("[data-tl-go]")){tailorGo(b);return;}
     if(b=t.closest("[data-del]")){if(confirm("Удалить из избранного?"))call("DELETE","/api/favorites/"+b.getAttribute("data-del")).then(function(){cacheFavs();show("favs");}).catch(fail);return;}
     if(b=t.closest("[data-cook]")){runJob(call("POST","/api/week/cook"),"Готовлю меню на день…","cook").then(function(){pendClear();show("menus");}).catch(function(e){fail(e,"menus");});return;}
   });
@@ -1289,8 +1329,17 @@ select{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--lin
       var lg=null;try{lg=new URLSearchParams(location.search).get("login");}catch(e){}
       if(lg){
         try{history.replaceState(null,"",location.pathname);}catch(e){}
-        return call("POST","/api/link/claim",{code:lg}).then(function(){ocClear();toast("✅ Вход выполнен — профиль общий с Telegram");},function(e){toast(e.message);})
-          .then(loadMe).then(function(){show("profile");});
+        // ссылку мог прислать кто угодно: входим только после подтверждения
+        return loadMe().then(function(){
+          main.innerHTML='<div class="card pcard"><h2>Войти через Telegram?</h2><p class="sub" style="margin:0 0 10px">Эту ссылку бот даёт только владельцу аккаунта (Настройки → Без VPN). '+
+            'Если вы сами её только что получили в своём боте — входите. Если ссылку вам кто-то прислал, не входите: вы окажетесь в чужом аккаунте, и всё, что вы сохраните, увидит он.</p>'+
+            '<button class="btn" id="lg-yes">Да, это моя ссылка — войти</button><button class="btn ghost" id="lg-no">Не входить</button></div>';
+          document.getElementById("lg-no").onclick=function(){show("new");};
+          document.getElementById("lg-yes").onclick=function(){
+            call("POST","/api/link/claim",{code:lg}).then(function(){ocClear();toast("✅ Вход выполнен — профиль общий с Telegram");},function(e){alert(e.message);})
+              .then(loadMe).then(function(){show("profile");});
+          };
+        });
       }
       var uq=new URLSearchParams(location.search),rfq=uq.get("ref"),tq=uq.get("test");
       if(rfq){call("POST","/api/ref",{ref:rfq}).catch(function(){});try{history.replaceState(null,"",location.pathname);}catch(e){}}

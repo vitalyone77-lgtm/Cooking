@@ -76,8 +76,9 @@ def stats(p: dict) -> dict:
     """Пришло людей, оплатили, суммы и выплаты. Тестовые и возвращённые платежи не считаем, звёзды считаем отдельно."""
     code = p["code"]
     users = accounts._q("SELECT COUNT(*) FROM refs WHERE ref=?", (code,), one=True)[0]
-    rows = accounts._q(f"SELECT p.uid, {accounts.RUB_SQL}, p.ts FROM payments p JOIN refs r ON r.uid=p.uid WHERE r.ref=? AND p.currency='RUB' ORDER BY p.ts", (code,), all_=True)
-    stars = accounts._q("SELECT p.uid, p.amount FROM payments p JOIN refs r ON r.uid=p.uid WHERE r.ref=? AND p.currency='XTR'", (code,), all_=True)
+    # только платежи после перехода по ссылке: старые оплаты пришедшего человека партнёру не принадлежат (аудит 15.11.2026)
+    rows = accounts._q(f"SELECT p.uid, {accounts.RUB_SQL}, p.ts FROM payments p JOIN refs r ON r.uid=p.uid WHERE r.ref=? AND p.currency='RUB' AND p.ts>=r.ts ORDER BY p.ts", (code,), all_=True)
+    stars = accounts._q("SELECT p.uid, p.amount FROM payments p JOIN refs r ON r.uid=p.uid WHERE r.ref=? AND p.currency='XTR' AND p.ts>=r.ts", (code,), all_=True)
     months: dict[str, dict] = {}
     for _, amount, ts in rows:
         m = months.setdefault(time.strftime("%Y-%m", time.localtime(ts)), {"gross": 0, "count": 0})
@@ -89,7 +90,7 @@ def stats(p: dict) -> dict:
     stars_total = sum(r[1] for r in stars)
     stars_earned = int(stars_total * p["share"] // 100)
     active = accounts._q("SELECT COUNT(DISTINCT s.uid) FROM subs s JOIN refs r ON r.uid=s.uid JOIN payments p ON p.uid=s.uid "
-                         "WHERE r.ref=? AND s.until > ? AND s.source='payment' AND p.currency IN ('RUB', 'XTR')", (code, time.time()), one=True)[0]
+                         "WHERE r.ref=? AND s.until > ? AND s.source='payment' AND p.currency IN ('RUB', 'XTR') AND p.ts>=r.ts", (code, time.time()), one=True)[0]
     history = accounts._q("SELECT ts, amount, stars FROM partner_settlements WHERE code=? ORDER BY ts DESC LIMIT 24", (code,), all_=True)
     return {"clicks": p["clicks"], "users": users, "buyers": len({r[0] for r in rows} | {r[0] for r in stars}), "active": active, "payments": len(rows), "gross": round(gross, 2),
             "unpaid": now["gross"], "tax": now["tax"], "fee": now["fee"], "due": now["due"], "paid": round(done[1], 2), "balance": now["due"], "ready": now["due"] >= MIN_PAYOUT,

@@ -2,6 +2,7 @@
 Калорийность блюда, которого нет в справочнике: спрашиваем ИИ. Ответ запоминаем (ai_foods), поэтому одно и то же блюдо спрашивается
 один раз на всех. Лимит на человека в день. Из ответа берём только числа и короткое название: текст запроса ничего не меняет.
 """
+import asyncio
 import json
 import logging
 import re
@@ -74,6 +75,9 @@ def _used_key(uid) -> str:
     return f"foodai:{uid}:{time.strftime('%Y-%m-%d')}"
 
 
+_busy: dict[str, asyncio.Lock] = {}
+
+
 async def estimate(uid, query: str) -> tuple[dict | None, str]:
     """-> (продукт, "") или (None, причина для человека). Запомненный ответ лимит не тратит."""
     query = re.sub(r"\s+", " ", query or "").strip()[:60]
@@ -84,21 +88,31 @@ async def estimate(uid, query: str) -> tuple[dict | None, str]:
     if hit:
         return hit, ""
     usage.note_words("diary", query)
-    limit = FREE_LIMIT if plans.plan_of(uid) in ("free", "anon") else DAILY_LIMIT
-    used = (accounts.sess_get(_used_key(uid)) or {}).get("n", 0)
-    if used >= limit:
-        return None, f"На сегодня вопросы к ИИ закончились ({limit} в день). Запишите блюдо сразу с калориями: «домашняя пицца 450»."
-    try:
-        raw = await ai.call_llm_with_fallback([{"role": "system", "content": SYSTEM}, {"role": "user", "content": query}], max_tokens=200)
-    except RuntimeError:
-        logger.warning("Оценка блюда: ИИ не ответил")
-        return None, "ИИ сейчас не отвечает. Запишите блюдо сразу с калориями: «домашняя пицца 450»."
+    if usage.cap_reached():
+        return None, "ИИ сегодня перегружен. Запишите блюдо сразу с калориями: «домашняя пицца 450»."
+    # Попытка списывается ДО вызова (аудит 15.11.2026: при списании «только за удачный ответ» бессмысленный текст и пачка
+    # одновременных запросов шли к ИИ без счёта). Возвращаем только если ИИ не ответил — это не вина человека.
+    # Одновременные вопросы одного человека — по очереди, иначе все прошли бы проверку лимита разом.
+    lock = _busy.setdefault(str(uid), asyncio.Lock())
+    async with lock:
+        limit = FREE_LIMIT if plans.plan_of(uid) in ("free", "anon") else DAILY_LIMIT
+        used = (accounts.sess_get(_used_key(uid)) or {}).get("n", 0)
+        if used >= limit:
+            return None, f"На сегодня вопросы к ИИ закончились ({limit} в день). Запишите блюдо сразу с калориями: «домашняя пицца 450»."
+        hit = cached(query)
+        if hit:
+            return hit, ""
+        accounts.sess_set(_used_key(uid), {"n": used + 1})
+        try:
+            raw = await ai.call_llm_with_fallback([{"role": "system", "content": SYSTEM}, {"role": "user", "content": query}], max_tokens=200)
+        except RuntimeError:
+            accounts.sess_set(_used_key(uid), {"n": used})
+            logger.warning("Оценка блюда: ИИ не ответил")
+            return None, "ИИ сейчас не отвечает. Запишите блюдо сразу с калориями: «домашняя пицца 450»."
+        usage.log("ai", uid, "foodai")               # видно в общем дневном потолке и в расходах
     d = parse(raw, query)
     if not d:
         return None, "ИИ не смог оценить такое блюдо. Попробуйте написать проще или запишите сразу с калориями: «домашняя пицца 450»."
-    # Лимит тратим только на УСПЕШНУЙ ответ — раньше счётчик увеличивался до вызова ИИ и не
-    # возвращался при сбое/непонятном ответе, человек терял попытку за ничего.
-    accounts.sess_set(_used_key(uid), {"n": used + 1})
     accounts._q("INSERT OR IGNORE INTO ai_foods(key, name, grams, kcal100, p100, f100, c100, label, ts) VALUES(?,?,?,?,?,?,?,?,?)",
                 (key, d["name"], d["grams"], d["kcal100"], d["p100"], d["f100"], d["c100"], d["label"], time.time()))
     return cached(query), ""

@@ -3,6 +3,7 @@
 или вручную, увидеть итог дня, график «калории столбиками и вес линией» картинкой, посчитать примерный расход.
 Калории оценочные: оговорка показывается на экранах дневника.
 """
+import asyncio
 import logging
 import re
 
@@ -486,7 +487,7 @@ async def chart(callback: CallbackQuery, state: FSMContext):
         return
     await callback.answer()
     usage.event("diary_chart", uid)
-    png = charts.weight_chart(weights, accounts.goals_get(uid)["weight_goal"])
+    png = await asyncio.to_thread(charts.weight_chart, weights, accounts.goals_get(uid)["weight_goal"])
     await ui.show(callback, "График веса. Оценка динамики, не медицинское заключение.", _back_kb(), png, mode="edit")
 
 

@@ -104,7 +104,8 @@ NEW_FEATURES = {"voice": "🎙 Голосовой ввод (продукты, п
 ROLLOUT_LEVELS = {"off": "выключено", "testers": "тестировщики", "premium": "подписка", "all": "все"}
 FEATURE_TITLES = {"memory": "Исключение продуктов и полка",
                   "pdf": "PDF для чтения без интернета", "cart": "Корзина ВкусВилла с ценами",
-                  "noads": "Сайт без рекламы"}
+                  "noads": "Сайт без рекламы",
+                  "tailor": "«🎯 Под меня»: рецепт из книги под ваши исключения, цель и пожелания"}
 
 
 def paywall() -> bool:
@@ -293,6 +294,10 @@ def maybe_start_trial(uid) -> float | None:
     """Первый упор в лимит бесплатного плана — включаем пробный полный доступ (один раз на аккаунт)."""
     days = int(cfg("TRIAL_DAYS") or 0)
     if not paywall_for(uid) or is_anon(uid) or days <= 0:
+        return None
+    if plan_of(uid) == "premium":
+        # уже есть подписка (промокод, друзья, оплата) и упёрлись в её лимит — пробная неделя ничего не добавит,
+        # а сгорела бы молча и не досталась потом (аудит 15.11.2026)
         return None
     return accounts.start_trial(uid, days)
 

@@ -76,6 +76,10 @@ class DiaryForm(StatesGroup):
     activity = State()
 
 
+class TailorForm(StatesGroup):
+    wishes = State()
+
+
 class BookForm(StatesGroup):
     """Книга рецептов: ждём слово для поиска."""
     q = State()

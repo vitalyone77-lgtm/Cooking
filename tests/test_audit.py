@@ -127,7 +127,7 @@ accounts._q("INSERT INTO links(dev_id, tg_id, ts) VALUES(?,?,?)", (dev_id, 7010,
 Client.content = '{"products": "not a list"}'
 before = usage._count("SELECT COUNT(*) FROM gens WHERE uid='7010'")
 r = cl.post("/api/label", files={"images": ("a.jpg", b"123", "image/jpeg")}, headers=hdr)
-check("сайт: непонятный ответ про состав без ошибки 500, попытка возвращена", r.status_code in (422, 502) and usage._count("SELECT COUNT(*) FROM gens WHERE uid='7010'") == before, f"{r.status_code} {r.text[:120]}")
+check("сайт: непонятный ответ про состав без ошибки 500; запрос к модели сделан — попытка засчитана", r.status_code in (422, 502) and usage._count("SELECT COUNT(*) FROM gens WHERE uid='7010'") == before + 1, f"{r.status_code} {r.text[:120]}")
 
 
 # ---- правки другой ветки (11.11.2026) ----

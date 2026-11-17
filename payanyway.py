@@ -67,6 +67,9 @@ def create_order(uid, plan_key: str) -> dict:
     o = plans.offer(plan_key)
     if not o or not o["rub"] or o["rub"] <= 0 or (o["key"] == plans.CHECK_KEY and not (plans.is_tester(uid) or plans.is_preview(uid))):
         raise ValueError("Такого тарифа нет")
+    if test_mode() and not (plans.is_tester(uid) or plans.is_preview(uid)):
+        # тестовая карта не должна давать настоящую подписку любому (аудит 15.11.2026)
+        raise ValueError("Оплата картой сейчас настраивается — попробуйте позже или оплатите звёздами в Telegram")
     n = accounts._q("SELECT COUNT(*) FROM pay_orders WHERE uid=? AND status='new' AND ts > ?", (str(uid), time.time() - 3600), one=True)[0]
     if n >= MAX_NEW_PER_HOUR:
         raise ValueError("Слишком много неоплаченных заказов за час, подождите немного")

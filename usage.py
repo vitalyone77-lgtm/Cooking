@@ -213,16 +213,32 @@ def try_spend(uid, kind: str, src: str, ip: str | None = None) -> tuple[int | No
     lim = plans.limit(uid, kind)
 
     def checked(limit) -> tuple[int | None, str]:
-        """Под _lock: только счётчики этой базы. -> (id, "") записано; (None, текст) отказ; (None, "limit") упёрлись в лимит тарифа."""
-        if cap > 0 and total_today() >= (cap * 3 // 2 if premium else cap):
-            return None, CAP_TEXT
-        if anon_cap > 0 and _count("SELECT COUNT(*) FROM gens WHERE uid LIKE 'w%' AND ts >= ?", (msk_midnight(),)) >= anon_cap:
-            return None, ANON_CAP_TEXT
-        if anon and ip and ip_cap > 0 and _count("SELECT COUNT(*) FROM gens WHERE ip=? AND ts >= ?", (ip, msk_midnight())) >= ip_cap:
-            return None, "С этого адреса сегодня уже было много подборов. Войдите в профиль или приходите завтра."
-        if limit and used(uid, kind, limit[1]) >= limit[0]:
-            return None, "limit"
-        return log(src, uid, kind, ip), ""
+        """Под _lock: только счётчики этой базы. -> (id, "") записано; (None, текст) отказ; (None, "limit") упёрлись в лимит тарифа.
+        Проверка и запись — ОДНОЙ транзакцией с захватом базы на запись: бот и сайт — разные процессы, и одновременные
+        запросы иначе проходили оба по старым цифрам (аудит 15.11.2026: 6 подборов вместо 5)."""
+        c = _conn()
+        q = lambda sql, args: c.execute(sql, args).fetchone()[0]
+        c.execute("BEGIN IMMEDIATE")
+        try:
+            why = ""
+            if cap > 0 and q("SELECT COUNT(*) FROM gens WHERE ts >= ?", (msk_midnight(),)) >= (cap * 3 // 2 if premium else cap):
+                why = CAP_TEXT
+            elif anon_cap > 0 and q("SELECT COUNT(*) FROM gens WHERE uid LIKE 'w%' AND ts >= ?", (msk_midnight(),)) >= anon_cap:
+                why = ANON_CAP_TEXT
+            elif anon and ip and ip_cap > 0 and q("SELECT COUNT(*) FROM gens WHERE ip=? AND ts >= ?", (ip, msk_midnight())) >= ip_cap:
+                why = "С этого адреса сегодня уже было много подборов. Войдите в профиль или приходите завтра."
+            elif limit and q("SELECT COUNT(*) FROM gens WHERE uid=? AND kind=? AND ts >= ?",
+                             (uid, kind, msk_midnight(limit[1] - 1))) >= limit[0]:
+                why = "limit"
+            if why:
+                c.rollback()
+                return None, why
+            rid = c.execute("INSERT INTO gens(src, uid, kind, ts, ip) VALUES (?, ?, ?, ?, ?)", (src, uid, kind, time.time(), ip)).lastrowid
+            c.commit()
+            return rid, ""
+        except BaseException:
+            c.rollback()
+            raise
 
     with _lock:
         rid, why = checked(lim)
@@ -374,7 +390,7 @@ def event(name: str, uid) -> None:
 
 
 # примерная стоимость одного подбора ИИ, ₽ (замеры токенов DeepSeek, с запасом)
-GEN_COST_RUB = {"recipe": 0.3, "daymenu": 0.7, "week": 0.6, "weekday": 0.7, "missing": 0.3, "reminder": 0.3, "photo": 0.1, "label": 0.3}
+GEN_COST_RUB = {"recipe": 0.3, "daymenu": 0.7, "week": 0.6, "weekday": 0.7, "missing": 0.3, "reminder": 0.3, "photo": 0.1, "label": 0.3, "foodai": 0.02}
 
 
 def _rows(sql: str, args=()) -> list:

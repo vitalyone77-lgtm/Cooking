@@ -77,6 +77,7 @@ from stores.links import STORES, DEFAULT_STORES, search_url, short_name
 from stores.basket import build_priced_basket
 
 BASE = Path(__file__).parent
+logging.getLogger("httpx").setLevel(logging.WARNING)      # адреса запросов (в т.ч. с токеном бота) не пишем в журнал
 app = FastAPI(title="Kitchen", docs_url=None, redoc_url=None, openapi_url=None)
 app.add_middleware(GZipMiddleware, minimum_size=1000)   # HTML/JS сайта в 3-4 раза меньше по сети
 app.mount("/uploads", StaticFiles(directory=web_db.DATA_DIR / "uploads"), name="uploads")
@@ -179,6 +180,7 @@ class Params(BaseModel):
 # ---------------- фоновые задачи (генерация долгая) ----------------
 
 JOBS: dict[str, dict] = {}
+JOB_TIMEOUT = 300       # секунд на одну генерацию (аудит 15.11.2026)
 _RUN_KEY = "running_jobs"      # незаконченные платные задачи: если процесс перезапустят посреди работы — попытку вернём
 _run_lock = __import__("threading").Lock()
 
@@ -277,7 +279,8 @@ def _start_job(dev_id: int, coro_fn, spend: dict | None = None) -> dict:
 
     async def runner():
         try:
-            JOBS[job_id]["result"] = await coro_fn()
+            # зависший ответ ИИ не держит человека («предыдущий запрос ещё выполняется») до часа: 5 минут — и попытка возвращается
+            JOBS[job_id]["result"] = await asyncio.wait_for(coro_fn(), JOB_TIMEOUT)
             JOBS[job_id]["status"] = "done"
         except Exception as e:  # noqa: BLE001
             JOBS[job_id]["status"] = "error"
@@ -653,6 +656,73 @@ def favorites_add(f: FavIn, x_device: str | None = Header(default=None)):
     return {"id": fav_mod.add_favorite(cid, f.title, f.text, f.cuisine)}
 
 
+class TailorIn(BaseModel):
+    book_id: int
+    wishes: str = Field("", max_length=300)
+
+
+@app.post("/api/tailor")
+async def api_tailor(body: TailorIn, x_device: str | None = Header(default=None)):
+    """«🎯 Под меня»: рецепт из книги под исключения, цель и пожелания. Подписка; попытка — как замена продуктов."""
+    import tailor
+    dev_id = _dev(x_device)
+    uid = _uid(dev_id)
+    if not plans.has_feature(uid, tailor.FEATURE):
+        raise HTTPException(403, "«Под меня» — в подписке «Повар»")
+    r = book.get(body.book_id)
+    if not r:
+        raise HTTPException(404, "Рецепт не найден")
+    if not tailor.summary(uid) and not body.wishes.strip():
+        raise HTTPException(400, "Напишите, что изменить: например «без лука, поменьше калорий»")
+    sp = _spend(dev_id, "missing")
+
+    async def work():
+        text, terms = await tailor.tailor_recipe(uid, r["text"], body.wishes)
+        usage.event("tailor", uid)
+        return {"title": extract_dish_title(text) or r["title"], "text": text,
+                "shopping": _mark_home(dev_id, with_amounts(links_for(terms), amounts_from_recipe_text(text), text))}
+
+    return _start_job(dev_id, work, sp)
+
+
+@app.get("/api/tailor/info")
+def api_tailor_info(x_device: str | None = Header(default=None)):
+    import tailor
+    uid = _uid(_dev(x_device))
+    return {"on": plans.has_feature(uid, tailor.FEATURE), "known": tailor.summary(uid)}
+
+
+class RecipeCartIn(BaseModel):
+    title: str = Field("", max_length=200)
+    text: str = Field("", max_length=20000)
+    ids: list[str] | None = Field(None, max_length=60)
+
+
+@app.get("/api/combo")
+def combo_get(x_device: str | None = Header(default=None)):
+    """Общий список покупок, который копится по ходу (один на бота и сайт): какие рецепты отмечены."""
+    return {"ids": shoplists.combo_get(_uid(_dev(x_device)))["ids"]}
+
+
+@app.post("/api/combo")
+def combo_post(body: RecipeCartIn, x_device: str | None = Header(default=None)):
+    """С текстом — рецепт в «Любимые» и в список; с ids — отмеченные галочки (пустой список — очистить)."""
+    uid = _uid(_dev(x_device))
+    if body.ids is not None:
+        s = shoplists.combo_get(uid)
+        s["ids"] = [i for i in body.ids if isinstance(i, str)]
+        shoplists.combo_save(uid, s)
+        return {"ids": shoplists.combo_get(uid)["ids"]}
+    if len(body.text) < 20:
+        raise HTTPException(400, "Нет рецепта")
+    try:
+        _, n = shoplists.combo_add(uid, body.title or extract_dish_title(body.text) or "Рецепт", body.text)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    usage.event("combo_add", uid)
+    return {"n": n}
+
+
 @app.delete("/api/favorites/{fav_id}")
 def favorites_delete(fav_id: str, x_device: str | None = Header(default=None)):
     return {"ok": fav_mod.remove_favorite(_uid(_dev(x_device)), fav_id)}
@@ -671,7 +741,7 @@ def me(x_device: str | None = Header(default=None)):
     memory = bool(tg) and plans.has_feature(uid, "memory")
     shelf_on = bool(tg) and plans.shelf_on(uid)
     left = {k: list(v) for k in ("recipe", "daymenu", "week") if (v := usage.left(uid, k))}
-    feat = {f: plans.has_feature(uid, f) for f in ("memory", "pdf", "cart", "noads")}
+    feat = {f: plans.has_feature(uid, f) for f in ("memory", "pdf", "cart", "noads", "tailor")}
     out = {"linked": bool(tg), "plan": plans.plan_of(uid), "status": plans.status_text(uid), "left": left,
            "paywall": plans.paywall_for(uid), "memory": memory, "shelf_on": shelf_on, "bot": config.BOT_USERNAME, "feat": feat, "via": ("vk" if tg and tg >= accounts.VK_OFFSET else "tg" if tg else ""),
            "hint": plans.next_step(uid), "preview": plans.is_preview(uid), "stores": _stores_json(uid), "both_linked": bool(tg) and accounts.has_vk_merged(tg), "diary_on": plans.diary_on(uid), "shelf_photo": plans.feature_on(uid, "photo_shelf") and plans.shelf_on(uid), "seller": payinfo.seller(), "photo_on": plans.feature_on(uid, "photo_recipe"),
@@ -720,7 +790,11 @@ class CodeIn(BaseModel):
 @app.post("/api/link/claim")
 def link_claim(body: CodeIn, x_device: str | None = Header(default=None)):
     """Сайт открыт по одноразовой ссылке из бота (?login=<код>)."""
-    tg = accounts.claim_login_code(body.code, _dev(x_device))
+    try:
+        tg = accounts.claim_login_code(body.code, _dev(x_device))
+    except accounts.OtherAccount:
+        raise HTTPException(409, "На этом устройстве уже выполнен вход в другой аккаунт. Если хотите сменить аккаунт, "
+                                 "выйдите в Настройках и откройте ссылку из бота ещё раз.")
     if tg:
         usage.event("site_link", tg)
     if not tg:
@@ -856,11 +930,16 @@ def vk_callback(request: Request, code: str = "", state: str = "", device_id: st
     p = _vk_pending(state)
     if not p or not code or not device_id:
         return _vk_page("Ссылка устарела", "Начните вход ещё раз на сайте.")
-    if not hmac.compare_digest(request.cookies.get("vk_st", ""), state):
-        accounts.sess_set(f"vkst:{state}", {**p, "code": code, "device": device_id})
-        return _vk_page("Подтвердите вход", "Нажимайте, только если вы сами сейчас начали вход на сайте Кухонного помощника. Если ссылку прислал кто-то другой, закройте эту страницу.",
+    if not hmac.compare_digest(request.cookies.get("vk_st", "").encode(), state.encode()):
+        # подтвердить может только этот браузер: одноразовый токен в форме и в cookie (state знает и тот, кто начал вход, — аудит 15.11.2026)
+        ct = secrets.token_urlsafe(24)
+        accounts.sess_set(f"vkst:{state}", {**p, "code": code, "device": device_id, "ct": ct})
+        page = _vk_page("Подтвердите вход", "Нажимайте, только если вы сами сейчас начали вход на сайте Кухонного помощника. Если ссылку прислал кто-то другой, закройте эту страницу.",
                         f"<form method=post action='/api/vk/confirm'><input type=hidden name=state value='{escape(state, quote=True)}'>"
+                        f"<input type=hidden name=ct value='{escape(ct, quote=True)}'>"
                         "<button style='font-size:18px;padding:12px 24px;border-radius:12px;border:0;background:#2f6b4f;color:#fff'>Да, это я, войти</button></form>")
+        page.set_cookie("vk_ct", ct, max_age=VK_START_TTL, httponly=True, secure=True, samesite="lax", path="/api/vk")
+        return page
     try:
         _vk_finish(state, p, code, device_id)
     except HTTPException as e:
@@ -869,10 +948,13 @@ def vk_callback(request: Request, code: str = "", state: str = "", device_id: st
 
 
 @app.post("/api/vk/confirm", response_class=HTMLResponse)
-def vk_confirm(state: str = FForm("")):
+def vk_confirm(request: Request, state: str = FForm(""), ct: str = FForm("")):
     p = _vk_pending(state)
     if not p or not p.get("code"):
         return _vk_page("Ссылка устарела", "Начните вход ещё раз на сайте.")
+    want = str(p.get("ct") or "")
+    if not want or not hmac.compare_digest(ct.encode(), want.encode()) or not hmac.compare_digest(request.cookies.get("vk_ct", "").encode(), want.encode()):
+        return _vk_page("Вход не выполнен", "Подтвердить вход можно только на той странице, которая открылась после «Разрешить» во ВКонтакте. Начните вход ещё раз на сайте.")
     try:
         _vk_finish(state, p, p["code"], p["device"])
     except HTTPException as e:
@@ -1232,8 +1314,7 @@ async def photo_items(image: UploadFile = File(...), x_device: str | None = Head
     except vision.VisionError:
         _refund(dev_id, sp)
         raise HTTPException(502, "Не получилось разобрать фото, попробуйте ещё раз поближе и при хорошем свете")
-    if not items:
-        _refund(dev_id, sp)
+    if not items:          # запрос к модели уже сделан: попытка засчитана
         raise HTTPException(422, "Не вижу на фото продуктов, попробуйте снять поближе")
     usage.event("photo_recipe", _uid(dev_id))
     return {"items": items}
@@ -1257,8 +1338,7 @@ async def shelf_photo(image: UploadFile = File(...), x_device: str | None = Head
     except vision.VisionError:
         _refund(dev_id, sp)
         raise HTTPException(502, "Не получилось разобрать фото, попробуйте ещё раз поближе и при хорошем свете")
-    if not items:
-        _refund(dev_id, sp)
+    if not items:          # запрос к модели уже сделан: попытка засчитана
         raise HTTPException(422, "Не вижу на фото продуктов, попробуйте снять поближе")
     usage.event("photo_shelf", uid)
     return {"items": items}
@@ -1290,8 +1370,7 @@ async def label_check(images: list[UploadFile] = File(...), x_device: str | None
     except vision.VisionError:
         _refund(dev_id, sp)
         raise HTTPException(502, "Не получилось прочитать состав, попробуйте ещё раз")
-    if not res["products"]:
-        _refund(dev_id, sp)
+    if not res["products"]:      # запрос к модели уже сделан: попытка засчитана
         raise HTTPException(422, "Не вижу состав на фото: снимите ближе, чтобы текст был резким")
     usage.event("label_check", _uid(dev_id))
     return res
@@ -1597,7 +1676,7 @@ def feedback_send(body: FeedbackIn, x_device: str | None = Header(default=None))
     return {"ok": True}
 
 
-GATE_NAMES = {"pdf", "cart", "memory", "daymenu", "week", "photo", "voice"}
+GATE_NAMES = {"pdf", "cart", "memory", "daymenu", "week", "photo", "voice", "tailor"}
 
 
 @app.post("/api/gate")
@@ -1680,7 +1759,7 @@ def api_pdf(body: PdfIn, x_device: str | None = Header(default=None)):
 # ---------------- реклама ----------------
 
 @app.get("/api/ad")
-def get_ad(slot: str = "top", x_device: str | None = Header(default=None)):
+def get_ad(request: Request, slot: str = "top", x_device: str | None = Header(default=None)):
     if plans.paywall() and "noads" in (plans.cfg("PREMIUM_FEATURES") or []):
         dev_id = web_db.device_id((x_device or "").strip())
         if dev_id and plans.plan_of(_uid(dev_id)) == "premium":
@@ -1690,17 +1769,36 @@ def get_ad(slot: str = "top", x_device: str | None = Header(default=None)):
         if not rows:
             return {"ad": None}
         a = random.choice(rows)
-        c.execute("INSERT INTO ad_events(ad_id,kind,ts) VALUES(?,?,?)", (a["id"], "view", time.time()))
+        if _ad_count_ok("view", a["id"], _client_ip(request)):
+            c.execute("INSERT INTO ad_events(ad_id,kind,ts) VALUES(?,?,?)", (a["id"], "view", time.time()))
     return {"ad": {"id": a["id"], "title": a["title"], "image": f"/uploads/{a['image']}", "go": f"/go/{a['id']}"}}
 
 
+_ad_once: dict[tuple, float] = {}
+
+
+def _ad_count_ok(kind: str, ad_id: int, ip: str) -> bool:
+    """Один показ и один клик объявления с одного адреса в час: иначе статистику для рекламодателя накручивали
+    простым циклом запросов (аудит 15.11.2026). Переход по ссылке работает всегда, не считается только повтор."""
+    now = time.time()
+    key = (kind, ad_id, ip)
+    if now - _ad_once.get(key, 0) < 3600:
+        return False
+    _ad_once[key] = now
+    if len(_ad_once) > 50000:
+        for k in [k for k, t in _ad_once.items() if now - t > 3600]:
+            _ad_once.pop(k, None)
+    return True
+
+
 @app.get("/go/{ad_id}")
-def go(ad_id: int):
+def go(ad_id: int, request: Request):
     with web_db.db() as c:
         a = c.execute("SELECT url FROM ads WHERE id=?", (ad_id,)).fetchone()
         if not a:
             raise HTTPException(404)
-        c.execute("INSERT INTO ad_events(ad_id,kind,ts) VALUES(?,?,?)", (ad_id, "click", time.time()))
+        if _ad_count_ok("click", ad_id, _client_ip(request)):
+            c.execute("INSERT INTO ad_events(ad_id,kind,ts) VALUES(?,?,?)", (ad_id, "click", time.time()))
     return RedirectResponse(a["url"], status_code=302)
 
 
@@ -1714,19 +1812,40 @@ def _role_password(role: str) -> str:
     return {"owner": config.ADMIN_PASSWORD, "partner": config.PARTNER_PASSWORD}.get(role, "")
 
 
-def _admin_cookie(role: str) -> str:
-    """«роль.подпись»: подпись зависит от пароля роли — сменили пароль, и старые входы перестают работать."""
-    sig = hmac.new(config.WEB_SECRET.encode(), f"admin:{role}:{_role_password(role)}".encode(), hashlib.sha256).hexdigest()
-    return f"{role}.{sig}"
+ADMIN_SESSION_DAYS = 3        # вход в админку живёт 3 дня с продлением, пока ей пользуются
+
+
+def _admin_cookie(role: str, sid: str) -> str:
+    """«роль.сессия.подпись»: у каждого входа своя сессия на сервере — «Выйти» её отменяет, утёкший код не живёт месяц
+    (аудит 15.11.2026: раньше код был один на все входы и жил 30 дней). Подпись зависит и от пароля роли:
+    сменили пароль — все входы недействительны."""
+    sig = hmac.new(config.WEB_SECRET.encode(), f"admin:{role}:{sid}:{_role_password(role)}".encode(), hashlib.sha256).hexdigest()
+    return f"{role}.{sid}.{sig}"
+
+
+def _admin_session(raw: str) -> tuple[str, str] | None:
+    parts = (raw or "").split(".")
+    if len(parts) != 3:
+        return None
+    role, sid, _ = parts
+    if not (config.WEB_SECRET and role in ROLE_TITLES and _role_password(role) and sid):
+        return None
+    if not hmac.compare_digest(raw.encode(), _admin_cookie(role, sid).encode()):
+        return None
+    s = accounts.sess_get(f"adm:{sid}")
+    if not s or s.get("role") != role or time.time() - s.get("seen", 0) > ADMIN_SESSION_DAYS * 86400:
+        return None
+    if time.time() - s.get("seen", 0) > 600:                 # продлеваем не чаще раза в 10 минут
+        accounts.sess_set(f"adm:{sid}", {"role": role, "seen": time.time()})
+    return role, sid
 
 
 def _need_admin(request: Request, owner: bool = False) -> str:
     """Роль вошедшего: owner (владелец — смотрит и меняет всё) или partner (партнёр — только смотрит).
     owner=True — действие меняет данные, партнёру недоступно."""
-    raw = request.cookies.get("adm", "")
-    role = raw.split(".", 1)[0]
-    if (config.WEB_SECRET and _role_password(role) and role in ROLE_TITLES
-            and hmac.compare_digest(raw.encode(), _admin_cookie(role).encode())):
+    got = _admin_session(request.cookies.get("adm", ""))
+    if got:
+        role = got[0]
         if owner and role != "owner":
             raise HTTPException(403, "Партнёр может только смотреть. Менять настройки может владелец.")
         return role
@@ -1754,14 +1873,19 @@ async def admin_login(request: Request, response: Response):
         _prune(_login_fail, 600)
         raise HTTPException(401, "Неверный пароль")
     accounts.admin_log(role, "вход", ip)
+    sid = secrets.token_urlsafe(18)
+    accounts.sess_set(f"adm:{sid}", {"role": role, "seen": time.time()})
     resp = JSONResponse({"ok": True, "role": role})
-    resp.set_cookie("adm", _admin_cookie(role), httponly=True, samesite="strict",
-                    secure=request.headers.get("x-forwarded-proto") == "https", max_age=30 * 86400)
+    resp.set_cookie("adm", _admin_cookie(role, sid), httponly=True, samesite="strict",
+                    secure=request.headers.get("x-forwarded-proto") == "https", max_age=ADMIN_SESSION_DAYS * 86400)
     return resp
 
 
 @app.post("/admin/logout")
-def admin_logout():
+def admin_logout(request: Request):
+    got = _admin_session(request.cookies.get("adm", ""))
+    if got:
+        accounts._q("DELETE FROM sess WHERE key=?", (f"adm:{got[1]}",))     # выход отменяет вход на сервере, а не только в браузере
     resp = JSONResponse({"ok": True})
     resp.delete_cookie("adm")
     return resp
@@ -2034,6 +2158,10 @@ async def _noindex_private(request: Request, call_next):
     resp = await call_next(request)
     if request.url.path.startswith(("/api", "/admin", "/go", "/uploads")):
         resp.headers["X-Robots-Tag"] = "noindex, nofollow"
+    if request.url.path.startswith(("/api/", "/admin")) and "cache-control" not in resp.headers:
+        resp.headers["Cache-Control"] = "no-store"          # личные ответы не оседают в кэше браузера и прокси (аудит 15.11.2026)
+    resp.headers.setdefault("X-Content-Type-Options", "nosniff")
+    resp.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")     # адрес страницы со ссылкой-ключом не уходит на чужие сайты
     return resp
 
 

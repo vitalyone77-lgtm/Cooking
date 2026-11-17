@@ -13,11 +13,16 @@ PIECE_WEIGHT_G: dict[str, int | None] = {
 _MAX_PIECES = 40   # больше — это уже граммы
 
 
+# прилагательное от плода — это другой продукт: «сливочное масло», «сливки», «лимонный сок», «апельсиновый сок» (аудит 15.11.2026)
+_ADJ = r"(?:н[ыоаую]|ов(?:ый|ая|ое|ые|ого|ую|ом)|ев(?:ый|ая|ое|ые)|оч|еч|к[иау])"
+
+
 def _stem_of(name: str) -> str | None:
-    n = name.lower()
+    n = name.lower().replace("ё", "е")
     for st in PIECE_WEIGHT_G:
-        if re.search(r"(?<![а-яё])" + st, n):
-            return st
+        for m in re.finditer(r"(?<![а-я])" + st, n):
+            if not re.match(_ADJ, n[m.end():]):
+                return st
     return None
 
 

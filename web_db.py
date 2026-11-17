@@ -41,6 +41,7 @@ def db():
 
 
 with db() as _c:
+    _c.execute("PRAGMA journal_mode=WAL")      # чтение не ждёт запись (аудит 15.11.2026: «database is locked» под нагрузкой)
     _c.executescript(SCHEMA)
 
 
@@ -57,10 +58,11 @@ def device_id(code: str) -> int | None:
     if not code or len(code) != 32:
         return None
     with db() as c:
-        row = c.execute("SELECT id FROM devices WHERE uuid=?", (code,)).fetchone()
+        row = c.execute("SELECT id, last_seen FROM devices WHERE uuid=?", (code,)).fetchone()
         if not row:
             return None
-        c.execute("UPDATE devices SET last_seen=? WHERE id=?", (time.time(), row["id"]))
+        if time.time() - (row["last_seen"] or 0) > 600:      # «последний визит» — не чаще раза в 10 минут, а не на каждый запрос
+            c.execute("UPDATE devices SET last_seen=? WHERE id=?", (time.time(), row["id"]))
         return row["id"]
 
 

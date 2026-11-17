@@ -39,6 +39,9 @@ IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp"}
 IS_IMAGE = F.photo | F.document.mime_type.in_(IMAGE_TYPES)
 
 
+_voice_locks: dict[int, asyncio.Lock] = {}
+
+
 class VisionForm(StatesGroup):
     extra = State()          # дописать продукты к распознанным
 
@@ -55,20 +58,23 @@ async def voice_middleware(handler, event: Message, data: dict):
     if event.voice.duration and event.voice.duration > 90:
         await event.answer("🎙 Голосовое слишком длинное: уложитесь в минуту.")
         return None
-    if usage.events_today("voice", uid) >= config.VOICE_DAILY:
-        await event.answer("🎙 Лимит голосовых на сегодня исчерпан. Можно написать текстом.")
-        return None
-    try:
-        audio = await event.bot.download(event.voice.file_id)
-        text = await vision.transcribe(audio.read())
-    except vision.VisionError:
-        await event.answer("🎙 Не получилось распознать голос — попробуйте ещё раз или напишите текстом.")
-        return None
-    except Exception:  # noqa: BLE001 — скачивание из Telegram
-        logger.exception("голосовое")
-        await event.answer("🎙 Не получилось распознать голос — попробуйте ещё раз или напишите текстом.")
-        return None
-    usage.event("voice", uid)
+    # Учёт ДО распознавания и по одному голосовому за раз (аудит 15.11.2026: пачка голосовых проходила проверку лимита разом,
+    # а неудачные расшифровки не считались — запросы к платной модели шли без счёта).
+    async with _voice_locks.setdefault(uid, asyncio.Lock()):
+        if usage.events_today("voice", uid) >= config.VOICE_DAILY:
+            await event.answer("🎙 Лимит голосовых на сегодня исчерпан. Можно написать текстом.")
+            return None
+        usage.event("voice", uid)
+        try:
+            audio = await event.bot.download(event.voice.file_id)
+            text = await vision.transcribe(audio.read())
+        except vision.VisionError:
+            await event.answer("🎙 Не получилось распознать голос — попробуйте ещё раз или напишите текстом.")
+            return None
+        except Exception:  # noqa: BLE001 — скачивание из Telegram
+            logger.exception("голосовое")
+            await event.answer("🎙 Не получилось распознать голос — попробуйте ещё раз или напишите текстом.")
+            return None
     if not text:
         await event.answer("🎙 Ничего не расслышал — попробуйте ещё раз.")
         return None
@@ -158,9 +164,8 @@ async def _recognize(message: Message, state: FSMContext, mode: str) -> None:
             logger.exception("фото")
         await status.edit_text("😔 Не получилось разобрать фото. Попробуйте ещё раз — поближе и при хорошем свете.")
         return
-    if not items:
-        usage.unlog(spent)
-        await status.edit_text("🤔 Не вижу на фото продуктов. Попробуйте сфотографировать поближе.")
+    if not items:          # запрос к модели уже сделан: попытка засчитана (иначе размытые фото шли бы без счёта)
+        await status.edit_text("🤔 Не вижу на фото продуктов. Попробуйте сфотографировать поближе, при хорошем свете.")
         return
     usage.event("photo_" + ("shelf" if mode == "shelf" else "recipe"), uid)
     _prune()
