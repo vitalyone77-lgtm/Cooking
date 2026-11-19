@@ -741,6 +741,19 @@ select{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--lin
   // редкое — внизу, над настройками: свой список покупок (подписка)
   function profileNav(){return '<div class="pnav-small">'+(isLocked("mylist")?'<button class="lcheck" data-gate="mylist">'+lockIc()+'📝 Свой список покупок</button>':'<button class="lcheck" data-tab-go="mylist">📝 Свой список покупок</button>')+'</div>'+
     '<div class="row"><button class="btn ghost" data-tab-go="settings">⚙️ Настройки</button><button class="btn ghost" data-tab-go="help">❓ Справка</button></div>';}
+  function viewShelfCook(){
+    return call("GET","/api/shelf/cook").then(function(d){
+      var h='<button class="chip mini" data-tab-go="profile">← Профиль</button><h1 style="margin-top:10px">🍳 Что приготовить из полки</h1>'+
+        '<p class="sub">Рецепты из книги, где больше всего продуктов уже есть дома. Соль, перец и специи не считаем.</p>';
+      if(!d.items.length)h+='<div class="card empty">В книге пока нет рецептов с продуктами с вашей полки. Нажмите «Создать» и впишите в «Что использовать» продукты с полки — помощник составит новый рецепт.<br><button class="btn" data-tab-go="new" style="margin-top:10px">🍳 Создать рецепт</button></div>';
+      d.items.forEach(function(r){
+        var sub="есть "+r.have.length+" из "+r.total+(r.kcal?" · "+r.kcal+" ккал":"")+(r.minutes?" · "+r.minutes+" мин":"");
+        var sid="s"+Math.random().toString(36).slice(2,8);window.__r[sid]={base:r.text,book:r};
+        h+=accordion(esc(r.title),sub,"",'<p class="sub" style="margin:8px 0 0">Есть дома: '+esc(r.have.join(", "))+'</p><div data-sc="'+sid+'">'+bookBody(r,r.text)+'</div>',false);
+      });
+      return h;
+    });
+  }
   function viewMyList(){
     return Promise.resolve('<button class="chip mini" data-tab-go="profile">← Профиль</button><h1 style="margin-top:10px">📝 Свой список покупок</h1>'+
       '<p class="sub">Что купить — через запятую или по строке, можно с количеством. Получится список с галочками: его можно отправить и отмечать вместе.</p>'+
@@ -787,7 +800,7 @@ select{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--lin
           else if(!m.shelf_on)h+='<div class="card pcard"><h2>Пока здесь пусто</h2><p class="sub" style="margin:0">В настройках можно включить дневник питания, вес и полку. Тогда они будут здесь.</p></div>';
           if(m.shelf_on)h+=accordion("🏠 Моя полка",(m.shelf||[]).length+" прод.","",'<p class="sub" style="margin:10px 0 8px">Долгоживущие продукты, которые уже есть дома. В списках покупок они идут отдельно.</p><div class="chips">'+
             (m.shelf||[]).map(function(x){return '<button class="chip" data-shelf-del="'+esc(x)+'">'+esc(x)+' ✕</button>';}).join("")+'</div>'+
-            (m.shelf_photo?'<button class="btn ghost" data-shelf-photo="1">📷 Добавить по фото</button><input type="file" id="shelf-photo-in" accept="image/*" style="display:none"><div id="shelf-photo-res"></div>':'')+'<div class="row" style="margin-top:8px"><input type="text" id="shelf-add" maxlength="60" placeholder="оливковое масло" aria-label="Добавить на полку"><button class="btn" style="width:auto;margin:0" data-shelf-add="1">Добавить</button></div>',false);
+            ((m.shelf||[]).length?'<button class="btn" data-tab-go="shelfcook">🍳 Что приготовить из полки</button>':'')+(m.shelf_photo?'<button class="btn ghost" data-shelf-photo="1">📷 Добавить по фото</button><input type="file" id="shelf-photo-in" accept="image/*" style="display:none"><div id="shelf-photo-res"></div>':'')+'<div class="row" style="margin-top:8px"><input type="text" id="shelf-add" maxlength="60" placeholder="оливковое масло" aria-label="Добавить на полку"><button class="btn" style="width:auto;margin:0" data-shelf-add="1">Добавить</button></div>',false);
           return h+profileNav();
         });
       });
@@ -912,7 +925,7 @@ select{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--lin
       return h;
     });
   }
-  var VIEWS={menus:viewMenus,favs:viewFavs,book:viewBook,profile:viewProfile,settings:viewSettings,label:viewLabel,combo:viewCombo,mylist:viewMyList,friends:viewFriends,help:viewHelp};
+  var VIEWS={menus:viewMenus,favs:viewFavs,book:viewBook,profile:viewProfile,settings:viewSettings,label:viewLabel,combo:viewCombo,mylist:viewMyList,shelfcook:viewShelfCook,friends:viewFriends,help:viewHelp};
   function offlineBanner(){return '<div class="card" style="padding:12px 16px;margin:0 0 12px;border-left:4px solid var(--primary)"><strong>📴 Нет интернета.</strong> Показываю сохранённое с прошлого раза: меню, план, избранное, рецепты и таймеры работают. Новые подборы — когда появится сеть.</div>';}
   window.addEventListener("online",function(){if(OFFLINE&&(cur==="menus"||cur==="favs"))show(cur);});
   // вкладку, которую уже открывали, показываем сразу из памяти, а свежие данные подставляем, как только придут

@@ -659,6 +659,8 @@ def shelf_view(uid: int) -> tuple[str, InlineKeyboardMarkup]:
     b.adjust(2)
     b.row(InlineKeyboardButton(text="➕ Добавить продукт", callback_data="pf:shadd"),
           *([InlineKeyboardButton(text="📷 Добавить по фото", callback_data="pf:shph")] if plans.feature_on(uid, "photo_shelf") else []))
+    if items:
+        b.row(InlineKeyboardButton(text="🍳 Что приготовить из полки", callback_data="pf:shck"))
     b.row(InlineKeyboardButton(text="⬅️ Профиль", callback_data="pf:back"))
     return text, b.as_markup()
 
@@ -1034,3 +1036,40 @@ async def cmd_grant(message: Message, command: CommandObject):
         await message.answer("Формат: /grant 123456789 30 (дней от 1 до 365)", parse_mode=None)
         return
     await message.answer(f"Готово: {uid} до {time.strftime('%d.%m.%Y', time.localtime(until))}", parse_mode=None)
+
+
+
+# ---------- «Что приготовить из полки» ----------
+
+@router.callback_query(F.data == "pf:shck")
+async def shelf_cook(callback: CallbackQuery, state: FSMContext):
+    """Рецепты книги, для которых больше всего продуктов уже на полке (без ИИ). Не нашлось — подобрать из этих продуктов."""
+    import book
+    if not await _need_shelf(callback):
+        return
+    uid = callback.message.chat.id
+    shelf = [s["item"] for s in accounts.shelf_list(uid)]
+    found = book.from_shelf(shelf)
+    usage.event("shelf_cook", uid)
+    await callback.answer()
+    b = InlineKeyboardBuilder()
+    for r in found:
+        b.row(InlineKeyboardButton(text=f"🍽 {r['title'][:34]} · есть {len(r['have'])} из {r['total']}", callback_data=f"bk:v:{r['id']}"))
+    b.row(InlineKeyboardButton(text="🔍 Подобрать новый рецепт из полки", callback_data="pf:shgen"))
+    b.row(InlineKeyboardButton(text="⬅️ Полка", callback_data="pf:shelf"))
+    text = ("🍳 Из того, что на полке, подходит (из книги рецептов, без ожидания):" if found else
+            "🍳 В книге пока нет рецептов с продуктами с вашей полки.") + "\n\nНужен свежий рецепт — «Подобрать новый»: продукты с полки подставятся сами."
+    await callback.message.edit_text(text, reply_markup=b.as_markup(), parse_mode=None)
+
+
+@router.callback_query(F.data == "pf:shgen")
+async def shelf_generate(callback: CallbackQuery, state: FSMContext):
+    import bot_vision
+    uid = callback.message.chat.id
+    shelf = [s["item"] for s in accounts.shelf_list(uid)][:15]
+    start = bot_vision.hooks.get("start_recipe")
+    await callback.answer()
+    if not shelf or not start:
+        await callback.message.answer("Полка пустая — добавьте продукты или нажмите «Подобрать рецепт» в меню.", parse_mode=None)
+        return
+    await start(callback.message, state, ", ".join(shelf))

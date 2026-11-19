@@ -656,6 +656,21 @@ def favorites_add(f: FavIn, x_device: str | None = Header(default=None)):
     return {"id": fav_mod.add_favorite(cid, f.title, f.text, f.cuisine)}
 
 
+@app.get("/api/shelf/cook")
+def api_shelf_cook(x_device: str | None = Header(default=None)):
+    """«Что приготовить из полки»: рецепты книги по продуктам с полки (без ИИ), в том же виде, что книга."""
+    dev_id = _dev(x_device)
+    uid = _uid(dev_id)
+    if not plans.shelf_on(uid):
+        raise HTTPException(403, "Полка — в тарифе «Повар»")
+    rows = book.from_shelf([s["item"] for s in accounts.shelf_list(uid)])
+    rating = book.votes([r["id"] for r in rows], uid)
+    usage.event("shelf_cook", uid)
+    return {"items": [{"id": r["id"], "title": r["title"], "text": r["text"], "tags": r["tags"], "kcal": r["kcal"], "minutes": r["minutes"],
+                       "meal": r["meal"], "servings": r["servings"], "card": f"/api/bookimg/{r['id']}.png", "rating": rating[r["id"]],
+                       "have": r["have"], "need": r["need"], "total": r["total"]} for r in rows]}
+
+
 class MyListIn(BaseModel):
     text: str = Field(min_length=1, max_length=3000)
     title: str = Field("", max_length=80)

@@ -338,3 +338,33 @@ def search(meal: str | None = None, tag: str | None = None, q: str | None = None
     n = accounts._q(f"SELECT COUNT(*) FROM book WHERE {cond}", args, one=True)[0]
     rows = accounts._q(f"SELECT {COLS} FROM book WHERE {cond} ORDER BY {SCORE} DESC, id DESC LIMIT ? OFFSET ?", args + [int(limit), int(offset)], all_=True)
     return [_row(r) for r in rows], n
+
+
+# ---------- «Что приготовить из полки»: рецепты книги по продуктам, которые уже есть дома (без ИИ) ----------
+_STAPLES = ("соль", "перец", "вода", "сахар", "специ", "приправ", "лавров", "зелень", "кипят", "лёд", "лед")
+
+
+def _staple(name: str) -> bool:
+    n = name.lower().replace("ё", "е")
+    return any(n.startswith(s) or (" " + s) in n for s in _STAPLES)
+
+
+def from_shelf(shelf: list[str], limit: int = 6) -> list[dict]:
+    """Рецепты книги, где больше всего продуктов уже есть на полке. Соль, перец, вода, специи не считаются ни «есть», ни «нужно».
+    -> [{**рецепт, "have": [что есть], "need": сколько докупить, "total": сколько продуктов}], лучшие сверху."""
+    from shopping import terms_from_recipe_text
+    shelf = [s for s in shelf if s and not _staple(s)]
+    if not shelf:
+        return []
+    rows = accounts._q(f"SELECT {COLS} FROM book WHERE " + SCORE + " > ? ORDER BY id DESC LIMIT 2000", (HIDE_SCORE,), all_=True)
+    out = []
+    for r in rows:
+        d = _row(r)
+        names = [t for t in terms_from_recipe_text(d["text"]) if not _staple(t)]
+        if not names:
+            continue
+        have = [t for t in names if any(accounts._same_product(t, s) for s in shelf)]
+        if have:
+            out.append({**d, "have": have, "need": len(names) - len(have), "total": len(names)})
+    out.sort(key=lambda x: (-len(x["have"]), x["need"], -x["id"]))
+    return out[:limit]
