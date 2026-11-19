@@ -76,6 +76,10 @@ class DiaryForm(StatesGroup):
     activity = State()
 
 
+class MyListForm(StatesGroup):
+    items = State()
+
+
 class TailorForm(StatesGroup):
     wishes = State()
 

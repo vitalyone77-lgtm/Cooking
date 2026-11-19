@@ -877,6 +877,11 @@ def recipe_kb(recipe_text: str, chat_id: int | None = None):
     bot_extras.add_combo(markup)
     if chat_id is not None and plans.diary_on(chat_id):          # «Съел порцию»: только у тех, кто включил дневник
         markup.inline_keyboard.append([InlineKeyboardButton(text="🍽 Записать в дневник", callback_data="dy:eat")])
+    # «Подобрать ещё» — завершающее действие, всегда последней строкой
+    rows = markup.inline_keyboard
+    more = [r for r in rows if any((b.text or "").startswith("🍳 Подобрать ещё") for b in r)]
+    if more:
+        rows[:] = [r for r in rows if r not in more] + more        # тот же список: модели клавиатуры не переприсваиваем
     return markup
 
 

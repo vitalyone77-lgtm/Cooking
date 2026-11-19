@@ -49,6 +49,36 @@ def create(uid, title: str, items: list, done: list | None = None) -> str:
     return lid
 
 
+_QTY_RE = re.compile(r"^(?P<name>.*?)[\s,:—–-]*(?P<amt>\d+(?:[.,]\d+)?\s*(?:кг|гр|г|мл|л|шт|уп\w*|пач\w*|бут\w*|бан\w*|пуч\w*|кус\w*|десят\w*)?\.?)$",
+                     re.IGNORECASE)
+
+
+def parse_manual(text: str) -> list[dict]:
+    """Свой список словами: «молоко 2 л, хлеб, яйца 10 шт» или по строке на продукт (можно голосом). -> [{name, amount}]."""
+    out, seen = [], set()
+    for part in re.split(r"[\n;]+|,(?![0-9])", text or ""):
+        part = re.sub(r"^\s*(?:[-–—•*]+|\d+[.)])\s*", "", part.strip()).strip(" .")      # «1) молоко», «- хлеб» (но не «2 л молока»)
+        if not part:
+            continue
+        m = _QTY_RE.match(part)
+        name, amount = (m.group("name").strip(" ,:—–-"), m.group("amt").strip()) if m and m.group("name").strip() else (part, "")
+        name = name[:1].upper() + name[1:]
+        if name.lower() not in seen:
+            seen.add(name.lower())
+            out.append({"name": name, "amount": amount})
+    return out[:MAX_ITEMS]
+
+
+def from_text(uid, text: str, title: str = "") -> dict:
+    """Свой список покупок (не из рецепта). ValueError — понятный текст. -> {url, title, items, id}"""
+    items = parse_manual(text)
+    if not items:
+        raise ValueError("Напишите хотя бы один продукт: например «молоко, хлеб, яйца 10 шт»")
+    title = (title or "").strip()[:80] or "Список покупок"
+    lid = create(uid, title, items)
+    return {"url": url(lid), "title": title, "items": items, "id": lid}
+
+
 def from_favorites(uid, ids: list[str]) -> dict:
     """Один список из нескольких рецептов избранного. То, что уже на полке, не покупаем. ValueError — понятный текст. -> {url, title, items, home}"""
     chosen = [f for f in favorites.get_favorites(uid) if f["id"] in set(ids)][:MAX_RECIPES]
@@ -125,24 +155,33 @@ h1{font-size:22px;margin:4px 0 2px}.sub{color:var(--muted);font-size:15px;margin
 label{display:flex;gap:12px;align-items:center;min-height:52px;padding:10px 14px;border-top:1px solid var(--line);cursor:pointer}label:first-child{border-top:0}
 input{width:24px;height:24px;flex:none;accent-color:var(--primary)}.n{flex:1}.a{color:var(--muted);white-space:nowrap;font-size:15px}
 .done .n,.done .a{opacity:.5;text-decoration:line-through}
-button,.link{display:block;width:100%%;min-height:48px;margin-top:12px;border-radius:14px;border:2px solid var(--primary);background:transparent;color:var(--primary);font:600 16px/1 inherit;text-align:center;padding:14px;text-decoration:none}
+button,.link{display:block;width:100%%;min-height:48px;margin-top:12px;border-radius:14px;border:2px solid var(--primary);background:transparent;color:var(--primary);font-family:inherit;font-weight:600;font-size:16px;line-height:1.2;text-align:center;padding:14px;text-decoration:none}
 .note{color:var(--muted);font-size:14px;margin-top:14px}
+.acts{display:flex;gap:10px;margin-top:12px}.acts button{margin-top:0}.acts .sq{flex:none;width:56px;padding:0;font-size:22px}
+.chips{display:flex;flex-wrap:wrap;gap:8px}.chips button{width:auto;min-height:44px;margin:0;padding:10px 14px;border-width:1px;font-weight:500}.chips button[aria-pressed=true]{background:var(--primary);color:var(--surface)}
+.go{color:var(--primary);font-size:15px;white-space:nowrap;text-decoration:none;padding:6px 0 6px 8px}
 .promo{margin-top:22px;padding:16px;border-radius:16px;background:var(--surface);border:1px solid var(--line);display:flex;flex-direction:column;gap:6px}.promo span{color:var(--muted);font-size:15px}
 </style></head><body><h1>%(title)s</h1><p class="sub" id="count" aria-live="polite"></p><div class="list" id="list"></div>
-<button id="share" type="button">Поделиться списком</button>
+<div class="acts"><button id="find" type="button" aria-expanded="false">🛒 Найти в магазине</button><button id="share" type="button" class="sq" aria-label="Поделиться списком" title="Поделиться списком">📤</button></div>
+<div id="stores" class="stores" hidden><p class="sub" style="margin:10px 0 6px">Где искать? Ссылки появятся у каждого продукта, который ещё не куплен.</p><div class="chips" id="chips"></div></div>
 <p class="note">Отметки общие: их видят все, у кого есть ссылка. Список хранится 30 дней.</p>
 <div class="promo"><strong>Список сделан в «Кухонном помощнике»</strong><span>Рецепт из ваших продуктов за минуту, с калориями и списком покупок. Начать можно бесплатно, работает без VPN.</span>
 <a class="link" href="%(site)s?utm_source=list">🍳 Открыть помощника</a></div>
 <script>
-(function(){var id=%(id)s,box=document.getElementById("list"),count=document.getElementById("count"),S=null,busy=0;
+(function(){var id=%(id)s,ST=%(stores)s,box=document.getElementById("list"),count=document.getElementById("count"),S=null,busy=0,shop=null;
+function q(n){return encodeURIComponent(String(n).replace(/\\([^)]*\\)/g,"").split(",")[0].trim());}
 function draw(){var d={};S.done.forEach(function(i){d[i]=1;});box.textContent="";S.items.forEach(function(it,i){var l=document.createElement("label");if(d[i])l.className="done";
 var c=document.createElement("input");c.type="checkbox";c.checked=!!d[i];c.setAttribute("data-i",i);var n=document.createElement("span");n.className="n";n.textContent=it.name;l.appendChild(c);l.appendChild(n);
-if(it.amount){var a=document.createElement("span");a.className="a";a.textContent=it.amount;l.appendChild(a);}box.appendChild(l);});
+if(it.amount){var a=document.createElement("span");a.className="a";a.textContent=it.amount;l.appendChild(a);}
+if(shop&&!d[i]){var g=document.createElement("a");g.className="go";g.href=shop.tpl.replace("{q}",q(it.name));g.target="_blank";g.rel="noopener";g.textContent="найти ›";g.addEventListener("click",function(e){e.stopPropagation();});l.appendChild(g);}box.appendChild(l);});
 count.textContent="Куплено "+S.done.length+" из "+S.items.length;}
 function load(){if(busy||document.hidden)return;fetch("/api/list/"+id,{cache:"no-store"}).then(function(r){return r.ok?r.json():null;}).then(function(j){if(j&&!busy){S=j;draw();}}).catch(function(){});}
 box.addEventListener("change",function(e){var c=e.target,i=+c.getAttribute("data-i"),on=c.checked;busy++;c.parentNode.classList.toggle("done",on);
 S.done=S.done.filter(function(x){return x!==i;});if(on)S.done.push(i);count.textContent="Куплено "+S.done.length+" из "+S.items.length;
 fetch("/api/list/"+id+"/toggle",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({i:i,on:on})}).then(function(r){if(!r.ok)throw 0;}).catch(function(){c.checked=!on;c.parentNode.classList.toggle("done",!on);alert("Не сохранилось: проверьте интернет");}).then(function(){busy--;});});
+var chips=document.getElementById("chips");ST.forEach(function(s){var b=document.createElement("button");b.type="button";b.textContent=s.name;b.setAttribute("aria-pressed","false");
+b.addEventListener("click",function(){shop=(shop===s)?null:s;Array.prototype.forEach.call(chips.children,function(x){x.setAttribute("aria-pressed",String(x===b&&!!shop));});if(S)draw();});chips.appendChild(b);});
+document.getElementById("find").addEventListener("click",function(){var p=document.getElementById("stores"),open=p.hidden;p.hidden=!open;this.setAttribute("aria-expanded",String(open));if(open&&ST.length===1){chips.firstChild.click();}});
 document.getElementById("share").addEventListener("click",function(){var u=location.href,t=document.title;if(navigator.share){navigator.share({title:t,url:u}).catch(function(){});return;}
 if(navigator.clipboard){navigator.clipboard.writeText(u).then(function(){alert("Ссылка скопирована");});return;}prompt("Ссылка на список",u);});
 load();setInterval(load,6000);document.addEventListener("visibilitychange",load);})();
@@ -151,7 +190,10 @@ load();setInterval(load,6000);document.addEventListener("visibilitychange",load)
 
 def page(lid: str, rec: dict) -> str:
     site = (config.WEB_APP_URL or "https://menu.ymayaka.ru").rstrip("/") + "/"
-    return _PAGE % {"title": escape(rec["title"]), "site": escape(site, quote=True), "id": json.dumps(lid)}
+    from stores.links import STORES, DEFAULT_STORES
+    stores = [{"key": k, "name": STORES[k][1], "tpl": STORES[k][2]} for k in DEFAULT_STORES]
+    return _PAGE % {"title": escape(rec["title"]), "site": escape(site, quote=True), "id": json.dumps(lid),
+                    "stores": json.dumps(stores, ensure_ascii=False).replace("</", "<\\/")}
 
 
 # ---------- «корзина рецептов»: общий список покупок собирается по ходу, одна на бота и сайт ----------

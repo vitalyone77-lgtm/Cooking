@@ -115,7 +115,8 @@ def _profile_view(uid: int) -> tuple[str, InlineKeyboardMarkup]:
     if devs:
         rows.append([(f"🔓 Выйти на сайте ({devs})", "pf:unall")])
     rows.append(([("🧩 Функции", "pf:fts")] if consent else []) + [("🌐 Без VPN", "pf:site")] + ([("🗑 Удалить", "pf:del")] if consent else []))
-    rows.append([("🔬 Проверить состав", "lb:o"), ("❓ Справка", "help:open")] + ([("⬅️ Профиль", "pf:main")] if diary_on else []))
+    rows.append([("📝 Свой список", "ml:o"), ("🔬 Проверить состав", "lb:o")])
+    rows.append([("❓ Справка", "help:open")] + ([("⬅️ Профиль", "pf:main")] if diary_on else []))
     b = InlineKeyboardBuilder()
     for row in rows:
         b.row(*[InlineKeyboardButton(text=t, callback_data=d) for t, d in row])
@@ -190,8 +191,10 @@ def _profile_main(uid: int, days: int = 30) -> tuple[str, InlineKeyboardMarkup, 
         lines.insert(2, "График появится, когда будут записи о еде или вес за разные дни.")
     b = InlineKeyboardBuilder()
     b.row(InlineKeyboardButton(text="📒 Записать еду", callback_data="dy:open"), InlineKeyboardButton(text="⚖️ Вес", callback_data="pf:weight"))
-    b.row(InlineKeyboardButton(text=f"📅 {days} дн. ▸ {_next_period(days)}", callback_data=f"pf:p:{_next_period(days)}"),
-          InlineKeyboardButton(text="⚙️ Настройки", callback_data="pf:set"))
+    b.row(InlineKeyboardButton(text=f"📅 {days} дн. ▸ {_next_period(days)}", callback_data=f"pf:p:{_next_period(days)}"))
+    # редкое — внизу, над настройками: свой список покупок и проверка состава
+    b.row(InlineKeyboardButton(text="📝 Свой список", callback_data="ml:o"), InlineKeyboardButton(text="🔬 Состав", callback_data="lb:o"))
+    b.row(InlineKeyboardButton(text="⚙️ Настройки", callback_data="pf:set"), InlineKeyboardButton(text="❓ Справка", callback_data="help:open"))
     return "\n".join(lines), b.as_markup(), png
 
 

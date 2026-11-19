@@ -77,12 +77,12 @@ async def main():
     s = FakeSession()
     b = Bot(token="42:TEST", session=s)
     kb = botmod.recipe_kb(R1, C)
-    check("под рецептом есть «🛒 В общий список покупок»", any(x.callback_data == "cb:add" for row in kb.inline_keyboard for x in row))
+    check("под рецептом есть «➕ В общий список»", any(x.callback_data == "cb:add" for row in kb.inline_keyboard for x in row))
     await botmod.dp.feed_update(b, cb("cb:add", R1.replace("*", ""), kb))
     ans = [d for n, d in s.calls if n == "AnswerCallbackQuery"][-1]
     check("бот: рецепт в списке, сказано сколько", "Куриный суп" in ans.get("text", "") and "1" in ans.get("text", ""), str(ans))
     ed = [d for n, d in s.calls if n == "EditMessageReplyMarkup"]
-    check("кнопка сменилась на «✅ В списке (1) — собрать»", ed and "В списке (1)" in str(ed[-1]) and "cb:o" in str(ed[-1]))
+    check("кнопка сменилась на «✅ В списке (1) — собрать»", ed and "В списке: 1" in str(ed[-1]) and "cb:o" in str(ed[-1]))
     check("рецепт сохранён в «Любимые»", any(f["title"] == "Куриный суп" for f in favorites.get_favorites(C)))
     await botmod.dp.feed_update(b, cb("cb:add", R2.replace("*", ""), botmod.recipe_kb(R2, C)))
     await botmod.dp.feed_update(b, cb("cb:add", R2.replace("*", ""), botmod.recipe_kb(R2, C)))

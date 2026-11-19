@@ -109,7 +109,7 @@ textarea{width:100%;min-height:64px;padding:10px 14px;border:1.5px solid var(--l
 .item.done .bn{opacity:.5;text-decoration:line-through}
 .dy-hero{margin:0}.dy-hero b{font-size:34px;line-height:1.1}.dy-bar{height:10px;background:var(--soft);border-radius:99px;overflow:hidden;margin:8px 0 6px}.dy-bar i{display:block;height:100%;background:var(--primary);border-radius:99px}
 .dychart{width:100%;height:auto;display:block;margin-top:8px}.dy-legend{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:14px;margin:8px 0 0}.sw{display:inline-block;width:12px;height:12px;border-radius:3px;margin-right:6px;vertical-align:-1px}
-.dy-tip{min-height:22px;font-size:14px;color:var(--muted);margin:4px 0 0}.pcard details{margin-top:10px}details.more{margin-top:16px;border:1px solid var(--line);border-radius:12px;padding:0 14px}details.more[open]{padding-bottom:12px}details.more summary{cursor:pointer;min-height:48px;padding:10px 0;font-weight:600;list-style-position:inside}details.more summary .sub{display:block;font-weight:400;font-size:14px;margin:2px 0 0}.pcard summary{cursor:pointer;min-height:40px;line-height:40px;font-weight:600}
+.dy-tip{min-height:22px;font-size:14px;color:var(--muted);margin:4px 0 0}.pcard details{margin-top:10px}.pnav-small{display:flex;justify-content:center;margin:18px 0 4px}details.more{margin-top:16px;border:1px solid var(--line);border-radius:12px;padding:0 14px}details.more[open]{padding-bottom:12px}details.more summary{cursor:pointer;min-height:48px;padding:10px 0;font-weight:600;list-style-position:inside}details.more summary .sub{display:block;font-weight:400;font-size:14px;margin:2px 0 0}.pcard summary{cursor:pointer;min-height:40px;line-height:40px;font-weight:600}
 .dy-res .item{padding:10px 0}.dy-food{display:block;width:100%;text-align:left;background:none;border:0;padding:6px 0;color:var(--text);font:inherit;min-height:44px}.dy-food small{display:block;color:var(--muted);font-size:14px}
 .chips[data-name=cuisine],.chips[data-name=appliance]{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}.chips[data-name=cuisine] .chip,.chips[data-name=appliance] .chip{width:100%;padding:4px 6px;font-size:15px;line-height:1.2}.chips[data-name=cuisine] .chip:last-child:nth-child(odd){grid-column:1/-1}
 @media (min-width:520px){.chips[data-name=appliance]{grid-template-columns:repeat(4,minmax(0,1fr))}}
@@ -738,7 +738,27 @@ select{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--lin
   // ---- вкладка «Профиль»: вход через Telegram, полка, подписка ----
   function loadMe(){return call("GET","/api/me").then(function(m){ME=m;try{ls("mecache",JSON.stringify(m));}catch(e){}return m;}).catch(function(){return ME;});}
   function botLink(start){return "https://t.me/"+esc((META&&META.bot)||ME.bot||"Cookingvkusno_bot")+(start?"?start="+start:"");}
-  function profileNav(){return '<div class="row"><button class="btn ghost" data-tab-go="settings">⚙️ Настройки</button><button class="btn ghost" data-tab-go="help">❓ Справка</button></div>';}
+  // редкое — внизу, над настройками: свой список покупок (подписка)
+  function profileNav(){return '<div class="pnav-small">'+(isLocked("mylist")?'<button class="lcheck" data-gate="mylist">'+lockIc()+'📝 Свой список покупок</button>':'<button class="lcheck" data-tab-go="mylist">📝 Свой список покупок</button>')+'</div>'+
+    '<div class="row"><button class="btn ghost" data-tab-go="settings">⚙️ Настройки</button><button class="btn ghost" data-tab-go="help">❓ Справка</button></div>';}
+  function viewMyList(){
+    return Promise.resolve('<button class="chip mini" data-tab-go="profile">← Профиль</button><h1 style="margin-top:10px">📝 Свой список покупок</h1>'+
+      '<p class="sub">Что купить — через запятую или по строке, можно с количеством. Получится список с галочками: его можно отправить и отмечать вместе.</p>'+
+      '<div class="card pcard"><label class="f" for="ml-t">Название (необязательно)</label><input type="text" id="ml-t" maxlength="80" placeholder="Домой, на дачу, к празднику">'+
+      '<label class="f" for="ml-x">Продукты</label><textarea id="ml-x" rows="6" maxlength="3000" placeholder="молоко 2 л\nхлеб\nяйца 10 шт\nбумажные полотенца" style="width:100%;font:inherit;padding:12px;border-radius:12px;border:1px solid var(--line);background:var(--surface);color:var(--text)"></textarea>'+
+      '<button class="btn" data-ml-go="1">Создать список</button></div><div id="ml-res"></div>');
+  }
+  function myListGo(b){
+    var x=(document.getElementById("ml-x")||{}).value||"",t=(document.getElementById("ml-t")||{}).value||"";
+    if(!x.trim()){alert("Напишите хотя бы один продукт");return;}
+    b.disabled=true;
+    call("POST","/api/mylist",{text:x,title:t}).then(function(r){
+      b.disabled=false;var box=document.getElementById("ml-res");
+      box.innerHTML='<div class="card pcard"><h2>'+esc(r.title)+'</h2>'+r.items.map(function(i){return '<div class="cline"><span>'+esc(i.name)+'</span><span class="sub">'+esc(i.amount||"")+'</span></div>';}).join("")+
+        '<a class="btn" style="display:block;text-align:center;margin-top:12px" href="'+esc(r.url)+'" target="_blank" rel="noopener">☑️ Открыть с галочками и отправить</a></div>';
+      box.scrollIntoView({behavior:"smooth",block:"start"});
+    }).catch(function(e){b.disabled=false;if(e.status===403)gateOpen("mylist");else alert(e.message);});
+  }
   function consentCard(p){return '<div class="card pcard"><h2>Данные профиля</h2><p class="sub" style="margin:0">'+esc(p.text||"")+'</p><button class="btn" data-consent="1">Согласен</button></div>';}
   // в профиле только то, чем пользуются каждый день; цели, функции, оплата и вход лежат в «Настройках»
   function viewProfile(mem){
@@ -892,7 +912,7 @@ select{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--lin
       return h;
     });
   }
-  var VIEWS={menus:viewMenus,favs:viewFavs,book:viewBook,profile:viewProfile,settings:viewSettings,label:viewLabel,combo:viewCombo,friends:viewFriends,help:viewHelp};
+  var VIEWS={menus:viewMenus,favs:viewFavs,book:viewBook,profile:viewProfile,settings:viewSettings,label:viewLabel,combo:viewCombo,mylist:viewMyList,friends:viewFriends,help:viewHelp};
   function offlineBanner(){return '<div class="card" style="padding:12px 16px;margin:0 0 12px;border-left:4px solid var(--primary)"><strong>📴 Нет интернета.</strong> Показываю сохранённое с прошлого раза: меню, план, избранное, рецепты и таймеры работают. Новые подборы — когда появится сеть.</div>';}
   window.addEventListener("online",function(){if(OFFLINE&&(cur==="menus"||cur==="favs"))show(cur);});
   // вкладку, которую уже открывали, показываем сразу из памяти, а свежие данные подставляем, как только придут
@@ -1304,6 +1324,7 @@ select{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--lin
     if(b=t.closest("[data-combo-go]")){comboGo(b);return;}
     if(b=t.closest("[data-combo-add]")){comboAdd(b);return;}
     if(b=t.closest("[data-tl-open]")){tailorOpen(b);return;}
+    if(b=t.closest("[data-ml-go]")){myListGo(b);return;}
     if(b=t.closest("[data-tl-go]")){tailorGo(b);return;}
     if(b=t.closest("[data-del]")){if(confirm("Удалить из избранного?"))call("DELETE","/api/favorites/"+b.getAttribute("data-del")).then(function(){cacheFavs();show("favs");}).catch(fail);return;}
     if(b=t.closest("[data-cook]")){runJob(call("POST","/api/week/cook"),"Готовлю меню на день…","cook").then(function(){pendClear();show("menus");}).catch(function(e){fail(e,"menus");});return;}

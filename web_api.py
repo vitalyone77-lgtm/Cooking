@@ -656,6 +656,25 @@ def favorites_add(f: FavIn, x_device: str | None = Header(default=None)):
     return {"id": fav_mod.add_favorite(cid, f.title, f.text, f.cuisine)}
 
 
+class MyListIn(BaseModel):
+    text: str = Field(min_length=1, max_length=3000)
+    title: str = Field("", max_length=80)
+
+
+@app.post("/api/mylist")
+def api_mylist(body: MyListIn, x_device: str | None = Header(default=None)):
+    """Свой список покупок (не из рецепта) с галочками и ссылкой. Подписка."""
+    uid = _uid(_dev(x_device))
+    if not plans.has_feature(uid, "mylist"):
+        raise HTTPException(403, "Свой список покупок — в подписке «Повар»")
+    try:
+        res = shoplists.from_text(uid, body.text, body.title)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    usage.event("mylist", uid)
+    return res
+
+
 class TailorIn(BaseModel):
     book_id: int
     wishes: str = Field("", max_length=300)
@@ -741,7 +760,7 @@ def me(x_device: str | None = Header(default=None)):
     memory = bool(tg) and plans.has_feature(uid, "memory")
     shelf_on = bool(tg) and plans.shelf_on(uid)
     left = {k: list(v) for k in ("recipe", "daymenu", "week") if (v := usage.left(uid, k))}
-    feat = {f: plans.has_feature(uid, f) for f in ("memory", "pdf", "cart", "noads", "tailor")}
+    feat = {f: plans.has_feature(uid, f) for f in ("memory", "pdf", "cart", "noads", "tailor", "mylist")}
     out = {"linked": bool(tg), "plan": plans.plan_of(uid), "status": plans.status_text(uid), "left": left,
            "paywall": plans.paywall_for(uid), "memory": memory, "shelf_on": shelf_on, "bot": config.BOT_USERNAME, "feat": feat, "via": ("vk" if tg and tg >= accounts.VK_OFFSET else "tg" if tg else ""),
            "hint": plans.next_step(uid), "preview": plans.is_preview(uid), "stores": _stores_json(uid), "both_linked": bool(tg) and accounts.has_vk_merged(tg), "diary_on": plans.diary_on(uid), "shelf_photo": plans.feature_on(uid, "photo_shelf") and plans.shelf_on(uid), "seller": payinfo.seller(), "photo_on": plans.feature_on(uid, "photo_recipe"),
@@ -1676,7 +1695,7 @@ def feedback_send(body: FeedbackIn, x_device: str | None = Header(default=None))
     return {"ok": True}
 
 
-GATE_NAMES = {"pdf", "cart", "memory", "daymenu", "week", "photo", "voice", "tailor"}
+GATE_NAMES = {"pdf", "cart", "memory", "daymenu", "week", "photo", "voice", "tailor", "mylist"}
 
 
 @app.post("/api/gate")

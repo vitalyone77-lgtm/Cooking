@@ -24,6 +24,7 @@ import usage
 import vision
 from bot_vision import ALBUM_WAIT, IS_IMAGE, _photo_bytes
 from last_recipe import get_last_recipe, set_last_recipe
+from states import MyListForm
 
 logger = logging.getLogger(__name__)
 router = Router(name="extras")
@@ -36,7 +37,7 @@ def _ps_key(msg: Message) -> str:
 
 
 def portions_row() -> list[InlineKeyboardButton]:
-    return [InlineKeyboardButton(text="👥 Другое число порций", callback_data="ps:o")]
+    return [InlineKeyboardButton(text="👥 Число порций", callback_data="ps:o")]
 
 
 def add_portions(markup: InlineKeyboardMarkup, text: str) -> InlineKeyboardMarkup:
@@ -155,8 +156,14 @@ def _combo_key(uid) -> str:
 
 
 def add_combo(markup: InlineKeyboardMarkup) -> InlineKeyboardMarkup:
-    """«🛒 В общий список» под рецептом: рецепт копится в общем списке покупок (одном на бота и сайт)."""
-    markup.inline_keyboard.append([InlineKeyboardButton(text="🛒 В общий список покупок", callback_data="cb:add")])
+    """«➕ В общий список» под рецептом: рецепт копится в общем списке покупок (одном на бота и сайт).
+    В одной строке с порциями и со своим значком: рядом уже есть «🛒 Продукты и магазины», две корзины путались."""
+    btn = InlineKeyboardButton(text="➕ В общий список", callback_data="cb:add")
+    for row in markup.inline_keyboard:
+        if any((x.callback_data or "") == "ps:o" for x in row) and len(row) < 2:
+            row.append(btn)
+            return markup
+    markup.inline_keyboard.insert(max(len(markup.inline_keyboard) - 1, 0), [btn])
     return markup
 
 
@@ -181,7 +188,7 @@ async def combo_add(callback: CallbackQuery):
     await callback.answer(f"🛒 «{title[:40]}» в общем списке. Рецептов в списке: {n}")
     mk = msg.reply_markup
     if mk:
-        rows = [[InlineKeyboardButton(text=f"✅ В списке ({n}) — собрать", callback_data="cb:o") if b.callback_data == "cb:add" else b
+        rows = [[InlineKeyboardButton(text=f"✅ В списке: {n}", callback_data="cb:o") if b.callback_data == "cb:add" else b
                  for b in row] for row in mk.inline_keyboard]
         try:
             await msg.edit_reply_markup(reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
@@ -281,6 +288,80 @@ async def combo_go(callback: CallbackQuery):
     rows = [[InlineKeyboardButton(text="☑️ Открыть с галочками", url=link)],
             [InlineKeyboardButton(text="📤 Переслать", url=f"https://t.me/share/url?url={quote(link, safe='')}&text={quote(res['title'], safe='')}")]]
     await callback.message.answer("\n".join(lines)[:4000], reply_markup=InlineKeyboardMarkup(inline_keyboard=rows), parse_mode=None, disable_web_page_preview=True)
+
+
+# ---------- свой список покупок (подписка) ----------
+
+def _mylist_cancel() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="✖️ Отмена", callback_data="ml:x")]])
+
+
+def mylist_kb(lid: str, link: str, title: str) -> InlineKeyboardMarkup:
+    """Под присланным списком: открыть с галочками и переслать — в одну строку, магазины — отдельно (их нажимают чаще)."""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="☑️ Открыть с галочками", url=link),
+         InlineKeyboardButton(text="📤", url=f"https://t.me/share/url?url={quote(link, safe='')}&text={quote(title, safe='')}")],
+        [InlineKeyboardButton(text="🛒 Найти в магазине", callback_data=f"ml:sh:{lid}")],
+    ])
+
+
+@router.callback_query(F.data == "ml:o")
+async def mylist_open(callback: CallbackQuery, state: FSMContext):
+    import plans
+    uid = callback.message.chat.id
+    if not plans.has_feature(uid, "mylist"):
+        usage.event("gate_mylist", uid)
+        await callback.answer()
+        await callback.message.answer(
+            "💎 Свой список покупок — в подписке «Повар».\n\nПишете или говорите голосом, что купить («молоко 2 л, хлеб, яйца 10 шт») — "
+            "бот присылает список с галочками: его можно переслать, отмечать вместе и искать продукты в магазинах.",
+            reply_markup=bot_profile.upsell_kb(uid), parse_mode=None)
+        return
+    await callback.answer()
+    await state.set_state(MyListForm.items)
+    await callback.message.answer(
+        "📝 Что купить? Напишите одним сообщением или скажите голосом — через запятую или по строке, можно с количеством:\n"
+        "«молоко 2 л, хлеб, яйца 10 шт, бумажные полотенца»", reply_markup=_mylist_cancel(), parse_mode=None)
+
+
+@router.callback_query(F.data == "ml:x")
+async def mylist_cancel(callback: CallbackQuery, state: FSMContext):
+    await state.clear()
+    await callback.answer("Отменено")
+    try:
+        await callback.message.delete()
+    except TelegramBadRequest:
+        pass
+
+
+@router.message(MyListForm.items, F.text, ~F.text.startswith("/"))
+async def mylist_text(message: Message, state: FSMContext):
+    uid = message.chat.id
+    try:
+        res = shoplists.from_text(uid, message.text)
+    except ValueError as e:
+        await message.answer(f"😔 {e}", reply_markup=_mylist_cancel(), parse_mode=None)
+        return
+    await state.clear()
+    usage.event("mylist", uid)
+    lines = [f"📝 {res['title']}", ""] + [f"▫️ {it['name']}" + (f" — {it['amount']}" if it["amount"] else "") for it in res["items"]]
+    lines += ["", "Отмечайте галочками по ссылке — можно вместе, без бота и VPN."]
+    await message.answer("\n".join(lines)[:4000], reply_markup=mylist_kb(res["id"], res["url"], res["title"]), parse_mode=None,
+                         disable_web_page_preview=True)
+
+
+@router.callback_query(F.data.startswith("ml:sh:"))
+async def mylist_shops(callback: CallbackQuery):
+    """Ссылки на поиск каждого продукта списка в магазинах, которые человек выбрал в настройках."""
+    from shopping import format_shopping_message
+    rec = shoplists.get(callback.data.split(":", 2)[2])
+    if not rec:
+        await callback.answer("Список устарел — составьте новый", show_alert=True)
+        return
+    done = set(rec["done"])
+    names = [it["name"] for i, it in enumerate(rec["items"]) if i not in done] or [it["name"] for it in rec["items"]]
+    await callback.answer()
+    await callback.message.answer(format_shopping_message(names, callback.message.chat.id), disable_web_page_preview=True)
 
 
 # ---------- проверка состава ----------
