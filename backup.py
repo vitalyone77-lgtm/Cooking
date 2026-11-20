@@ -5,10 +5,14 @@
 Файлы (анкеты и напоминания user_data.json, магазины store_prefs.json, старые меню и избранное) и загруженные картинки
 рекламы копируются как есть. Пути берутся из самих модулей, чтобы копия не отставала от кода.
 Каждый источник копируется отдельно: сбой одного не отменяет остальные (аудит 15.11.2026). О любом сбое владельцу
-приходит сообщение в Telegram. Копия лежит на том же сервере — внешнюю (Яндекс Диск) настроим, когда будет диск.
+приходит сообщение в Telegram. Копия лежит на сервере, а ночью ещё уезжает архивом в Google Диск (rclone, remote gdrive, папка
+Cooking-backups, хранится 14 дней); если rclone не настроен, этот шаг молча пропускается.
 """
 import datetime
+import os
 import shutil
+import subprocess
+import tarfile
 import sqlite3
 import sys
 from pathlib import Path
@@ -92,10 +96,36 @@ def run(dest: Path = DEST, today: datetime.date | None = None) -> tuple[Path, li
     return folder, errors
 
 
+REMOTE = os.getenv("BACKUP_REMOTE", "gdrive:Cooking-backups")
+
+
+def offsite(folder: Path, remote: str = REMOTE) -> str | None:
+    """Архив папки копии в облако через rclone. -> None (успех или rclone не настроен) либо текст ошибки."""
+    if not remote or not shutil.which("rclone"):
+        return None
+    arc = folder.parent / (folder.name + ".tar.gz")
+    try:
+        with tarfile.open(arc, "w:gz") as t:
+            t.add(folder, arcname=folder.name)
+        for cmd in (["rclone", "copyto", str(arc), f"{remote}/{arc.name}"],
+                    ["rclone", "delete", remote, "--min-age", f"{KEEP_DAYS}d", "--include", "*.tar.gz"]):
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=900)
+            if r.returncode:
+                return f"облако: {(r.stderr or '').strip().splitlines()[-1:] or r.returncode}"
+        return None
+    except Exception as e:  # noqa: BLE001
+        return f"облако: {type(e).__name__}: {e}"
+    finally:
+        arc.unlink(missing_ok=True)
+
+
 if __name__ == "__main__":
     import feedback
     try:
         folder, errors = run()
+        cloud = offsite(folder)
+        if cloud:
+            errors.append(cloud)
         print("копия:", folder, "ошибки:", errors or "нет")
         if errors:
             feedback.notify_sync("⚠️ Ночная копия сделана не полностью:\n" + "\n".join(errors[:10]))
