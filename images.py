@@ -124,8 +124,10 @@ async def _free(prompt: str) -> bytes | None:
                     if attempt == 0 and m and int(m.group(1)) <= 50:
                         await _sleep(int(m.group(1)) + 1)
                         continue
+                    logger.warning("Бесплатная картинка: лимит (402), нужен ключ pollinations")
                     return None
                 if resp.status_code != 200 or "image" not in resp.headers.get("content-type", ""):
+                    logger.warning("Бесплатная картинка: сервис ответил %s", resp.status_code)
                     return None
                 return resp.content or None
     except (httpx.HTTPError, ValueError) as e:
