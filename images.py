@@ -133,12 +133,12 @@ async def _free(prompt: str) -> bytes | None:
     return None
 
 
-async def make_dish_image(title: str, recipe_text: str) -> bytes | None:
+async def make_dish_image(title: str, recipe_text: str, provider: str | None = None) -> bytes | None:
     """Картинка к рецепту (байты) или None. card: фирменная карточка; free: pollinations.ai, leonardo: платный; если они
     не справились, берётся карточка (она не зависит от сети)."""
     if not configured():
         return None
-    order = {"leonardo": ["leonardo", "card"], "free": ["free", "card"]}.get(config.IMAGE_PROVIDER, ["card"])
+    order = {"leonardo": ["leonardo", "card"], "free": ["free", "card"]}.get(provider or config.IMAGE_PROVIDER, ["card"])
     prompt = None
     for provider in order:
         if provider == "card":

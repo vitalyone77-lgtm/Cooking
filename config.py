@@ -187,6 +187,8 @@ SOCIAL_FEATURE_HOUR = _env_num("SOCIAL_FEATURE_HOUR", 18, int)
 # Чем делать картинку: card (фирменная карточка рецепта, бесплатно, по умолчанию), free (pollinations.ai, как в autobot),
 # leonardo (платный) или off. Если free или leonardo не справились, берётся карточка
 IMAGE_PROVIDER = os.getenv("IMAGE_PROVIDER", "card").strip().lower()
+# Картинка для Telegram-КАНАЛА отдельно: free (сгенерированная pollinations.ai, при сбое карточка), leonardo или card. Бот и ВК это не меняет
+TG_IMAGE_PROVIDER = os.getenv("TG_IMAGE_PROVIDER", "free").strip().lower()
 FREE_IMAGE_MODEL = os.getenv("FREE_IMAGE_MODEL", "flux")
 POLLINATIONS_KEY = os.getenv("POLLINATIONS_KEY", "")           # необязательно: ключ аккаунта pollinations снимает лимиты
 LEONARDO_API_KEY = os.getenv("LEONARDO_API_KEY", "")

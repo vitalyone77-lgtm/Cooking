@@ -68,7 +68,8 @@ def section_photo(section: str | None, gid: int) -> str | None:
     """Вложение с постоянной картинкой раздела из альбома сообщества или None, если её номер не задан."""
     code = SECTION_PHOTO.get(section or "", section)
     pairs = dict(p.split("=", 1) for p in config.VK_SECTION_PHOTOS.split(",") if "=" in p)
-    pid = pairs.get(code or "", "").strip()
+    ids = [x.strip() for x in pairs.get(code or "", "").split("|") if x.strip().isdigit()]   # «obed=1|2|3»: несколько шаблонов, меняются по дням
+    pid = ids[datetime.now().toordinal() % len(ids)] if ids else ""
     return f"photo-{gid}_{pid}" if pid.isdigit() else None
 HISTORY_KEY = "social:history"
 LAST_KEY = "social:last"
@@ -307,8 +308,14 @@ async def publish(bot, title: str, text: str, image: bytes | None = None, body: 
         except RuntimeError as e:
             out["errors"].append(str(e))
     if configured_tg():
+        tg_image = image
+        if config.TG_IMAGE_PROVIDER in ("free", "leonardo") and images.configured():
+            try:
+                tg_image = await images.make_dish_image(title, body or text, config.TG_IMAGE_PROVIDER) or image
+            except Exception:  # noqa: BLE001
+                logger.exception("Картинка для канала не получилась, беру обычную")
         try:
-            out["tg"] = await post_tg(bot, text, image)
+            out["tg"] = await post_tg(bot, text, tg_image)
         except Exception as e:  # noqa: BLE001
             out["errors"].append(f"Telegram-канал: {type(e).__name__}")
     if out["vk"] or out["tg"]:
