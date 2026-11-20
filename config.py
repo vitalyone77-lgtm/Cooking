@@ -190,6 +190,8 @@ IMAGE_PROVIDER = os.getenv("IMAGE_PROVIDER", "card").strip().lower()
 # Картинка для Telegram-КАНАЛА отдельно: free (сгенерированная pollinations.ai, при сбое карточка), leonardo или card. Бот и ВК это не меняет
 TG_IMAGE_PROVIDER = os.getenv("TG_IMAGE_PROVIDER", "free").strip().lower()
 FREE_IMAGE_MODEL = os.getenv("FREE_IMAGE_MODEL", "flux")
+CF_ACCOUNT_ID = os.getenv("CF_ACCOUNT_ID", "").strip()          # Cloudflare Workers AI (бесплатный дневной лимит): TG_IMAGE_PROVIDER=cloudflare
+CF_API_TOKEN = os.getenv("CF_API_TOKEN", "").strip()
 POLLINATIONS_KEY = os.getenv("POLLINATIONS_KEY", "")           # необязательно: ключ аккаунта pollinations снимает лимиты
 LEONARDO_API_KEY = os.getenv("LEONARDO_API_KEY", "")
 LEONARDO_MODEL_ID = os.getenv("LEONARDO_MODEL_ID", "7b592283-e8a7-4c5a-9ba6-d18c31f258b9")

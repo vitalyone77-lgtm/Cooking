@@ -110,6 +110,24 @@ async def _leonardo(prompt: str) -> bytes | None:
         return None
 
 
+async def _cloudflare(prompt: str) -> bytes | None:
+    """Cloudflare Workers AI, модель flux-1-schnell: JSON в ответ, картинка в base64. Ключ только в заголовке."""
+    if not (config.CF_ACCOUNT_ID and config.CF_API_TOKEN):
+        return None
+    url = f"https://api.cloudflare.com/client/v4/accounts/{config.CF_ACCOUNT_ID}/ai/run/@cf/black-forest-labs/flux-1-schnell"
+    try:
+        async with httpx.AsyncClient(timeout=90) as client:
+            resp = await client.post(url, json={"prompt": prompt[:2000], "steps": 6}, headers={"Authorization": f"Bearer {config.CF_API_TOKEN}"})
+            if resp.status_code != 200:
+                logger.warning("Cloudflare: картинка не получилась, ответ %s", resp.status_code)
+                return None
+            import base64
+            return base64.b64decode(resp.json()["result"]["image"]) or None
+    except (httpx.HTTPError, ValueError, KeyError, TypeError) as e:
+        logger.warning("Cloudflare: картинка не получилась (%s)", type(e).__name__)
+        return None
+
+
 async def _free(prompt: str) -> bytes | None:
     """Бесплатный pollinations.ai: обычный запрос, в ответ картинка. Лимит без ключа: одна в 45 секунд с адреса."""
     url = (f"{POLLINATIONS_URL}{urllib.parse.quote(prompt[:900])}?width={config.RECIPE_IMAGE_SIZE}&height={config.RECIPE_IMAGE_SIZE}"
@@ -140,7 +158,7 @@ async def make_dish_image(title: str, recipe_text: str, provider: str | None = N
     не справились, берётся карточка (она не зависит от сети)."""
     if not configured():
         return None
-    order = {"leonardo": ["leonardo", "card"], "free": ["free", "card"]}.get(provider or config.IMAGE_PROVIDER, ["card"])
+    order = {"leonardo": ["leonardo", "card"], "free": ["free", "card"], "cloudflare": ["cloudflare", "card"]}.get(provider or config.IMAGE_PROVIDER, ["card"])
     prompt = None
     for provider in order:
         if provider == "card":
@@ -151,7 +169,7 @@ async def make_dish_image(title: str, recipe_text: str, provider: str | None = N
                 return None
         if prompt is None:
             prompt = f"{await dish_scene(title, recipe_text)}, {STYLE}"
-        img = await (_leonardo(prompt) if provider == "leonardo" else _free(prompt))
+        img = await {"leonardo": _leonardo, "cloudflare": _cloudflare}.get(provider, _free)(prompt)
         if img:
             return img
     return None

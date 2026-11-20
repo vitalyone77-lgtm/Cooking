@@ -309,7 +309,7 @@ async def publish(bot, title: str, text: str, image: bytes | None = None, body: 
             out["errors"].append(str(e))
     if configured_tg():
         tg_image = image
-        if config.TG_IMAGE_PROVIDER in ("free", "leonardo") and images.configured():
+        if config.TG_IMAGE_PROVIDER in ("free", "leonardo", "cloudflare") and images.configured():
             try:
                 tg_image = await images.make_dish_image(title, body or text, config.TG_IMAGE_PROVIDER) or image
             except Exception:  # noqa: BLE001
