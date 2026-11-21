@@ -257,6 +257,16 @@ def find(uid, data: dict) -> dict | None:
         return None
 
 
+def recent_titles(uid, limit: int = 12) -> list[str]:
+    """Названия рецептов, которые человек видел за последние BOOK_REPEAT_DAYS дней: их ИИ не повторяет."""
+    try:
+        rows = accounts._q("SELECT b.title FROM book_seen s JOIN book b ON b.id=s.book_id WHERE s.uid=? AND s.ts > ? ORDER BY s.ts DESC LIMIT ?",
+                           (str(uid), time.time() - seen_days() * 86400, limit), all_=True)
+        return [r[0] for r in rows]
+    except Exception:  # noqa: BLE001
+        return []
+
+
 def mark_seen(uid, book_id: int) -> None:
     accounts._q("INSERT INTO book_seen(uid, book_id, ts) VALUES(?,?,?) ON CONFLICT(uid, book_id) DO UPDATE SET ts=excluded.ts",
                 (str(uid), int(book_id), time.time()))

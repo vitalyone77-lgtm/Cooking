@@ -711,6 +711,7 @@ async def step_confirm_go(callback: CallbackQuery, state: FSMContext):
         if hit:
             recipe_text, shopping_terms = hit["text"], hit["terms"]
         else:
+            data = {**data, "avoid_titles": book.recent_titles(callback.message.chat.id)}
             search_query, results = await search_recipes(data)
             await status_msg.edit_text(
                 f"🔎 Искал по запросу: «{search_query}»\n🤖 Анализирую и подбираю рецепт..."
@@ -731,7 +732,9 @@ async def step_confirm_go(callback: CallbackQuery, state: FSMContext):
 
         dish_title = extract_dish_title(recipe_text)
         if not hit:
-            book.add(data, dish_title, recipe_text, shopping_terms)       # новый рецепт пополняет книгу
+            new_id = book.add(data, dish_title, recipe_text, shopping_terms)       # новый рецепт пополняет книгу
+            if new_id:
+                book.mark_seen(callback.message.chat.id, new_id)      # сам себе из книги он не выпадет
         save_last_request(callback.message.chat.id, data, dish_title)
 
         set_last_recipe(callback.message.chat.id, dish_title, recipe_text, data.get("cuisine"))

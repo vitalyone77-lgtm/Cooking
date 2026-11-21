@@ -424,14 +424,17 @@ async def api_recipe(p: Params, x_device: str | None = Header(default=None)):
         if hit:
             text, terms, bid = hit["text"], hit["terms"], hit["id"]
         else:
-            query, results = await search_recipes(data)
-            text = await generate_recipe(data, query, format_results_for_prompt(results))
+            gdata = {**data, "avoid_titles": book.recent_titles(_uid(dev_id))}
+            query, results = await search_recipes(gdata)
+            text = await generate_recipe(gdata, query, format_results_for_prompt(results))
             if text.startswith("😔"):
                 raise RuntimeError("ИИ сейчас недоступен, попробуйте позже")
             text, terms = extract_shopping_terms(text)
             if not text.strip():
                 raise RuntimeError("Не получилось составить рецепт под эти параметры")
             bid = book.add(data, extract_dish_title(text) or "Рецепт", text, terms)       # новый рецепт пополняет книгу
+            if bid:
+                book.mark_seen(_uid(dev_id), bid)
         return {"title": extract_dish_title(text) or "Рецепт", "text": text, "card": f"/api/bookimg/{bid}.png" if bid else None,
                 "shopping": _mark_home(dev_id, with_amounts(links_for(terms), amounts_from_recipe_text(text), text))}
 
@@ -1681,6 +1684,33 @@ def recipe_page(slug: str):
     return HTMLResponse(recipe_pages.render(rec, slug, base, config.BOT_USERNAME))
 
 
+@app.api_route("/recepty", methods=["GET", "HEAD"], response_class=HTMLResponse)
+def recipes_index():
+    """Список рецептов книги для поисковиков и людей."""
+    import seo_book
+    return HTMLResponse(seo_book.render_index(seo_book.visible_rows(), _site()))
+
+
+@app.api_route("/recept/{ref}", methods=["GET", "HEAD"], response_class=HTMLResponse)
+def recipe_book_page(ref: str):
+    """Страница рецепта из книги: /recept/<номер>-<название>. Важен только номер, название для красоты адреса."""
+    import seo_book
+    m = re.match(r"^(\d{1,9})(?:-[a-z0-9-]*)?$", ref)
+    row = seo_book.get_visible(int(m.group(1))) if m else None
+    if not row:
+        raise HTTPException(404, "Рецепт не найден")
+    return HTMLResponse(seo_book.render(row, _site(), config.BOT_USERNAME))
+
+
+@app.api_route("/recept-img/{book_id}.png", methods=["GET", "HEAD"])
+def recipe_book_image(book_id: int):
+    import seo_book
+    png = _book_card(book_id) if 0 < book_id < 10**9 and seo_book.get_visible(book_id) else None
+    if not png:
+        raise HTTPException(404, "Картинки нет")
+    return Response(content=png, media_type="image/png", headers={"Cache-Control": "public, max-age=86400"})
+
+
 @app.api_route("/rimg/{slug}.png", methods=["GET", "HEAD"])
 def recipe_image(slug: str):
     import recipe_pages
@@ -2211,6 +2241,11 @@ def sitemap():
     lastmod = time.strftime("%Y-%m-%d", time.gmtime(max(
         (BASE / "web" / "index.html").stat().st_mtime, (BASE / "seo_pages.py").stat().st_mtime)))
     urls = [("/", "1.0")] + [(p, "0.8" if p != "/pitanie" else "0.6") for p in seo_pages.all_paths()]
+    import seo_book
+    try:
+        urls += [("/recepty", "0.7")] + [(seo_book.path(r), "0.6") for r in seo_book.visible_rows()]
+    except Exception:  # noqa: BLE001 — карта сайта не должна падать из-за книги
+        logging.getLogger(__name__).exception("Рецепты книги не попали в карту сайта")
     rows = "".join(f"  <url><loc>{_site()}{p}</loc><lastmod>{lastmod}</lastmod><priority>{pr}</priority></url>\n"
                    for p, pr in urls)
     body = ('<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
