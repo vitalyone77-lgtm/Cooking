@@ -141,6 +141,44 @@ r = cl.post("/api/mylist", json={"text": "молоко 2 л\nхлеб", "title":
 check("сайт: список создан", r.status_code == 200 and r.json()["title"] == "Домой" and len(r.json()["items"]) == 2, r.text[:200])
 pg = cl.get("/l/" + r.json()["id"]).text
 check("страница: «Найти в магазине» и маленькая «Поделиться» рядом", 'id="find"' in pg and 'class="sq"' in pg and "Пятёрочка" in pg)
+
+# ---- кнопки «⭐ Избранное» и «📋 Последний список» ----
+saved = cl.get("/api/mylist/saved", headers=Hp)
+check("сайт: список с названием попал в избранное",
+      saved.status_code == 200 and [x["id"] for x in saved.json()] == [r.json()["id"]], saved.text[:200])
+bot_row = accounts._q("SELECT id, saved FROM shop_lists WHERE uid=? AND title='Список покупок' ORDER BY ts LIMIT 1",
+                      (str(PRO),), one=True)
+check("сайт: список из бота без названия в избранное не попал",
+      bool(bot_row) and bot_row[1] == 0 and all(x["id"] != bot_row[0] for x in saved.json()), str(bot_row))
+r2 = cl.post("/api/mylist", json={"text": "соль\nперец"}, headers=Hp)
+check("сайт: безымянный список создан", r2.status_code == 200 and r2.json()["title"] == "Список покупок", r2.text[:200])
+lastj = cl.get("/api/mylist/last", headers=Hp).json()
+check("сайт: «последний» — самый свежий, включая безымянный",
+      lastj.get("id") == r2.json()["id"] and lastj.get("count") == 2, str(lastj))
+check("сайт: у «последнего» абсолютная ссылка и число купленного",
+      lastj.get("url", "").endswith("/l/" + r2.json()["id"]) and lastj.get("checked") == 0, str(lastj))
+check("сайт: избранное и последний закрыты без подписки",
+      cl.get("/api/mylist/saved", headers=Hf).status_code == 403
+      and cl.get("/api/mylist/last", headers=Hf).status_code == 403)
+PRO2 = 792003
+accounts.grant_days(PRO2, 30, "promo:T")
+Hp2 = dev_for(PRO2)
+check("сайт: у другого подписчика свои списки (пусто)",
+      cl.get("/api/mylist/saved", headers=Hp2).json() == []
+      and cl.get("/api/mylist/last", headers=Hp2).json() == {})
+# список из рецепта с автоназванием — разовый, в избранное не идёт
+recipe_lid = shoplists.create(PRO, "Покупки на 3 рецепта", [{"name": "рис", "amount": ""}])
+check("сайт: список из рецепта (автоназвание) не в избранном",
+      all(x["id"] != recipe_lid for x in cl.get("/api/mylist/saved", headers=Hp).json()))
+check("сайт: список из рецепта виден как последний",
+      cl.get("/api/mylist/last", headers=Hp).json().get("id") == recipe_lid)
+accounts._q("UPDATE shop_lists SET ts=? WHERE id=?", (time.time() - shoplists.TTL - 10, recipe_lid))
+check("сайт: список старше 30 дней не считается последним",
+      cl.get("/api/mylist/last", headers=Hp).json().get("id") == r2.json()["id"])
+accounts._q("DELETE FROM shop_lists WHERE id=?", (r2.json()["id"],))
+check("сайт: после удаления последнего показывается предыдущий",
+      cl.get("/api/mylist/last", headers=Hp).json().get("id") == r.json()["id"])
+
 node = shutil.which("node")
 if node:
     js = re.search(r"<script>(.*)</script>", pg, re.S).group(1)
@@ -151,6 +189,9 @@ if node:
     check("скрипт страницы списка без ошибок", rr.returncode == 0, rr.stderr[:300])
 idx = open("web/index.html", encoding="utf-8").read()
 check("сайт: «Свой список» внизу профиля над Настройками, с замком", 'data-tab-go="mylist"' in idx and 'data-gate="mylist"' in idx and "mylist:viewMyList" in idx)
+check("сайт: над «Создать список» две кнопки — избранное и последний",
+      'data-ml-fav="1"' in idx and 'data-ml-last="1"' in idx and idx.index('data-ml-fav="1"') < idx.index('data-ml-go="1"'))
+check("сайт: подсказка, что название сохраняет список в избранном", "сохранится в «Избранном»" in idx)
 
 print("ИТОГО: упало", len(fails))
 sys.exit(1 if fails else 0)

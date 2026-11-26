@@ -755,11 +755,38 @@ select{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--lin
     });
   }
   function viewMyList(){
-    return Promise.resolve('<button class="chip mini" data-tab-go="profile">← Профиль</button><h1 style="margin-top:10px">📝 Свой список покупок</h1>'+
-      '<p class="sub">Что купить — через запятую или по строке, можно с количеством. Получится список с галочками: его можно отправить и отмечать вместе.</p>'+
-      '<div class="card pcard"><label class="f" for="ml-t">Название (необязательно)</label><input type="text" id="ml-t" maxlength="80" placeholder="Домой, на дачу, к празднику">'+
-      '<label class="f" for="ml-x">Продукты</label><textarea id="ml-x" rows="6" maxlength="3000" placeholder="молоко 2 л\nхлеб\nяйца 10 шт\nбумажные полотенца" style="width:100%;font:inherit;padding:12px;border-radius:12px;border:1px solid var(--line);background:var(--surface);color:var(--text)"></textarea>'+
-      '<button class="btn" data-ml-go="1">Создать список</button></div><div id="ml-res"></div>');
+    // «последний» и «избранное» — с сервера: они общие с ботом и переживают смену устройства
+    return Promise.all([
+      call("GET","/api/mylist/last").catch(function(){return null;}),
+      call("GET","/api/mylist/saved").catch(function(){return [];})
+    ]).then(function(r){
+      var last=r[0],favs=r[1]||[];
+      return '<button class="chip mini" data-tab-go="profile">← Профиль</button><h1 style="margin-top:10px">📝 Свой список покупок</h1>'+
+        '<p class="sub">Создайте новый список или откройте сохранённый.</p>'+
+        '<div class="card pcard"><label class="f" for="ml-t">Название (необязательно)</label><input type="text" id="ml-t" maxlength="80" placeholder="Дайте название — список сохранится в «Избранном»">'+
+        '<p class="sub" style="margin:6px 0 0">Без названия список будет разовым: он останется в «Последнем списке».</p>'+
+        '<label class="f" for="ml-x">Продукты</label><textarea id="ml-x" rows="6" maxlength="3000" placeholder="молоко 2 л\nхлеб\nяйца 10 шт\nбумажные полотенца" style="width:100%;font:inherit;padding:12px;border-radius:12px;border:1px solid var(--line);background:var(--surface);color:var(--text)"></textarea>'+
+        '<div class="row" style="margin-top:12px">'+
+        '<button class="btn ghost" data-ml-fav="1" style="flex:1;width:auto;margin:0">⭐ Избранное'+(favs.length?' ('+favs.length+')':'')+'</button>'+
+        '<button class="btn ghost" data-ml-last="1" data-url="'+esc(last&&last.url||"")+'" style="flex:1;width:auto;margin:0"'+(last&&last.id?'':' disabled')+'>📋 Последний список</button>'+
+        '</div><div id="ml-fav"></div>'+
+        '<button class="btn" data-ml-go="1">Создать список</button></div><div id="ml-res"></div>';
+    });
+  }
+  function myListLast(b){
+    // адрес уже в кнопке: window.open должен вызываться прямо в клике, иначе iOS блокирует popup
+    var u=b.getAttribute("data-url");
+    if(u)window.open(u,"_blank","noopener");
+    else toast("Списков пока нет — создайте первый");
+  }
+  function myListFav(b){
+    var box=document.getElementById("ml-fav");if(!box)return;
+    if(box.innerHTML){box.innerHTML="";return;}                 // второй клик сворачивает
+    call("GET","/api/mylist/saved").then(function(list){
+      if(!list.length){box.innerHTML='<p class="sub" style="margin:12px 0 0">Списков с названием пока нет. Напишите название при создании — список появится здесь.</p>';return;}
+      box.innerHTML='<div class="card pcard" style="margin-top:12px"><h3 style="margin:0 0 4px">⭐ Избранные списки</h3>'+
+        list.map(function(f){return '<a class="cline" href="'+esc(f.url)+'" target="_blank" rel="noopener" style="color:inherit;text-decoration:none"><span>'+esc(f.title)+'</span><span class="sub">'+f.count+' прод.'+(f.checked?' · куплено '+f.checked:'')+'</span></a>';}).join("")+'</div>';
+    }).catch(fail);
   }
   function myListGo(b){
     var x=(document.getElementById("ml-x")||{}).value||"",t=(document.getElementById("ml-t")||{}).value||"";
@@ -769,6 +796,7 @@ select{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--lin
       b.disabled=false;var box=document.getElementById("ml-res");
       box.innerHTML='<div class="card pcard"><h2>'+esc(r.title)+'</h2>'+r.items.map(function(i){return '<div class="cline"><span>'+esc(i.name)+'</span><span class="sub">'+esc(i.amount||"")+'</span></div>';}).join("")+
         '<a class="btn" style="display:block;text-align:center;margin-top:12px" href="'+esc(r.url)+'" target="_blank" rel="noopener">☑️ Открыть с галочками и отправить</a></div>';
+      var lb=document.querySelector("[data-ml-last]");if(lb){lb.disabled=false;lb.setAttribute("data-url",r.url);}   // новый список стал последним
       box.scrollIntoView({behavior:"smooth",block:"start"});
     }).catch(function(e){b.disabled=false;if(e.status===403)gateOpen("mylist");else alert(e.message);});
   }
@@ -1272,6 +1300,8 @@ select{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--lin
     if(b=t.closest("[data-bk-page]")){BK.page=+b.getAttribute("data-bk-page")||0;show("book");return;}
     if(b=t.closest("[data-bk-search]")){BK.q=(document.getElementById("bk-q")||{}).value||"";BK.page=0;show("book");return;}
     if(b=t.closest("[data-bk-reset]")){BK=JSON.parse(JSON.stringify(BK0));show("book");return;}
+    if(b=t.closest("[data-ml-last]")){myListLast(b);return;}
+    if(b=t.closest("[data-ml-fav]")){myListFav(b);return;}
     if(b=t.closest("[data-tab-go]")){show(b.getAttribute("data-tab-go"));return;}
     if(b=t.closest("[data-vk-go]")){vkWait();return;}
     if(b=t.closest("[data-link-go]")){linkWait();return;}   // ссылка откроется сама, ждём подтверждения

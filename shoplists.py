@@ -31,8 +31,9 @@ def _clean(items: list) -> list[dict]:
     return out
 
 
-def create(uid, title: str, items: list, done: list | None = None) -> str:
-    """Новый список. -> номер для ссылки. ValueError — понятный текст: пустой список или слишком часто."""
+def create(uid, title: str, items: list, done: list | None = None, saved: bool = False) -> str:
+    """Новый список. -> номер для ссылки. ValueError — понятный текст: пустой список или слишком часто.
+    saved=True — постоянный список: виден в «Избранном» (только если человек сам дал название)."""
     clean = _clean(items)
     if not clean:
         raise ValueError("В списке нет продуктов")
@@ -43,9 +44,9 @@ def create(uid, title: str, items: list, done: list | None = None) -> str:
     accounts._q("DELETE FROM shop_lists WHERE ts < ?", (now - TTL,))
     lid = secrets.token_urlsafe(9)
     marks = sorted({int(i) for i in (done or []) if 0 <= int(i) < len(clean)})
-    accounts._q("INSERT INTO shop_lists(id, uid, title, items, done, ts) VALUES(?,?,?,?,?,?)",
+    accounts._q("INSERT INTO shop_lists(id, uid, title, items, done, ts, saved) VALUES(?,?,?,?,?,?,?)",
                 (lid, str(uid), re.sub(r"\s+", " ", title or "").strip()[:100] or "Список покупок",
-                 json.dumps(clean, ensure_ascii=False), json.dumps(marks), now))
+                 json.dumps(clean, ensure_ascii=False), json.dumps(marks), now, 1 if saved else 0))
     return lid
 
 
@@ -74,9 +75,10 @@ def from_text(uid, text: str, title: str = "") -> dict:
     items = parse_manual(text)
     if not items:
         raise ValueError("Напишите хотя бы один продукт: например «молоко, хлеб, яйца 10 шт»")
-    title = (title or "").strip()[:80] or "Список покупок"
-    lid = create(uid, title, items)
-    return {"url": url(lid), "title": title, "items": items, "id": lid}
+    given = (title or "").strip()[:80]
+    # название дал человек — значит это постоянный список, показываем в «Избранном»
+    lid = create(uid, given or "Список покупок", items, saved=bool(given))
+    return {"url": url(lid), "title": given or "Список покупок", "items": items, "id": lid}
 
 
 def from_favorites(uid, ids: list[str]) -> dict:
@@ -119,6 +121,31 @@ def get(lid: str) -> dict | None:
     if not r or time.time() - r[3] > TTL:
         return None
     return {"title": r[0], "items": json.loads(r[1]), "done": json.loads(r[2])}
+
+
+def last(uid) -> dict | None:
+    """Самый свежий список аккаунта — для кнопки «📋 Последний список» на сайте.
+    TTL тот же, что у страницы: старый список не открылся бы, поэтому и не предлагаем."""
+    r = accounts._q(
+        "SELECT id, title, items, done, ts FROM shop_lists WHERE uid=? AND ts > ? "
+        "ORDER BY ts DESC, rowid DESC LIMIT 1",
+        (str(uid), time.time() - TTL), one=True)
+    if not r:
+        return None
+    items, done = json.loads(r[2]), json.loads(r[3])
+    return {"id": r[0], "title": r[1] or "Список покупок", "count": len(items),
+            "checked": len(done), "ts": r[4], "url": url(r[0])}
+
+
+def saved(uid, limit: int = 50) -> list[dict]:
+    """Избранное: списки, которым человек сам дал название (saved=1). Разовые и собранные
+    из рецептов (saved=0) сюда не попадают, даже если у них есть автоназвание."""
+    rows = accounts._q(
+        "SELECT id, title, items, done, ts FROM shop_lists "
+        "WHERE uid=? AND saved=1 AND ts > ? ORDER BY ts DESC, rowid DESC LIMIT ?",
+        (str(uid), time.time() - TTL, limit), all_=True)
+    return [{"id": r[0], "title": r[1], "count": len(json.loads(r[2])),
+             "checked": len(json.loads(r[3])), "ts": r[4], "url": url(r[0])} for r in rows]
 
 
 def toggle(lid: str, index: int, on: bool) -> list[int] | None:

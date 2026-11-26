@@ -67,7 +67,7 @@ CREATE TABLE IF NOT EXISTS book_votes(book_id INTEGER, uid TEXT, vote INTEGER, t
 CREATE TABLE IF NOT EXISTS partners(code TEXT PRIMARY KEY, token TEXT UNIQUE, share REAL, tax REAL, clicks INTEGER, ts REAL, owner_tg TEXT);
 CREATE TABLE IF NOT EXISTS partner_settlements(id INTEGER PRIMARY KEY AUTOINCREMENT, code TEXT, gross REAL, amount REAL, stars INTEGER, ts REAL);
 CREATE TABLE IF NOT EXISTS macro_ref(uid TEXT PRIMARY KEY, p REAL, f REAL, c REAL);
-CREATE TABLE IF NOT EXISTS shop_lists(id TEXT PRIMARY KEY, uid TEXT, title TEXT, items TEXT, done TEXT, ts REAL);
+CREATE TABLE IF NOT EXISTS shop_lists(id TEXT PRIMARY KEY, uid TEXT, title TEXT, items TEXT, done TEXT, ts REAL, saved INTEGER DEFAULT 0);
 CREATE INDEX IF NOT EXISTS shop_lists_uid ON shop_lists(uid, ts);
 CREATE TABLE IF NOT EXISTS ai_foods(id INTEGER PRIMARY KEY AUTOINCREMENT, key TEXT UNIQUE, name TEXT, grams REAL, kcal100 REAL, p100 REAL, f100 REAL, c100 REAL, label TEXT, ts REAL);
 """
@@ -103,6 +103,11 @@ def _conn():
         cols = {r[1] for r in c.execute("PRAGMA table_info(partners)").fetchall()}
         if "owner_tg" not in cols:
             c.execute("ALTER TABLE partners ADD COLUMN owner_tg TEXT")
+            c.commit()
+        # saved добавлен позже (2026-11-26): избранное отдельно от разовых списков. У старых списков 0.
+        cols = {r[1] for r in c.execute("PRAGMA table_info(shop_lists)").fetchall()}
+        if "saved" not in cols:
+            c.execute("ALTER TABLE shop_lists ADD COLUMN saved INTEGER DEFAULT 0")
             c.commit()
         _ready = True
     _shared = c

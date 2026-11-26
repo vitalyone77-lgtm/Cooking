@@ -693,6 +693,24 @@ def api_mylist(body: MyListIn, x_device: str | None = Header(default=None)):
     return res
 
 
+@app.get("/api/mylist/last")
+def api_mylist_last(x_device: str | None = Header(default=None)):
+    """Последний список аккаунта — кнопка «📋 Последний список» над «Создать список»."""
+    uid = _uid(_dev(x_device))
+    if not plans.has_feature(uid, "mylist"):
+        raise HTTPException(403, "Свой список покупок — в подписке «Повар»")
+    return shoplists.last(uid) or {}
+
+
+@app.get("/api/mylist/saved")
+def api_mylist_saved(x_device: str | None = Header(default=None)):
+    """Избранные списки (с названием) — кнопка «⭐ Избранное» над «Создать список»."""
+    uid = _uid(_dev(x_device))
+    if not plans.has_feature(uid, "mylist"):
+        raise HTTPException(403, "Свой список покупок — в подписке «Повар»")
+    return shoplists.saved(uid)
+
+
 class TailorIn(BaseModel):
     book_id: int
     wishes: str = Field("", max_length=300)
