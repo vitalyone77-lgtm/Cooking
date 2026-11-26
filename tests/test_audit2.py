@@ -202,7 +202,8 @@ check("11: месяц + месяц при объединении = 60 дней",
 
 # ---- 12. копия ----
 import backup
-with tempfile.TemporaryDirectory() as td:
+# Windows: sqlite-файл может быть ещё занят при выходе из TemporaryDirectory — не роняем тест из-за очистки.
+with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
     folder, errs = backup.run(Path(td))
     names = {p.name for p in folder.iterdir()}
 check("12: копия: все базы и файлы, без ошибок", not errs and {"accounts_a2.db", "usage_a2.db", "web.db"} <= names, f"{errs} {names}")
