@@ -16,6 +16,7 @@ os.environ["WEB_DATA_DIR"] = "web_data_adm"
 from fastapi.testclient import TestClient
 import config
 config.LIMITS_FREE = "recipe=3/1,daymenu=1/7,week=0/3,missing=2/1,photo=1/1"   # не зависим от .env сервера
+config.PREMIUM_PLANS = "month=30:199:150,year=365:1990:1500"                   # цены фиксируем: тест не зависит от .env
 config.ADMIN_PASSWORD, config.PARTNER_PASSWORD, config.WEB_SECRET = "owner-pass-1", "partner-pass-1", "secret-x"
 import accounts
 import plans

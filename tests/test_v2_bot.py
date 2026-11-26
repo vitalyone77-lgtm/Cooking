@@ -20,6 +20,7 @@ from aiogram.types import Update, CallbackQuery, Message, Chat, User
 
 import config
 config.LIMITS_FREE = "recipe=3/1,daymenu=1/7,week=0/3,missing=2/1,photo=1/1"   # не зависим от .env сервера
+config.PREMIUM_PLANS = "month=30:199:150,year=365:1990:1500"                   # цены фиксируем: тест не зависит от .env
 import usage
 import accounts
 import plans
@@ -183,6 +184,9 @@ check("оплата: повторная доставка платежа не п�
 config.PROMO_CODES = "BLOGGER=14"
 check("промокод: дни по коду, регистр не важен", plans.promo_days("blogger") == 14 and plans.promo_days("x") == 0)
 check("промокод: один раз на аккаунт", accounts.use_promo(U2, "blogger") and not accounts.use_promo(U2, "BLOGGER"))
+# Windows: time.time() имеет разрешение ~15 мс, оплата и привязка ref могут получить одинаковый ts.
+# Разводим события, иначе ref_stats засчитывает оплату, сделанную ДО перехода по ссылке.
+time.sleep(0.05)
 accounts.set_ref(U2, "blog_anna")
 accounts.set_ref(U2, "other")
 check("ref: запоминается первый источник; оплата ДО перехода по ссылке не засчитывается", accounts.ref_stats()[0] == {"ref": "blog_anna", "users": 1, "paid_users": 0, "amount": 0}, str(accounts.ref_stats()))

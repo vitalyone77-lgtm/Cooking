@@ -103,7 +103,10 @@ check("JSON-LD FAQ и хлебные крошки", '"FAQPage"' in r.text and '"
 check("несуществующая статья — 404", c.get("/pitanie/net-takoy").status_code == 404)
 check("список статей", c.get("/pitanie").status_code == 200)
 sm = c.get("/sitemap.xml").text
-check("sitemap содержит все статьи", sm.count("<loc>") == 1 + 1 + len(__import__("seo_pages").PAGES) and "<lastmod>" in sm, sm[:300])
+import seo_pages
+# главная + /pitanie и статьи + /recepty (книга рецептов появилась в карте сайта 21.11.2026)
+expected_urls = 2 + len(seo_pages.all_paths())
+check("sitemap содержит все статьи", sm.count("<loc>") == expected_urls and "<lastmod>" in sm, sm[:300])
 check("llms.txt со статьями", "/pitanie/plan-pitaniya-na-3-dnya" in c.get("/llms.txt").text)
 idx = c.get("/", headers={"Accept-Encoding": "gzip"})
 check("главная сжимается gzip", idx.headers.get("content-encoding") == "gzip", str(idx.headers))
