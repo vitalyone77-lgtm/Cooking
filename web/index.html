@@ -125,16 +125,29 @@ textarea{width:100%;min-height:64px;padding:10px 14px;border:1.5px solid var(--l
 .wchart{width:100%;height:auto;display:block;margin-top:8px}
 select{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--line);border-radius:12px;background:var(--surface);color:var(--text);font:inherit}
 </style>
-<!-- Yandex.Metrika counter -->
+<!-- Yandex.Metrika counter: tag.js грузим после load (в простое), иначе на медленной связи он держит
+     window.load десятки секунд и задерживает регистрацию service worker. Очередь ym() работает и до загрузки. -->
 <script type="text/javascript">
-    (function(m,e,t,r,i,k,a){
-        m[i]=m[i]||function(){(m[i].a=m[i].a||[]).push(arguments)};
-        m[i].l=1*new Date();
-        for (var j = 0; j < document.scripts.length; j++) {if (document.scripts[j].src === r) { return; }}
-        k=e.createElement(t),a=e.getElementsByTagName(t)[0],k.async=1,k.src=r,a.parentNode.insertBefore(k,a)
-    })(window, document,'script','https://mc.yandex.ru/metrika/tag.js?id=113752594', 'ym');
-
-    ym(113752594, 'init', {ssr:true, webvisor:false, clickmap:true, ecommerce:"dataLayer", referrer: document.referrer, url: location.href, accurateTrackBounce:true, trackLinks:true});
+    window.ym = window.ym || function(){(window.ym.a = window.ym.a || []).push(arguments)};
+    window.ym.l = 1*new Date();
+    (function(){
+        var started = false;
+        function start(){
+            if (started) return;
+            started = true;
+            var s = document.createElement("script");
+            s.async = 1;
+            s.src = "https://mc.yandex.ru/metrika/tag.js?id=113752594";
+            document.head.appendChild(s);
+            window.ym(113752594, "init", {ssr:true, webvisor:false, clickmap:true, ecommerce:"dataLayer", referrer: document.referrer, url: location.href, accurateTrackBounce:true, trackLinks:true});
+        }
+        function later(){
+            if ("requestIdleCallback" in window) requestIdleCallback(start, {timeout: 2000});
+            else setTimeout(start, 500);
+        }
+        if (document.readyState === "complete") later();
+        else window.addEventListener("load", later, {once: true});
+    })();
 </script>
 <noscript><div><img src="https://mc.yandex.ru/watch/113752594" style="position:absolute; left:-9999px;" alt="" /></div></noscript>
 <!-- /Yandex.Metrika counter -->
@@ -166,7 +179,7 @@ select{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--lin
   var inApp=/Telegram|FBAN|FBAV|Instagram|VKClient|; wv\)/i.test(UA);
   window.addEventListener("beforeinstallprompt",function(e){e.preventDefault();deferredInstall=e;fillInstall();});
   window.addEventListener("appinstalled",function(){deferredInstall=null;standalone=true;fillInstall();});
-  if("serviceWorker" in navigator){window.addEventListener("load",function(){try{navigator.serviceWorker.register("/sw.js").catch(function(){});}catch(e){}});}
+  if("serviceWorker" in navigator){try{navigator.serviceWorker.register("/sw.js").catch(function(){});}catch(e){}}
   function installHelp(){
     if(framed) return 'Эта страница встроена в другой сайт — установить её отсюда нельзя. Откройте приложение отдельно и добавьте уже оттуда.<a class="btn" style="margin-top:12px" href="'+esc(location.origin+"/")+'" target="_blank" rel="noopener">Открыть приложение</a>';
     if(isIOS&&inApp) return 'Сейчас страница открыта внутри другого приложения (Telegram и т.п.), здесь нет кнопки «На экран Домой». Откройте её в Safari: нажмите «⋯» → «Открыть в Safari» и повтори.';
