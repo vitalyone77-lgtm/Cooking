@@ -1,6 +1,8 @@
 """Скорость открытия приложения: Метрика не держит window.load, service worker отдаёт кэш после 1.8 с,
 версия кэша поднята, чтобы после выкладки не застрять на старой оболочке."""
 import os
+import shutil
+import subprocess
 import sys
 
 PROJ = "/tmp/ct"
@@ -35,6 +37,15 @@ check("SW: при таймауте отдаём кэш, сеть догружа�
 check("SW: главная по-прежнему единственная офлайн-страница", 'if (url.pathname !== "/") return;' in sw)
 check("SW: /api и служебные разделы не кэшируются",
       r"/^\/(api|admin|go|uploads)(\/|$)/" in sw)
+
+node = shutil.which("node")
+if node:
+    r = subprocess.run([node, os.path.join(PROJ, "tests", "sw_check.js")],
+                       capture_output=True, text=True, cwd=PROJ)
+    check("SW: кэш отдаётся через 1.8 с, свежая сеть важнее кэша", r.returncode == 0,
+          (r.stdout + r.stderr)[-400:])
+else:
+    print("SKIP SW: нет node — поведение service worker не проверено")
 
 print("Провалов:", len(fails))
 sys.exit(1 if fails else 0)
