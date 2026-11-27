@@ -768,7 +768,7 @@ select{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--lin
         '<label class="f" for="ml-x">Продукты</label><textarea id="ml-x" rows="6" maxlength="3000" placeholder="молоко 2 л\nхлеб\nяйца 10 шт\nбумажные полотенца" style="width:100%;font:inherit;padding:12px;border-radius:12px;border:1px solid var(--line);background:var(--surface);color:var(--text)"></textarea>'+
         '<div class="row" style="margin-top:12px">'+
         '<button class="btn ghost" data-ml-fav="1" style="flex:1;width:auto;margin:0">⭐ Избранное'+(favs.length?' ('+favs.length+')':'')+'</button>'+
-        '<button class="btn ghost" data-ml-last="1" data-url="'+esc(last&&last.url||"")+'" style="flex:1;width:auto;margin:0"'+(last&&last.id?'':' disabled')+'>📋 Последний список</button>'+
+        '<button class="btn ghost" data-ml-last="1" data-url="'+esc(last&&(last.url_owner||last.url)||"")+'" style="flex:1;width:auto;margin:0"'+(last&&last.id?'':' disabled')+'>📋 Последний список</button>'+
         '</div><div id="ml-fav"></div>'+
         '<button class="btn" data-ml-go="1">Создать список</button></div><div id="ml-res"></div>';
     });
@@ -779,14 +779,22 @@ select{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--lin
     if(u)window.open(u,"_blank","noopener");
     else toast("Списков пока нет — создайте первый");
   }
+  function myListFavFill(box){
+    return call("GET","/api/mylist/saved").then(function(list){
+      if(!list.length){box.innerHTML='<p class="sub" style="margin:12px 0 0">Списков с названием пока нет. Напишите название при создании — список появится здесь.</p>';return;}
+      box.innerHTML='<div class="card pcard" style="margin-top:12px"><h3 style="margin:0 0 4px">⭐ Избранные списки</h3>'+
+        list.map(function(f){return '<div class="cline" style="align-items:center"><a href="'+esc(f.url_owner||f.url)+'" target="_blank" rel="noopener" style="color:inherit;text-decoration:none;flex:1;display:flex;justify-content:space-between;gap:12px"><span>'+esc(f.title)+'</span><span class="sub">'+f.count+' прод.'+(f.checked?' · куплено '+f.checked:'')+'</span></a>'+
+          '<button class="chip mini" data-edit-list="'+esc(f.id)+'" style="margin-left:8px" aria-label="Редактировать список">✏️</button></div>';}).join("")+'</div>';
+    });
+  }
   function myListFav(b){
     var box=document.getElementById("ml-fav");if(!box)return;
     if(box.innerHTML){box.innerHTML="";return;}                 // второй клик сворачивает
-    call("GET","/api/mylist/saved").then(function(list){
-      if(!list.length){box.innerHTML='<p class="sub" style="margin:12px 0 0">Списков с названием пока нет. Напишите название при создании — список появится здесь.</p>';return;}
-      box.innerHTML='<div class="card pcard" style="margin-top:12px"><h3 style="margin:0 0 4px">⭐ Избранные списки</h3>'+
-        list.map(function(f){return '<a class="cline" href="'+esc(f.url)+'" target="_blank" rel="noopener" style="color:inherit;text-decoration:none"><span>'+esc(f.title)+'</span><span class="sub">'+f.count+' прод.'+(f.checked?' · куплено '+f.checked:'')+'</span></a>';}).join("")+'</div>';
-    }).catch(fail);
+    myListFavFill(box).catch(fail);
+  }
+  function myListFavReload(){
+    var box=document.getElementById("ml-fav");if(!box)return;
+    box.innerHTML="";myListFavFill(box).catch(fail);
   }
   function myListGo(b){
     var x=(document.getElementById("ml-x")||{}).value||"",t=(document.getElementById("ml-t")||{}).value||"";
@@ -795,8 +803,8 @@ select{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--lin
     call("POST","/api/mylist",{text:x,title:t}).then(function(r){
       b.disabled=false;var box=document.getElementById("ml-res");
       box.innerHTML='<div class="card pcard"><h2>'+esc(r.title)+'</h2>'+r.items.map(function(i){return '<div class="cline"><span>'+esc(i.name)+'</span><span class="sub">'+esc(i.amount||"")+'</span></div>';}).join("")+
-        '<a class="btn" style="display:block;text-align:center;margin-top:12px" href="'+esc(r.url)+'" target="_blank" rel="noopener">☑️ Открыть с галочками и отправить</a></div>';
-      var lb=document.querySelector("[data-ml-last]");if(lb){lb.disabled=false;lb.setAttribute("data-url",r.url);}   // новый список стал последним
+        '<a class="btn" style="display:block;text-align:center;margin-top:12px" href="'+esc(r.url_owner||r.url)+'" target="_blank" rel="noopener">☑️ Открыть с галочками и отправить</a></div>';
+      var lb=document.querySelector("[data-ml-last]");if(lb){lb.disabled=false;lb.setAttribute("data-url",r.url_owner||r.url);}   // новый список стал последним
       box.scrollIntoView({behavior:"smooth",block:"start"});
     }).catch(function(e){b.disabled=false;if(e.status===403)gateOpen("mylist");else alert(e.message);});
   }
@@ -1302,6 +1310,40 @@ select{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--lin
     if(b=t.closest("[data-bk-reset]")){BK=JSON.parse(JSON.stringify(BK0));show("book");return;}
     if(b=t.closest("[data-ml-last]")){myListLast(b);return;}
     if(b=t.closest("[data-ml-fav]")){myListFav(b);return;}
+    if(b=t.closest("[data-edit-list]")){
+      var elid=b.getAttribute("data-edit-list");
+      call("GET","/api/mylist/"+elid).then(function(L){
+        var box=document.getElementById("ml-fav");if(!box)return;
+        var itemsText=L.items.map(function(i){return i.amount?i.name+" "+i.amount:i.name;}).join("\n");
+        box.innerHTML='<div class="card pcard" style="margin-top:12px"><h3 style="margin:0 0 8px">✏️ Редактирование: '+esc(L.title)+'</h3>'+
+          '<label class="f">Название</label><input type="text" id="edit-title" value="'+esc(L.title)+'" maxlength="100" style="width:100%;font:inherit;padding:12px;border-radius:12px;border:1px solid var(--line);background:var(--surface);color:var(--text)">'+
+          '<label class="f" style="margin-top:12px">Продукты (по одному на строку)</label><textarea id="edit-items" rows="6" maxlength="5000" style="width:100%;font:inherit;padding:12px;border-radius:12px;border:1px solid var(--line);background:var(--surface);color:var(--text)">'+esc(itemsText)+'</textarea>'+
+          '<div class="row" style="margin-top:12px"><button class="btn" data-save-list="'+esc(elid)+'" style="flex:1;width:auto;margin:0">💾 Сохранить</button>'+
+          '<button class="btn ghost" data-delete-list="'+esc(elid)+'" style="flex:1;width:auto;margin:0">🗑️ Удалить</button></div>'+
+          '<button class="chip mini" data-cancel-edit="1" style="margin-top:10px">Отмена</button></div>';
+      }).catch(fail);
+      return;
+    }
+    if(b=t.closest("[data-cancel-edit]")){myListFavReload();return;}
+    if(b=t.closest("[data-save-list]")){
+      var slid=b.getAttribute("data-save-list");
+      var et=(document.getElementById("edit-title")||{}).value||"";
+      var ei=(document.getElementById("edit-items")||{}).value||"";
+      if(!et.trim()){toast("Укажите название");return;}
+      b.disabled=true;
+      call("PUT","/api/mylist/"+slid,{title:et.trim(),text:ei.trim()}).then(function(){toast("Сохранено");myListFavReload();})
+        .catch(function(e){b.disabled=false;fail(e);});
+      return;
+    }
+    if(b=t.closest("[data-delete-list]")){
+      var dlid=b.getAttribute("data-delete-list");
+      var dtitle=(document.getElementById("edit-title")||{}).value||"";
+      if(!confirm("Удалить список «"+dtitle+"»? Отменить нельзя."))return;
+      b.disabled=true;
+      call("DELETE","/api/mylist/"+dlid).then(function(){toast("Удалено");myListFavReload();})
+        .catch(function(e){b.disabled=false;fail(e);});
+      return;
+    }
     if(b=t.closest("[data-tab-go]")){show(b.getAttribute("data-tab-go"));return;}
     if(b=t.closest("[data-vk-go]")){vkWait();return;}
     if(b=t.closest("[data-link-go]")){linkWait();return;}   // ссылка откроется сама, ждём подтверждения

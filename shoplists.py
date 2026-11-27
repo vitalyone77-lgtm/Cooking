@@ -3,6 +3,8 @@
 в обычном браузере, без бота, входа и VPN. Настоящие чек-листы Telegram боту недоступны (только от имени бизнес-аккаунта),
 а кнопки в пересланном сообщении не работают, поэтому общий список живёт на сайте.
 """
+import hashlib
+import hmac
 import json
 import re
 import secrets
@@ -148,6 +150,73 @@ def saved(uid, limit: int = 50) -> list[dict]:
              "checked": len(json.loads(r[3])), "ts": r[4], "url": url(r[0])} for r in rows]
 
 
+def get_one(lid: str, uid) -> dict | None:
+    """Один список для правки: только владельцу и только если не устарел."""
+    if not ID_RE.match(lid or ""):
+        return None
+    r = accounts._q("SELECT title, items, done, ts, uid, saved FROM shop_lists WHERE id=?", (lid,), one=True)
+    if not r or str(r[4]) != str(uid) or time.time() - r[3] > TTL:
+        return None
+    return {"id": lid, "title": r[0] or "", "items": json.loads(r[1]), "done": json.loads(r[2]),
+            "ts": r[3], "saved": bool(r[5]), "url": url(lid)}
+
+
+def update(lid: str, uid, title: str, items: list) -> bool:
+    """Название и продукты. Галочки сбрасываем: индексы продуктов изменились.
+    ValueError — пустой список. False — не владелец или списка уже нет."""
+    if not ID_RE.match(lid or ""):
+        return False
+    clean = _clean(items)
+    if not clean:
+        raise ValueError("В списке нет продуктов")
+    now = time.time()
+    r = accounts._q("SELECT uid FROM shop_lists WHERE id=? AND ts > ?", (lid, now - TTL), one=True)
+    if not r or str(r[0]) != str(uid):
+        return False
+    accounts._q("UPDATE shop_lists SET title=?, items=?, done=?, ts=? WHERE id=?",
+                (re.sub(r"\s+", " ", title or "").strip()[:100] or "Список покупок",
+                 json.dumps(clean, ensure_ascii=False), json.dumps([]), now, lid))
+    return True
+
+
+def delete(lid: str, uid) -> bool:
+    """Удалить список. Только владелец."""
+    if not ID_RE.match(lid or ""):
+        return False
+    r = accounts._q("SELECT uid FROM shop_lists WHERE id=?", (lid,), one=True)
+    if not r or str(r[0]) != str(uid):
+        return False
+    accounts._q("DELETE FROM shop_lists WHERE id=?", (lid,))
+    return True
+
+
+def toggle_saved(lid: str, uid=None) -> bool | None:
+    """Переключить флаг «избранное». uid=None — владение уже подтверждено подписью из ссылки.
+    ts не трогаем: переключение избранного не должно менять «Последний список»."""
+    if not ID_RE.match(lid or ""):
+        return None
+    with accounts._lock:
+        c = accounts._conn()
+        try:
+            with c:
+                r = c.execute("SELECT uid, saved FROM shop_lists WHERE id=?", (lid,)).fetchone()
+                if not r or (uid is not None and str(r[0]) != str(uid)):
+                    return None
+                new_saved = 1 - int(r[1] or 0)
+                c.execute("UPDATE shop_lists SET saved=? WHERE id=?", (new_saved, lid))
+                return bool(new_saved)
+        finally:
+            c.close()
+
+
+def saved_flag(lid: str) -> bool:
+    """Только флаг избранного — для отрисовки страницы /l/<id>."""
+    if not ID_RE.match(lid or ""):
+        return False
+    r = accounts._q("SELECT saved FROM shop_lists WHERE id=?", (lid,), one=True)
+    return bool(r and r[0])
+
+
 def toggle(lid: str, index: int, on: bool) -> list[int] | None:
     """Отметить или снять. Запись одним блоком под замком: двое могут отмечать в одном списке одновременно. -> отметки или None."""
     if not ID_RE.match(lid or ""):
@@ -172,6 +241,26 @@ def url(lid: str) -> str:
     return (config.WEB_APP_URL or "https://menu.ymayaka.ru").rstrip("/") + "/l/" + lid
 
 
+def owner_token(lid: str) -> str:
+    """Подпись «этот список открыл владелец» для кнопки на /l/<id>. Страница открывается
+    новой вкладкой, заголовок X-Device туда не попадает — владение подтверждаем подписью в адресе.
+    Пусто, если WEB_SECRET не настроен: тогда кнопки на странице просто не будет."""
+    if not config.WEB_SECRET or not ID_RE.match(lid or ""):
+        return ""
+    return hmac.new(config.WEB_SECRET.encode(), ("mylist:" + lid).encode(), hashlib.sha256).hexdigest()[:32]
+
+
+def is_owner_token(lid: str, token: str) -> bool:
+    want = owner_token(lid)
+    return bool(want) and hmac.compare_digest(want, (token or "").strip())
+
+
+def owner_url(lid: str) -> str:
+    """Ссылка для владельца: с подписью, чтобы на странице была кнопка «Сохранить в избранное»."""
+    t = owner_token(lid)
+    return url(lid) + ("?k=" + t if t else "")
+
+
 _PAGE = """<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="robots" content="noindex"><title>%(title)s</title><style>
 :root{--bg:#FBF7F2;--surface:#fff;--text:#2B2622;--muted:#6B625A;--line:#E7DED3;--primary:#2F6B4F}
@@ -189,6 +278,7 @@ button,.link{display:block;width:100%%;min-height:48px;margin-top:12px;border-ra
 .go{color:var(--primary);font-size:15px;white-space:nowrap;text-decoration:none;padding:6px 0 6px 8px}
 .promo{margin-top:22px;padding:16px;border-radius:16px;background:var(--surface);border:1px solid var(--line);display:flex;flex-direction:column;gap:6px}.promo span{color:var(--muted);font-size:15px}
 </style></head><body><h1>%(title)s</h1><p class="sub" id="count" aria-live="polite"></p><div class="list" id="list"></div>
+%(save_btn)s
 <div class="acts"><button id="find" type="button" aria-expanded="false">🛒 Найти в магазине</button><button id="share" type="button" class="sq" aria-label="Поделиться списком" title="Поделиться списком">📤</button></div>
 <div id="stores" class="stores" hidden><p class="sub" style="margin:10px 0 6px">Где искать? Ссылки появятся у каждого продукта, который ещё не куплен.</p><div class="chips" id="chips"></div></div>
 <p class="note">Отметки общие: их видят все, у кого есть ссылка. Список хранится 30 дней.</p>
@@ -209,17 +299,27 @@ fetch("/api/list/"+id+"/toggle",{method:"POST",headers:{"Content-Type":"applicat
 var chips=document.getElementById("chips");ST.forEach(function(s){var b=document.createElement("button");b.type="button";b.textContent=s.name;b.setAttribute("aria-pressed","false");
 b.addEventListener("click",function(){shop=(shop===s)?null:s;Array.prototype.forEach.call(chips.children,function(x){x.setAttribute("aria-pressed",String(x===b&&!!shop));});if(S)draw();});chips.appendChild(b);});
 document.getElementById("find").addEventListener("click",function(){var p=document.getElementById("stores"),open=p.hidden;p.hidden=!open;this.setAttribute("aria-expanded",String(open));if(open&&ST.length===1){chips.firstChild.click();}});
-document.getElementById("share").addEventListener("click",function(){var u=location.href,t=document.title;if(navigator.share){navigator.share({title:t,url:u}).catch(function(){});return;}
+var saveBtn=document.getElementById("save-btn");
+if(saveBtn){saveBtn.addEventListener("click",function(){var lid=saveBtn.getAttribute("data-save-lid"),k=saveBtn.getAttribute("data-save-k");saveBtn.disabled=true;
+fetch("/api/mylist/"+encodeURIComponent(lid)+"/save?k="+encodeURIComponent(k),{method:"POST"}).then(function(r){if(!r.ok)throw 0;return r.json();}).then(function(j){saveBtn.setAttribute("data-saved",String(j.saved));saveBtn.textContent=j.saved?"💔 Убрать из избранного":"⭐ Сохранить в избранное";saveBtn.disabled=false;}).catch(function(){saveBtn.disabled=false;alert("Не сохранилось: проверьте интернет");});});}
+document.getElementById("share").addEventListener("click",function(){var u=location.href,h=u.indexOf("#");if(h>=0)u=u.slice(0,h);u=u.replace(/([?&])k=[^&]*&?/,"$1").replace(/[?&]$/,"");var t=document.title;if(navigator.share){navigator.share({title:t,url:u}).catch(function(){});return;}
 if(navigator.clipboard){navigator.clipboard.writeText(u).then(function(){alert("Ссылка скопирована");});return;}prompt("Ссылка на список",u);});
 load();setInterval(load,6000);document.addEventListener("visibilitychange",load);})();
 </script></body></html>"""
 
 
-def page(lid: str, rec: dict) -> str:
+def page(lid: str, rec: dict, can_save: bool = False, saved: bool = False) -> str:
     site = (config.WEB_APP_URL or "https://menu.ymayaka.ru").rstrip("/") + "/"
     from stores.links import STORES, DEFAULT_STORES
     stores = [{"key": k, "name": STORES[k][1], "tpl": STORES[k][2]} for k in DEFAULT_STORES]
-    return _PAGE % {"title": escape(rec["title"]), "site": escape(site, quote=True), "id": json.dumps(lid),
+    save_btn = ""
+    if can_save:
+        text = "💔 Убрать из избранного" if saved else "⭐ Сохранить в избранное"
+        save_btn = ('<button id="save-btn" type="button" data-save-lid="%s" data-save-k="%s" data-saved="%s">%s</button>'
+                    % (escape(lid, quote=True), escape(owner_token(lid), quote=True),
+                       "true" if saved else "false", text))
+    return _PAGE % {"title": escape(rec["title"] or "Список покупок"), "site": escape(site, quote=True),
+                    "id": json.dumps(lid), "save_btn": save_btn,
                     "stores": json.dumps(stores, ensure_ascii=False).replace("</", "<\\/")}
 
 

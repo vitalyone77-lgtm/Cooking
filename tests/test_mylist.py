@@ -51,6 +51,7 @@ check("разбор: количество, нумерация, тире, пов�
 check("разбор: «2 л молока» не теряет начало", shoplists.parse_manual("2 л молока")[0]["name"] == "2 л молока")
 
 config.PAYWALL_ENABLED = True
+config.WEB_SECRET = "secret-ml-test"                    # подпись «владелец» для страницы /l/<id>
 accounts.settings_set({"PREMIUM_FEATURES": ["memory", "pdf", "cart", "noads", "tailor", "mylist"]}, "test")
 plans.reload()
 FREE, PRO = 792001, 792002
@@ -179,6 +180,48 @@ accounts._q("DELETE FROM shop_lists WHERE id=?", (r2.json()["id"],))
 check("сайт: после удаления последнего показывается предыдущий",
       cl.get("/api/mylist/last", headers=Hp).json().get("id") == r.json()["id"])
 
+# ---- этап 2: правка, удаление, «Сохранить в избранное» на странице /l/<id> ----
+rd = cl.post("/api/mylist", json={"text": "молоко\nхлеб", "title": "Базовый"}, headers=Hp)
+lid = rd.json()["id"]
+one = cl.get("/api/mylist/" + lid, headers=Hp)
+check("этап 2: владелец получает список для правки",
+      one.status_code == 200 and one.json()["saved"] is True and one.json()["title"] == "Базовый", one.text[:200])
+check("этап 2: чужой список не отдаётся", cl.get("/api/mylist/" + lid, headers=Hp2).status_code == 404)
+check("этап 2: чужой не может редактировать",
+      cl.put("/api/mylist/" + lid, json={"title": "X", "text": "соль"}, headers=Hp2).status_code == 403)
+ru = cl.put("/api/mylist/" + lid, json={"title": "Новый", "text": "соль\nперец"}, headers=Hp)
+check("этап 2: владелец меняет название и продукты",
+      ru.status_code == 200 and ru.json()["title"] == "Новый"
+      and [i["name"] for i in ru.json()["items"]] == ["Соль", "Перец"], ru.text[:200])
+one = cl.get("/api/mylist/" + lid, headers=Hp).json()
+check("этап 2: после правки галочки сброшены", one["done"] == [] and one["title"] == "Новый")
+check("этап 2: пустые продукты не принимаются",
+      cl.put("/api/mylist/" + lid, json={"title": "X", "text": "   "}, headers=Hp).status_code == 400)
+check("этап 2: изменённый список в избранном",
+      cl.get("/api/mylist/saved", headers=Hp).json()[0]["title"] == "Новый")
+check("этап 2: saved переключается туда-обратно",
+      cl.post("/api/mylist/" + lid + "/save", headers=Hp).json()["saved"] is False
+      and cl.post("/api/mylist/" + lid + "/save", headers=Hp).json()["saved"] is True)
+check("этап 2: чужой не может переключить saved",
+      cl.post("/api/mylist/" + lid + "/save", headers=Hp2).status_code == 403)
+tok = shoplists.owner_token(lid)
+check("этап 2: подпись владельца формируется", len(tok) == 32, tok)
+pg_owner = cl.get("/l/" + lid + "?k=" + tok).text
+pg_guest = cl.get("/l/" + lid).text
+check("этап 2: владелец видит «Убрать из избранного»",
+      'id="save-btn"' in pg_owner and "Убрать из избранного" in pg_owner)
+check("этап 2: по обычной ссылке кнопки нет", 'id="save-btn"' not in pg_guest)
+check("этап 2: чужая подпись не подходит",
+      cl.post("/api/mylist/" + lid + "/save?k=bad").status_code in (401, 403))
+j = cl.post("/api/mylist/" + lid + "/save?k=" + tok)
+check("этап 2: со страницы saved переключается по подписи", j.status_code == 200 and j.json()["saved"] is False, j.text[:200])
+check("этап 2: после переключения кнопка предлагает сохранить",
+      "Сохранить в избранное" in cl.get("/l/" + lid + "?k=" + tok).text)
+check("этап 2: чужой не может удалить", cl.delete("/api/mylist/" + lid, headers=Hp2).status_code == 403)
+check("этап 2: владелец удаляет", cl.delete("/api/mylist/" + lid, headers=Hp).json()["ok"] is True)
+check("этап 2: удалённый список не найден",
+      cl.get("/api/mylist/" + lid, headers=Hp).status_code == 404 and cl.get("/l/" + lid).status_code == 404)
+
 node = shutil.which("node")
 if node:
     js = re.search(r"<script>(.*)</script>", pg, re.S).group(1)
@@ -192,6 +235,9 @@ check("сайт: «Свой список» внизу профиля над На
 check("сайт: над «Создать список» две кнопки — избранное и последний",
       'data-ml-fav="1"' in idx and 'data-ml-last="1"' in idx and idx.index('data-ml-fav="1"') < idx.index('data-ml-go="1"'))
 check("сайт: подсказка, что название сохраняет список в избранном", "сохранится в «Избранном»" in idx)
+check("этап 2: в избранном есть ✏️, форма правки и удаление",
+      "data-edit-list" in idx and "data-save-list" in idx and "data-delete-list" in idx)
+check("этап 2: владельцу отдаётся ссылка с подписью", "url_owner" in idx)
 
 print("ИТОГО: упало", len(fails))
 sys.exit(1 if fails else 0)

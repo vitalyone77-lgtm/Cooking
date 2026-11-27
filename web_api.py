@@ -679,6 +679,18 @@ class MyListIn(BaseModel):
     title: str = Field("", max_length=80)
 
 
+class MyListUpdate(BaseModel):
+    title: str = Field("", max_length=100)
+    text: str = Field(min_length=1, max_length=5000)
+
+
+def _with_owner(rec: dict) -> dict:
+    """Добавляет ссылку с подписью владельца: на /l/<id> тогда есть кнопка «В избранное»."""
+    rec = dict(rec)
+    rec["url_owner"] = shoplists.owner_url(rec.get("id", ""))
+    return rec
+
+
 @app.post("/api/mylist")
 def api_mylist(body: MyListIn, x_device: str | None = Header(default=None)):
     """Свой список покупок (не из рецепта) с галочками и ссылкой. Подписка."""
@@ -690,7 +702,7 @@ def api_mylist(body: MyListIn, x_device: str | None = Header(default=None)):
     except ValueError as e:
         raise HTTPException(400, str(e))
     usage.event("mylist", uid)
-    return res
+    return _with_owner(res)
 
 
 @app.get("/api/mylist/last")
@@ -699,7 +711,8 @@ def api_mylist_last(x_device: str | None = Header(default=None)):
     uid = _uid(_dev(x_device))
     if not plans.has_feature(uid, "mylist"):
         raise HTTPException(403, "Свой список покупок — в подписке «Повар»")
-    return shoplists.last(uid) or {}
+    rec = shoplists.last(uid)
+    return _with_owner(rec) if rec else {}
 
 
 @app.get("/api/mylist/saved")
@@ -708,7 +721,61 @@ def api_mylist_saved(x_device: str | None = Header(default=None)):
     uid = _uid(_dev(x_device))
     if not plans.has_feature(uid, "mylist"):
         raise HTTPException(403, "Свой список покупок — в подписке «Повар»")
-    return shoplists.saved(uid)
+    return [_with_owner(x) for x in shoplists.saved(uid)]
+
+
+@app.get("/api/mylist/{list_id}")
+def api_mylist_get(list_id: str, x_device: str | None = Header(default=None)):
+    """Один список для правки. Отдаём только владельцу."""
+    uid = _uid(_dev(x_device))
+    if not plans.has_feature(uid, "mylist"):
+        raise HTTPException(403, "Свой список покупок — в подписке «Повар»")
+    rec = shoplists.get_one(list_id, uid)
+    if not rec:
+        raise HTTPException(404, "Список не найден")
+    return rec
+
+
+@app.put("/api/mylist/{list_id}")
+def api_mylist_update(list_id: str, data: MyListUpdate, x_device: str | None = Header(default=None)):
+    """Название и продукты. Галочки сбрасываются."""
+    uid = _uid(_dev(x_device))
+    if not plans.has_feature(uid, "mylist"):
+        raise HTTPException(403, "Свой список покупок — в подписке «Повар»")
+    try:
+        ok = shoplists.update(list_id, uid, data.title, shoplists.parse_manual(data.text))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    if not ok:
+        raise HTTPException(403, "Только владелец может изменять список")
+    return shoplists.get_one(list_id, uid) or {"id": list_id}
+
+
+@app.delete("/api/mylist/{list_id}")
+def api_mylist_delete(list_id: str, x_device: str | None = Header(default=None)):
+    """Удалить список. Только владелец."""
+    uid = _uid(_dev(x_device))
+    if not plans.has_feature(uid, "mylist"):
+        raise HTTPException(403, "Свой список покупок — в подписке «Повар»")
+    if not shoplists.delete(list_id, uid):
+        raise HTTPException(403, "Только владелец может удалять список")
+    return {"ok": True}
+
+
+@app.post("/api/mylist/{list_id}/save")
+def api_mylist_toggle_save(list_id: str, k: str = "", x_device: str | None = Header(default=None)):
+    """Переключить «избранное». Из приложения — по устройству, со страницы /l/<id> — по подписи:
+    при обычном переходе по ссылке заголовок X-Device не отправляется."""
+    if shoplists.is_owner_token(list_id, k):
+        result = shoplists.toggle_saved(list_id)
+    else:
+        uid = _uid(_dev(x_device))
+        if not plans.has_feature(uid, "mylist"):
+            raise HTTPException(403, "Свой список покупок — в подписке «Повар»")
+        result = shoplists.toggle_saved(list_id, uid)
+    if result is None:
+        raise HTTPException(403, "Только владелец")
+    return {"saved": result}
 
 
 class TailorIn(BaseModel):
@@ -1657,11 +1724,15 @@ def pay_terms():
 
 
 @app.api_route("/l/{lid}", methods=["GET", "HEAD"], response_class=HTMLResponse)
-def list_page(lid: str):
+def list_page(lid: str, k: str = ""):
     rec = shoplists.get(lid)
     if not rec:
         raise HTTPException(404, "Список не найден или устарел")
-    return HTMLResponse(shoplists.page(lid, rec), headers={"Cache-Control": "no-store", "X-Robots-Tag": "noindex"})
+    # кнопку «Сохранить в избранное» показываем только владельцу: он открывает ссылку с подписью k
+    can_save = shoplists.is_owner_token(lid, k)
+    return HTMLResponse(shoplists.page(lid, rec, can_save=can_save,
+                                       saved=shoplists.saved_flag(lid) if can_save else False),
+                        headers={"Cache-Control": "no-store", "X-Robots-Tag": "noindex"})
 
 
 @app.delete("/api/profile/data")
