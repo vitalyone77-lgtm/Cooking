@@ -784,12 +784,14 @@ select{width:100%;min-height:48px;padding:10px 14px;border:1.5px solid var(--lin
       '<button class="btn" data-ml-go="1">Создать список</button></div><div id="ml-res"></div>';
   }
   function mlFetch(){
+    var okLast=false,okFavs=false;   // ошибку сети в память не пишем, иначе 5 минут будем показывать «списков нет»
     return Promise.all([
-      call("GET","/api/mylist/last").catch(function(){return null;}),
-      call("GET","/api/mylist/saved").catch(function(){return [];})
+      call("GET","/api/mylist/last").then(function(v){okLast=true;return v;}).catch(function(){return null;}),
+      call("GET","/api/mylist/saved").then(function(v){okFavs=true;return v;}).catch(function(){return [];})
     ]).then(function(r){
       var d={last:r[0]||null,favs:r[1]||[]};
-      mlWrite("mylist:last",d.last);mlWrite("mylist:saved",d.favs);
+      if(okLast)mlWrite("mylist:last",d.last);
+      if(okFavs)mlWrite("mylist:saved",d.favs);
       return d;
     });
   }

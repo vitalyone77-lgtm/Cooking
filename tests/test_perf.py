@@ -52,6 +52,8 @@ check("свой список: свежая память рисуется сра�
       "return Promise.resolve(mlHtml(a.v,b.v))" in idx and "mlFetch().then(mlPaint)" in idx)
 check("свой список: после создания и правки память обновляется",
       'mlWrite("mylist:saved",list)' in idx and "mlFetch().then(mlPaint).catch" in idx)
+check("свой список: ошибка сети не затирает память пустым ответом",
+      "if(okLast)mlWrite" in idx and "if(okFavs)mlWrite" in idx)
 check("свой список: при выходе из профиля память стирается",
       'ls("mecache","");ls("mylist:last","");ls("mylist:saved","")' in idx)
 
