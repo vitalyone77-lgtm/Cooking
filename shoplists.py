@@ -285,7 +285,7 @@ button,.link{display:block;width:100%%;min-height:48px;margin-top:12px;border-ra
 <div class="promo"><strong>Список сделан в «Кухонном помощнике»</strong><span>Рецепт из ваших продуктов за минуту, с калориями и списком покупок. Начать можно бесплатно, работает без VPN.</span>
 <a class="link" href="%(site)s?utm_source=list">🍳 Открыть помощника</a></div>
 <script>
-(function(){var id=%(id)s,ST=%(stores)s,box=document.getElementById("list"),count=document.getElementById("count"),S=null,busy=0,shop=null;
+(function(){var id=%(id)s,ST=%(stores)s,box=document.getElementById("list"),count=document.getElementById("count"),S=%(state)s,busy=0,shop=null;
 function q(n){return encodeURIComponent(String(n).replace(/\\([^)]*\\)/g,"").split(",")[0].trim());}
 function draw(){var d={};S.done.forEach(function(i){d[i]=1;});box.textContent="";S.items.forEach(function(it,i){var l=document.createElement("label");if(d[i])l.className="done";
 var c=document.createElement("input");c.type="checkbox";c.checked=!!d[i];c.setAttribute("data-i",i);var n=document.createElement("span");n.className="n";n.textContent=it.name;l.appendChild(c);l.appendChild(n);
@@ -304,8 +304,16 @@ if(saveBtn){saveBtn.addEventListener("click",function(){var lid=saveBtn.getAttri
 fetch("/api/mylist/"+encodeURIComponent(lid)+"/save?k="+encodeURIComponent(k),{method:"POST"}).then(function(r){if(!r.ok)throw 0;return r.json();}).then(function(j){saveBtn.setAttribute("data-saved",String(j.saved));saveBtn.textContent=j.saved?"💔 Убрать из избранного":"⭐ Сохранить в избранное";saveBtn.disabled=false;}).catch(function(){saveBtn.disabled=false;alert("Не сохранилось: проверьте интернет");});});}
 document.getElementById("share").addEventListener("click",function(){var u=location.href,h=u.indexOf("#");if(h>=0)u=u.slice(0,h);u=u.replace(/([?&])k=[^&]*&?/,"$1").replace(/[?&]$/,"");var t=document.title;if(navigator.share){navigator.share({title:t,url:u}).catch(function(){});return;}
 if(navigator.clipboard){navigator.clipboard.writeText(u).then(function(){alert("Ссылка скопирована");});return;}prompt("Ссылка на список",u);});
-load();setInterval(load,6000);document.addEventListener("visibilitychange",load);})();
+draw();setInterval(load,10000);document.addEventListener("visibilitychange",load);})();
 </script></body></html>"""
+
+
+def _js_json(obj) -> str:
+    """JSON для вставки внутрь <script>: «<», «>», «&» и разделители строк экранируем,
+    чтобы название продукта вида «</script><script>…» не вырвалось из тега."""
+    s = json.dumps(obj, ensure_ascii=False)
+    return (s.replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")
+            .replace("\u2028", "\\u2028").replace("\u2029", "\\u2029"))
 
 
 def page(lid: str, rec: dict, can_save: bool = False, saved: bool = False) -> str:
@@ -318,9 +326,11 @@ def page(lid: str, rec: dict, can_save: bool = False, saved: bool = False) -> st
         save_btn = ('<button id="save-btn" type="button" data-save-lid="%s" data-save-k="%s" data-saved="%s">%s</button>'
                     % (escape(lid, quote=True), escape(owner_token(lid), quote=True),
                        "true" if saved else "false", text))
+    # продукты и отметки кладём прямо в HTML: фиксированный список показывается сразу, без второго запроса
+    state = {"items": rec.get("items") or [], "done": rec.get("done") or []}
     return _PAGE % {"title": escape(rec["title"] or "Список покупок"), "site": escape(site, quote=True),
-                    "id": json.dumps(lid), "save_btn": save_btn,
-                    "stores": json.dumps(stores, ensure_ascii=False).replace("</", "<\\/")}
+                    "id": json.dumps(lid), "save_btn": save_btn, "state": _js_json(state),
+                    "stores": _js_json(stores)}
 
 
 # ---------- «корзина рецептов»: общий список покупок собирается по ходу, одна на бота и сайт ----------

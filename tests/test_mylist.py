@@ -142,6 +142,9 @@ r = cl.post("/api/mylist", json={"text": "молоко 2 л\nхлеб", "title":
 check("сайт: список создан", r.status_code == 200 and r.json()["title"] == "Домой" and len(r.json()["items"]) == 2, r.text[:200])
 pg = cl.get("/l/" + r.json()["id"]).text
 check("страница: «Найти в магазине» и маленькая «Поделиться» рядом", 'id="find"' in pg and 'class="sq"' in pg and "Пятёрочка" in pg)
+check("страница: продукты сразу в HTML, без второго запроса; опрос 10 с",
+      'S={"items": ' in pg and "draw();setInterval(load,10000)" in pg and "Молоко" in pg and "setInterval(load,6000)" not in pg,
+      pg[pg.find("S="):pg.find("S=") + 160] + " | draw:" + str(pg.find("draw();setInterval")) + " | milk:" + str(pg.find("молоко")))
 
 # ---- кнопки «⭐ Избранное» и «📋 Последний список» ----
 saved = cl.get("/api/mylist/saved", headers=Hp)

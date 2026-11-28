@@ -83,7 +83,8 @@ lid = r.json()["id"]
 pg = cl.get("/l/" + lid)
 check("страница списка без входа, заголовок экранирован, закрыта от поиска", pg.status_code == 200 and "<script>alert" not in pg.text and "&lt;script&gt;" in pg.text and "noindex" in pg.text, pg.text[:200])
 check("страница списка отвечает на HEAD", cl.head("/l/" + lid).status_code == 200)
-check("название продукта не вставлено в HTML (рисуется как текст)", "onerror" not in pg.text)
+check("название продукта в HTML экранировано и рисуется как текст",
+      "<img src=x onerror=1>" not in pg.text and "\\u003cimg src=x onerror=1\\u003e" in pg.text)
 t = cl.post(f"/api/list/{lid}/toggle", json={"i": 1, "on": True})
 check("галочка без входа и общая", t.status_code == 200 and cl.get(f"/api/list/{lid}").json()["done"] == [1], t.text)
 check("несуществующий список: 404", cl.get("/l/aaaaaaaaaaaa").status_code == 404 and cl.post("/api/list/aaaaaaaaaaaa/toggle", json={"i": 0, "on": True}).status_code == 404)

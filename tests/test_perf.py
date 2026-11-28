@@ -19,6 +19,7 @@ def check(n, c, x=""):
 
 sw = open("web/sw.js", encoding="utf-8").read()
 idx = open("web/index.html", encoding="utf-8").read()
+sl = open("shoplists.py", encoding="utf-8").read()
 
 check("метрика: tag.js не вставляется при разборе страницы", "document.scripts.length" not in idx)
 check("метрика: загрузка отложена до простоя после load",
@@ -37,6 +38,22 @@ check("SW: при таймауте отдаём кэш, сеть догружа�
 check("SW: главная по-прежнему единственная офлайн-страница", 'if (url.pathname !== "/") return;' in sw)
 check("SW: /api и служебные разделы не кэшируются",
       r"/^\/(api|admin|go|uploads)(\/|$)/" in sw)
+
+check("страница списка: продукты и отметки сразу в HTML",
+      "S=%(state)s" in sl and 'rec.get("items")' in sl)
+check("страница списка: JSON в <script> экранирован от выхода из тега",
+      "def _js_json" in sl and '.replace("<", "\\\\u003c")' in sl and '"state": _js_json(state)' in sl)
+check("страница списка: опрос раз в 10 с, первый запрос не дублирует HTML",
+      "draw();setInterval(load,10000)" in sl and "setInterval(load,6000)" not in sl)
+
+check("свой список: последний и избранное лежат в памяти 5 минут",
+      "var ML_TTL=5*60*1000" in idx and '"mylist:last"' in idx and '"mylist:saved"' in idx)
+check("свой список: свежая память рисуется сразу, сеть обновляет в фоне",
+      "return Promise.resolve(mlHtml(a.v,b.v))" in idx and "mlFetch().then(mlPaint)" in idx)
+check("свой список: после создания и правки память обновляется",
+      'mlWrite("mylist:saved",list)' in idx and "mlFetch().then(mlPaint).catch" in idx)
+check("свой список: при выходе из профиля память стирается",
+      'ls("mecache","");ls("mylist:last","");ls("mylist:saved","")' in idx)
 
 node = shutil.which("node")
 if node:
